@@ -1,18 +1,16 @@
 import WebSocket from 'ws';
 import { randomUUID } from 'node:crypto';
-import type { ConversationView, HarnessCapabilities, Message, ServerEvent, TurnRequest, TurnReceipt } from '../contract/types.js';
+import type { ConversationView, HarnessAdapter, HarnessCapabilities, Message, ServerEvent, TurnRequest, TurnReceipt } from '../contract/types.js';
 import type { ServiceConfig } from './config.js';
 import { Store } from './store.js';
 import { signGatewayChallenge } from './identity.js';
 import { Timings, type TimingSample } from './telemetry.js';
 
 type Json = Record<string, any>;
-class RejectedRequest extends Error {}
+class RejectedRequest extends Error {constructor(readonly code?:string){super('OpenClaw declined the request');}}
 const terminal=new Set(['complete','failed','cancelled']);
-export interface GatewayPort {
-  capabilities():HarnessCapabilities; history(id:string):Promise<ConversationView>;
-  send(id:string,turn:TurnRequest):Promise<TurnReceipt>; abort(id:string,turnId:string):Promise<void>;
-  approval(id:string,decision:string):Promise<void>; answer(id:string,answer:string):Promise<void>; diagnostics?():TimingSample[]; close():void;
+export interface GatewayPort extends HarnessAdapter {
+  approval(id:string,decision:string):Promise<void>; answer(id:string,answer:string):Promise<void>; diagnostics?():TimingSample[];
 }
 export function displayText(message:unknown):string {
   if(!message || typeof message!=='object')return '';
@@ -24,6 +22,7 @@ export class Gateway implements GatewayPort {
   private timings=new Timings();
   private socket?:WebSocket; private ready=false; private stopped=false; private timer?:NodeJS.Timeout;
   private connectingTimer?:NodeJS.Timeout; private backoff=1000; private version=''; private methods=new Set<string>();
+  private pairingRequired=false;
   private pending=new Map<string,{resolve:(v:Json)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout}>();
   private sequence=new Map<string,number>(); private text=new Map<string,string>(); private modelImages=new Set<string>();
   private images=false; private approvals=false; private subscribed=new Set<string>();
@@ -32,7 +31,7 @@ export class Gateway implements GatewayPort {
   constructor(private cfg:ServiceConfig, private store:Store, private publish:(event:ServerEvent)=>void) {
     if(cfg.gatewayEnabled&&cfg.gatewayToken)this.connect();
   }
-  capabilities():HarnessCapabilities {return {connected:this.ready,images:this.images,cancellation:this.methods.has('chat.abort'),approvals:this.ready&&this.approvals,version:this.version,...!this.ready?{reason:'OpenClaw is reconnecting. Your conversation is preserved.'}:{}};}
+  capabilities():HarnessCapabilities {return {connected:this.ready,images:this.images,cancellation:this.methods.has('chat.abort'),approvals:this.ready&&this.approvals,version:this.version,...!this.ready?{reason:this.pairingRequired?'Voice Connect requires one-time device approval on the OpenClaw server.':'OpenClaw is reconnecting. Your conversation is preserved.'}:{}};}
   diagnostics():TimingSample[]{return this.timings.snapshot();}
   private connect():void {
     if(this.stopped)return;
@@ -44,15 +43,15 @@ export class Gateway implements GatewayPort {
       if(ws!==this.socket)return;clearTimeout(this.connectingTimer);this.ready=false;this.approvals=false;this.subscribed.clear();this.prompts.clear();this.questionGroups.clear();this.sequence.clear();this.text.clear();
       for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('Gateway connection lost'));}this.pending.clear();
       for(const row of this.store.outstanding())if(row.delivery==='pending'||row.delivery==='accepted')this.store.updateTurn(row.id,'uncertain');
-      this.publish({type:'connection',connected:false,reason:'Connection interrupted. Checking your existing conversation before resuming.'});
-      if(!this.stopped){this.timer=setTimeout(()=>this.connect(),this.backoff);this.backoff=Math.min(30000,this.backoff*2);}
+      this.publish({type:'connection',connected:false,reason:this.capabilities().reason});
+      if(!this.stopped){this.timer=setTimeout(()=>this.connect(),this.backoff);this.backoff=Math.min(4000,this.backoff*2);}
     });
   }
   private frame(frame:Json,ws:WebSocket):void {
     if(ws!==this.socket)return;
     if(frame.type==='res'){
       const p=this.pending.get(frame.id);if(!p)return;this.pending.delete(frame.id);clearTimeout(p.timer);
-      frame.ok?p.resolve(frame.payload??{}):p.reject(new RejectedRequest('OpenClaw declined the request'));return;
+      frame.ok?p.resolve(frame.payload??{}):p.reject(new RejectedRequest(frame.error?.code==='NOT_PAIRED'&&frame.error?.details?.code==='PAIRING_REQUIRED'?'PAIRING_REQUIRED':undefined));return;
     }
     if(frame.type!=='event')return;
     if(frame.event==='connect.challenge'){
@@ -67,13 +66,13 @@ export class Gateway implements GatewayPort {
         const agents=await this.request('agents.list',{},true);
         if(typeof agents.defaultId!=='string'||!/^[a-z0-9_-]+$/i.test(agents.defaultId))throw new Error('No default OpenClaw agent');
         this.store.set('default-agent',agents.defaultId);
-        this.ready=true;this.backoff=1000;this.publish({type:'connection',connected:true});
+        this.ready=true;this.pairingRequired=false;this.backoff=1000;this.publish({type:'connection',connected:true});
         await this.discoverImages(hello).catch(()=>{});
         for(const row of this.store.outstanding()) {
           if(row.cancelRequested){void this.request('chat.abort',{...this.target(row.conversationId),runId:row.runId??row.id}).catch(()=>{});}
         }
         for(const c of this.store.conversations().slice(0,20)){void this.history(c.id).then(()=>this.publish({type:'reconcile',conversationId:c.id})).catch(()=>{});}
-      }).catch(()=>ws.close(1008,'Gateway unavailable'));return;
+      }).catch(error=>{this.pairingRequired=error instanceof RejectedRequest&&error.code==='PAIRING_REQUIRED';ws.close(1008,'Gateway unavailable');});return;
     }
     if(!this.ready)return;
     if(frame.event==='chat')this.chat(frame.payload??{});

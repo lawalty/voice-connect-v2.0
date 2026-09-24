@@ -55,7 +55,7 @@ export class Store {
   conversationForSession(key:string):string|undefined {return (this.db.prepare('SELECT id FROM conversations WHERE session_key=?').get(key) as {id:string}|undefined)?.id;}
   mapping(id:string):{sessionKey:string;sessionId?:string} {
     const row=this.db.prepare('SELECT session_key AS sessionKey, session_id AS sessionId FROM conversations WHERE id=?').get(id) as {sessionKey:string;sessionId?:string}|undefined;
-    if(!row)throw new Error('Conversation not found');return row;
+    if(!row)throw new Error('Conversation not found');return {sessionKey:row.sessionKey,...typeof row.sessionId==='string'&&row.sessionId?{sessionId:row.sessionId}:{}};
   }
   setSession(id:string, sessionId:string):void { this.db.prepare('UPDATE conversations SET session_id=? WHERE id=?').run(sessionId,id); }
   turn(id:string):TurnRow|undefined {

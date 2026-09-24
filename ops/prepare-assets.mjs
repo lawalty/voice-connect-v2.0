@@ -58,6 +58,8 @@ for (const filename of Object.keys(entries).sort()) {
 }
 blocks.push(Buffer.alloc(1024));
 const bytes = gzipSync(Buffer.concat(blocks), { level: 6 });
+// zlib otherwise records different operating systems in the gzip header.
+bytes[9] = 255;
 await writeFile(modelArchive, bytes);
 const manifest = { id: 'vosk-en-us-0.15', url: '/models/vosk-en-us-0.15.tar.gz.bin', sha256: digest(bytes), bytes: bytes.length, license: 'Apache-2.0', sampleRate: 16000 };
 await writeFile(path.join(models, 'vosk-en-us-0.15.json'), JSON.stringify(manifest, null, 2) + '\n');

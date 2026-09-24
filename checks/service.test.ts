@@ -19,19 +19,21 @@ async function fixture(unremovableBootstrap=false) {
   const dir=mkdtempSync(join(tmpdir(),'vc2-service-'));
   const server=new WebSocketServer({port:0});await new Promise<void>(resolve=>server.once('listening',()=>resolve()));
   const calls:{method:string;params:any}[]=[],clients=new Set<WebSocket>(),events:ServerEvent[]=[];
-  let holdSend=false,history:any;const held:(()=>void)[]=[];
+  let holdSend=false,history:any,pendingApprovals:any[]=[];const held:(()=>void)[]=[];
   server.on('connection',socket=>{
     clients.add(socket);socket.on('close',()=>clients.delete(socket));
     socket.send(JSON.stringify({type:'event',event:'connect.challenge',payload:{nonce:'fixture',ts:Date.now()}}));
     socket.on('message',raw=>{
       const request=JSON.parse(raw.toString());calls.push({method:request.method,params:request.params});
+      if('sessionId'in request.params&&typeof request.params.sessionId!=='string'){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST'}}));return;}
       let payload:any={};
-      if(request.method==='connect')payload={type:'hello-ok',protocol:4,server:{version:'2026.9.6-fixture'},features:{methods:['chat.send','chat.history','chat.abort','models.list','sessions.messages.subscribe','exec.approval.resolve','question.resolve']},snapshot:{sessionDefaults:{model:'openai/verified-image-model'}}};
+      if(request.method==='connect')payload={type:'hello-ok',protocol:4,server:{version:'2026.9.6-fixture'},features:{methods:['chat.send','chat.history','chat.abort','models.list','sessions.messages.subscribe','exec.approval.resolve','exec.approval.list','question.resolve']},snapshot:{sessionDefaults:{model:'openai/verified-image-model'}}};
       if(request.method==='agents.list')payload={defaultId:'northpointe',agents:[{id:'northpointe',name:'NorthPointe'}]};
       if(request.method==='models.list')payload={models:[{id:'verified-image-model',provider:'openai',input:['text','image']}]};
       if(request.method==='chat.history')payload=history??{sessionId:'session-fixture',messages:[],sessionInfo:{model:'verified-image-model',modelProvider:'openai'}};
       if(request.method==='chat.send')payload={runId:request.params.idempotencyKey,status:'started'};
       if(request.method==='chat.abort')payload={ok:true,aborted:true,runIds:[request.params.runId]};
+      if(request.method==='exec.approval.list')payload=pendingApprovals;
       const reply=()=>{if(socket.readyState===1)socket.send(JSON.stringify({type:'res',id:request.id,ok:true,payload}));};
       if(request.method==='chat.send'&&holdSend)held.push(reply);else reply();
     });
@@ -51,7 +53,7 @@ async function fixture(unremovableBootstrap=false) {
   const created=await app.inject({method:'POST',url:'/api/conversations',headers,payload:{}});expect(created.statusCode).toBe(200);
   const conversation=created.json();
   const emit=(event:string,payload:any)=>{for(const socket of clients)socket.send(JSON.stringify({type:'event',event,payload}));};
-  return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
+  return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
 }
 describe('owner boundary',()=>{
   it('finishes one-time setup when a token mount cannot be deleted, and never guesses an agent',async()=>{
@@ -106,6 +108,14 @@ describe('owner boundary',()=>{
   });
 });
 describe('native OpenClaw lifecycle',()=>{
+  it('omits an unassigned native sessionId, then preserves the assigned identifier',async()=>{
+    const f=await fixture(),url=`/api/conversations/${f.conversation.id}`;
+    expect((f.app as any).vc.store.mapping(f.conversation.id)).not.toHaveProperty('sessionId');
+    expect((await f.app.inject({method:'GET',url,headers:f.headers})).statusCode).toBe(200);
+    expect(f.calls.find(c=>c.method==='chat.history')?.params).not.toHaveProperty('sessionId');
+    await f.app.inject({method:'POST',url:`${url}/turns`,headers:f.headers,payload:{id:'assigned-session',text:'Continue the same native session'}});
+    expect(f.calls.find(c=>c.method==='chat.send')?.params.sessionId).toBe('session-fixture');
+  });
   it('signs the exact challenge with a stable encrypted application identity and no admin permission',async()=>{
     const f=await fixture();const p=f.calls.find(c=>c.method==='connect')!.params,d=p.device;
     expect(p.scopes).not.toContain('operator.admin');
@@ -182,6 +192,19 @@ describe('native OpenClaw lifecycle',()=>{
     expect(f.events.find(e=>e.type==='approval')).toMatchObject({detail:'Command:\ndate\n\nDirectory:\n/tmp'});
     expect((await f.app.inject({method:'POST',url:'/api/approvals/approval-one',headers:f.headers,payload:{decision:'allow-once'}})).statusCode).toBe(200);
     expect(f.calls.find(c=>c.method==='exec.approval.resolve')?.params).toEqual({id:'approval-one',decision:'allow-once'});
+  });
+  it('replays only pending approvals belonging to known VC runs, without exposing other sessions',async()=>{
+    const f=await fixture(),url=`/api/conversations/${f.conversation.id}/turns`;
+    await f.app.inject({method:'POST',url,headers:f.headers,payload:{id:'replay-turn',text:'Work with a reviewable action'}});
+    await expect.poll(()=>f.calls.some(c=>c.method==='exec.approval.list')).toBe(true);
+    f.setApprovals([
+      {id:'vc:approval.1',request:{runId:'replay-turn',sessionKey:`agent:northpointe:vc2:${f.conversation.id}`,command:'date',cwd:'/tmp'},expiresAtMs:Date.now()+10000},
+      {id:'foreign-approval',request:{runId:'not-ours',sessionKey:'agent:northpointe:someone-else',command:'foreign private command'},expiresAtMs:Date.now()+10000},
+    ]);
+    f.emit('session.approval',{phase:'pending',approval:{id:'vc:approval.1'}});
+    await expect.poll(()=>f.events.some(e=>e.type==='approval'&&e.id==='vc:approval.1')).toBe(true);
+    expect(JSON.stringify(f.events)).not.toContain('foreign private');
+    expect((await f.app.inject({method:'POST',url:'/api/approvals/vc%3Aapproval.1',headers:f.headers,payload:{decision:'allow-once'}})).statusCode).toBe(200);
   });
 });
 it('preserves a cancellation tombstone when service storage reopens',()=>{

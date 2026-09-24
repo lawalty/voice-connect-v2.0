@@ -11,6 +11,7 @@ export function signGatewayChallenge(store:Store, token:string, nonce:string, si
   const privateKey=createPrivateKey(store.decrypt(encoded));
   const publicKey=createPublicKey(privateKey).export({format:'jwk'}).x!;
   const id=createHash('sha256').update(Buffer.from(publicKey,'base64url')).digest('hex');
+  if(store.get('gateway-device-id')!==id)store.set('gateway-device-id',id);
   const payload=['v3',id,'gateway-client','backend','operator',scopes.join(','),String(signedAt),token,nonce,'linux',''].join('|');
   return {id,publicKey,signature:sign(null,Buffer.from(payload),privateKey).toString('base64url'),signedAt,nonce};
 }

@@ -11,3 +11,4 @@ client/public/models/*.bin
 client/public/models/*.onnx
 client/public/runtime
 *.log
+source.tar

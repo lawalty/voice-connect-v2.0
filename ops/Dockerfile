@@ -1,13 +1,12 @@
-FROM node:24-bookworm-slim AS build
+FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS build
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY ops/prepare-assets.mjs ops/asset-lock.json ./ops/
-RUN node ops/prepare-assets.mjs
 COPY . .
+RUN node ops/prepare-assets.mjs
 RUN npm run build
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package.json package-lock.json ./
