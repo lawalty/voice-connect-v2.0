@@ -1,0 +1,47 @@
+name: voice-connect-v2
+services:
+  app:
+    image: voice-connect-v2:${VC_RELEASE:?Set immutable VC_RELEASE}
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    network_mode: host
+    environment:
+      NODE_ENV: production
+      VC_HOST: 127.0.0.1
+      VC_PORT: 18880
+      VC_ORIGIN: https://srv2003889.hstgr.cloud
+      VC_STATE_DIR: /state
+      VC_GATEWAY_URL: ws://127.0.0.1:18789
+      VC_GATEWAY_MODEL: openai/gpt-6-astra
+      VC_IMAGE_MODEL_ALLOWLIST: openai/gpt-6-astra
+      VC_GATEWAY_TOKEN_FILE: /run/secrets/gateway-token
+      VC_MASTER_KEY_FILE: /run/secrets/master-key
+      VC_BOOTSTRAP_TOKEN_FILE: /run/secrets/bootstrap-token
+      VC_BUILD: ${VC_RELEASE}
+    volumes:
+      - /opt/voice-connect-v2/state:/state
+      - /opt/voice-connect-v2/secrets:/run/secrets:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:18880/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+  edge:
+    image: caddy:2
+    network_mode: host
+    volumes:
+      - /opt/voice-connect-v2/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/voice-connect-v2/caddy-data:/data
+      - /opt/voice-connect-v2/caddy-config:/config
+    restart: unless-stopped
+    mem_limit: 128m
+    security_opt: [no-new-privileges:true]

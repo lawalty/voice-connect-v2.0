@@ -1,0 +1,13 @@
+.git
+node_modules
+.local
+.state
+.env*
+dist
+test-results
+playwright-report
+client/public/models/*.tar.gz
+client/public/models/*.bin
+client/public/models/*.onnx
+client/public/runtime
+*.log

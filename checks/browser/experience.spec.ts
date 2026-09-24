@@ -1,0 +1,86 @@
+import { test, expect, type Page } from '@playwright/test';
+
+async function signIn(page:Page){
+  await page.goto('/');
+  await page.getByLabel('Password',{exact:true}).fill('browser-fixture-password-2026');
+  await page.getByRole('button',{name:'Enter your space'}).click();
+  await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
+}
+test('private entry, continuous text conversation, and refresh preserve history',async({page},info)=>{
+  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+  await signIn(page);
+  await page.getByRole('button',{name:'NorthPointe',exact:true}).click();
+  await page.getByRole('button',{name:'Begin a new conversation'}).click();
+  await page.getByLabel('Message NorthPointe').fill('A browser acceptance thought.');
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  if(info.project.name==='android-layout')await page.getByRole('button',{name:/Conversation\s*\d/}).click();
+  await expect(page.getByText('Your conversation stays together. I’m here with you.',{exact:true})).toBeVisible();
+  await expect(page.getByText('Your conversation stays together. I’m here with you.',{exact:true})).toHaveCount(1);
+  if(info.project.name==='android-layout')await page.getByRole('button',{name:'Close transcript'}).click();
+  const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
+  await page.getByLabel('Message NorthPointe').fill('My second message.');
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  if(info.project.name==='android-layout')await page.getByRole('button',{name:/Conversation\s*\d/}).click();
+  await expect(page.getByText('Your second message is in the same conversation.',{exact:true})).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
+  if(info.project.name==='android-layout')await page.getByRole('button',{name:/Conversation\s*\d/}).click();
+  await expect(page.getByRole('log',{name:'Messages'}).getByText('A browser acceptance thought.',{exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(before);
+  await page.screenshot({path:info.outputPath('conversation.png'),fullPage:true});
+  expect(errors).toEqual([]);
+});
+test('camera captures deliberately and attaches to the current conversation',async({page,context},info)=>{
+  await context.grantPermissions(['camera']);
+  await signIn(page);
+  const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
+  const uploads:string[]=[],turns:string[]=[];
+  page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/api/uploads'))uploads.push(request.url());if(request.method()==='POST'&&request.url().endsWith('/turns'))turns.push(request.postData()||'');});
+  await page.getByRole('button',{name:'Attach a camera photo'}).click();
+  await expect(page.getByRole('button',{name:'Take photo',exact:true})).toBeEnabled();
+  expect(uploads).toHaveLength(0);
+  await page.getByRole('button',{name:'Take photo',exact:true}).click();
+  await expect(page.getByAltText('Photo to attach to your next message')).toBeVisible();
+  expect(uploads).toHaveLength(0);
+  await page.getByRole('button',{name:'Attach photo',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(uploads).toHaveLength(1);expect(turns).toHaveLength(0);
+  await page.getByLabel('Message NorthPointe').fill('A deliberately captured test image.');
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  await expect.poll(()=>turns.length).toBe(1);
+  expect(JSON.parse(turns[0]).attachments).toHaveLength(1);
+  expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(before);
+  await page.screenshot({path:info.outputPath('camera.png'),fullPage:true});
+});
+test('settings disclose speech processing and preserve the active conversation',async({page},info)=>{
+  await signIn(page);
+  const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
+  await page.getByRole('button',{name:'Open settings'}).click();
+  await expect(page.getByText(/may send microphone audio to its vendor/)).toBeVisible();
+  await page.getByRole('button',{name:/On this device/}).click();
+  await expect(page.getByRole('button',{name:'Download',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:/Premium Deepgram Flux/}).click();
+  await expect(page.getByText(/Audio is streamed to Deepgram/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'Save preferences'})).toBeDisabled();
+  await page.screenshot({path:info.outputPath('settings.png'),fullPage:true});
+  await page.keyboard.press('Escape');
+  expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(before);
+  await expect(page.getByRole('button',{name:'Open settings'})).toBeFocused();
+});
+test('offline draft remains unsent and cancellation cannot resurrect old output',async({page,context},info)=>{
+  await signIn(page);
+  await page.getByRole('button',{name:'NorthPointe',exact:true}).click();
+  await page.getByRole('button',{name:'Begin a new conversation'}).click();
+  await page.getByLabel('Message NorthPointe').fill('Please give a slow fixture response.');
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  await page.getByRole('button',{name:'Interrupt',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Interrupt',exact:true})).toHaveCount(0);
+  await context.setOffline(true);
+  await page.getByLabel('Message NorthPointe').fill('Keep this offline thought.');
+  await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
+  await context.setOffline(false);
+  await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
+  await expect(page.getByLabel('Message NorthPointe')).toHaveValue('Keep this offline thought.');
+  await expect(page.getByText('Your conversation stays together. I’m here with you.',{exact:true})).toHaveCount(0);
+  await page.screenshot({path:info.outputPath('recovery.png'),fullPage:true});
+});

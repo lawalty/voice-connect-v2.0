@@ -1,0 +1,8 @@
+{
+  "id": "vosk-en-us-0.15",
+  "url": "/models/vosk-en-us-0.15.tar.gz.bin",
+  "sha256": "4ca58bd8a15a7117ec1870af304dad0412df6e5636c898ac663086e6f01db91c",
+  "bytes": 41706199,
+  "license": "Apache-2.0",
+  "sampleRate": 16000
+}

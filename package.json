@@ -1,0 +1,57 @@
+{
+  "name": "voice-connect-v2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "concurrently -k \"tsx watch service/main.ts\" \"vite --host 127.0.0.1\"",
+    "dev:server": "tsx watch service/main.ts",
+    "build": "tsc --noEmit && vite build && node ops/build-service.mjs",
+    "start": "node dist/service/main.js",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "prepare:assets": "node ops/prepare-assets.mjs",
+    "bootstrap": "tsx service/bootstrap.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.2",
+    "@fastify/multipart": "10.1.2",
+    "@fastify/rate-limit": "11.2.0",
+    "@fastify/static": "10.1.4",
+    "@fastify/websocket": "11.3.1",
+    "@node-rs/argon2": "2.2.1",
+    "fastify": "5.12.5",
+    "lucide-react": "1.48.0",
+    "onnxruntime-web": "1.30.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "sharp": "0.35.4",
+    "vosk-browser": "0.0.8",
+    "ws": "8.21.3",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/ws": "8.18.1",
+    "@vitejs/plugin-react": "6.1.1",
+    "concurrently": "10.0.5",
+    "esbuild": "0.28.2",
+    "fflate": "0.8.3",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.1",
+    "vitest": "5.0.1"
+  },
+  "overrides": {
+    "vosk-browser": {
+      "uuid": "11.1.1"
+    }
+  }
+}

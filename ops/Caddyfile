@@ -1,0 +1,11 @@
+srv2003889.hstgr.cloud {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
+        X-Frame-Options DENY
+    }
+    reverse_proxy 127.0.0.1:18880
+}
