@@ -1,6 +1,6 @@
-// Only the public application shell is cached. API, model and audio data never enter this cache.
-const CACHE = 'vc2-shell-v2';
-const RUNTIME = ['/audio/capture.js', '/runtime/vosk.js', '/runtime/ort-wasm-simd-threaded.wasm', '/models/silero_vad.onnx'];
+// Cache the public shell and exact static speech runtime assets; never API data or recordings.
+const CACHE = 'vc2-shell-v3';
+const RUNTIME = ['/audio/vosk.worker.js', '/runtime/vosk.js', '/runtime/ort-wasm-simd-threaded.wasm', '/models/silero_vad.onnx'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['/', '/icon.svg', '/manifest.webmanifest']))); self.skipWaiting(); });
 self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('vc2-shell-') && key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', event => {

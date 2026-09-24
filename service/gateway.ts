@@ -145,7 +145,8 @@ export class Gateway implements GatewayPort {
       if(known?.conversationId!==id)known=undefined;
       if(known){seen.add(known.id);if(known.delivery==='pending'||known.delivery==='uncertain')this.store.updateTurn(known.id,'accepted',known.runId??known.id);}
       const createdAt=typeof raw.timestamp==='number'?raw.timestamp:Date.parse(raw.timestamp??'')||Date.now();
-      if(text)messages.push({id:String(raw.id??raw.messageId??`${raw.role}-${messages.length}-${createdAt}`),role:raw.role,text,createdAt,...known?{turnId:known.id,delivery:known.delivery}:{},...raw.runId?{runId:raw.runId}:{}});
+      const attachments=raw.role==='user'&&known?known.attachments.flatMap(a=>{const value=this.store.attachment(a);return value?[value.meta]:[];}):[];
+      if(text||attachments.length)messages.push({id:String(raw.id??raw.messageId??`${raw.role}-${messages.length}-${createdAt}`),role:raw.role,text,createdAt,...known?{turnId:known.id,delivery:known.delivery}:{},...raw.runId?{runId:raw.runId}:{},...attachments.length?{attachments}:{}});
     }
     if(live?.runId){const row=this.store.findRun(live.runId);if(row&&!row.cancelRequested){this.store.updateTurn(row.id,'accepted',live.runId);if(typeof live.text==='string')this.text.set(live.runId,live.text);}}
     // A missing run is unknown, never silently resent. It is not an active speaking run.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, createHash, createPublicKey, verify } from 'node:crypto';
@@ -15,6 +15,25 @@ import { loadConfig } from '../service/config.js';
 const cleanup:(()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const fn of cleanup.reverse())await fn();cleanup.length=0;});
 const origin='http://127.0.0.1:5173',bootstrap='test-bootstrap-token-that-is-long-enough';
+describe('isolated local recognition worker policy',()=>{
+  it('allows generated JS only on the exact worker asset, including cache validation, never HTML fallback',async()=>{
+    const dir=mkdtempSync(join(tmpdir(),'vc2-worker-policy-')),staticDir=join(dir,'public');
+    mkdirSync(join(staticDir,'audio'),{recursive:true});mkdirSync(join(staticDir,'runtime'));
+    writeFileSync(join(staticDir,'index.html'),'<!doctype html><title>Strict document</title>');
+    writeFileSync(join(staticDir,'audio','vosk.worker.js'),'self.onmessage = () => {};');
+    writeFileSync(join(staticDir,'audio','other.js'),'void 0;');writeFileSync(join(staticDir,'runtime','vosk.js'),'void 0;');
+    const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),gatewayToken:'',gatewayEnabled:false,staticDir,origin}});
+    cleanup.push(async()=>{await app.close();rmSync(dir,{recursive:true,force:true});});
+    const header=(r:{headers:Record<string,unknown>})=>String(r.headers['content-security-policy']);
+    const worker=await app.inject({url:'/audio/vosk.worker.js'});expect(worker.statusCode).toBe(200);expect(header(worker)).toContain("'unsafe-eval'");expect(header(worker)).toContain("worker-src 'self' blob:");expect(header(worker)).toContain("connect-src 'self' blob:");
+    expect(header(await app.inject({method:'HEAD',url:'/audio/vosk.worker.js?v=test'}))).toContain("'unsafe-eval'");
+    const cached=await app.inject({url:'/audio/vosk.worker.js',headers:{'if-none-match':String(worker.headers.etag)}});expect(cached.statusCode).toBe(304);expect(header(cached)).toContain("'unsafe-eval'");
+    for(const url of ['/','/index.html','/audio/other.js','/runtime/vosk.js','/audio/vosk.worker.js.map','/audio/vosk.worker.js/anything','/audio/%76osk.worker.js'])expect(header(await app.inject({url}))).not.toContain("'unsafe-eval'");
+    for(const url of ['/%61pi/settings','/%61pi/no-such-endpoint','/a%70i/conversations?next=/api/status']){const protectedResponse=await app.inject({url});expect(protectedResponse.statusCode).toBe(401);expect(String(protectedResponse.headers['content-type'])).toContain('application/json');expect(header(protectedResponse)).not.toContain("'unsafe-eval'");}
+    unlinkSync(join(staticDir,'audio','vosk.worker.js'));
+    const missing=await app.inject({url:'/audio/vosk.worker.js'});expect(String(missing.headers['content-type'])).toContain('text/html');expect(header(missing)).not.toContain("'unsafe-eval'");
+  });
+});
 async function fixture(unremovableBootstrap=false) {
   const dir=mkdtempSync(join(tmpdir(),'vc2-service-'));
   const server=new WebSocketServer({port:0});await new Promise<void>(resolve=>server.once('listening',()=>resolve()));
@@ -73,6 +92,18 @@ describe('owner boundary',()=>{
     expect((await f.app.inject({method:'POST',url:'/api/auth/setup',headers:{origin},payload:{password:'another safe password',bootstrapToken:bootstrap}})).statusCode).toBe(409);
     const response=await f.app.inject({method:'GET',url:'/api/status',headers:{cookie:f.cookie}});expect(response.json().csrfToken).toBe(f.csrf);
   });
+  it('protects router-decoded API aliases, query tricks, and noncanonical paths',async()=>{
+    const f=await fixture();
+    for(const url of ['/%61pi/settings','/a%70i/settings','/ap%69/settings','/api/%73ettings','/%61pi/conversations?next=/api/status','/%61pi/settings?path=/api/auth/login'])expect((await f.app.inject({method:'GET',url})).statusCode).toBe(401);
+    for(const url of ['//api/settings','/api//settings','/%2e/api/settings','/api%2fsettings'])expect([400,401,403,404]).toContain((await f.app.inject({method:'GET',url})).statusCode);
+    for(const url of ['/%61pi/conversations','/a%70i/conversations?path=/api/auth/login']){
+      expect((await f.app.inject({method:'POST',url,headers:{origin},payload:{}})).statusCode).toBe(401);
+      expect((await f.app.inject({method:'POST',url,headers:{...f.headers,origin:'https://other.example'},payload:{}})).statusCode).toBe(403);
+      expect((await f.app.inject({method:'POST',url,headers:{origin,cookie:f.cookie},payload:{}})).statusCode).toBe(403);
+    }
+    expect((await f.app.inject({method:'POST',url:'/%61pi/auth/login',headers:{origin:'https://other.example'},payload:{password:'a secure test password'}})).statusCode).toBe(403);
+    expect((await f.app.inject({method:'GET',url:'/%61pi/settings',headers:f.headers})).statusCode).toBe(200);
+  });
   it('encrypts provider keys and revokes other sessions on password change',async()=>{
     const f=await fixture();const key='synthetic-deepgram-key-not-a-real-secret';
     expect((await f.app.inject({method:'PUT',url:'/api/settings/deepgram',headers:f.headers,payload:{apiKey:key}})).statusCode).toBe(200);
@@ -87,11 +118,16 @@ describe('owner boundary',()=>{
   it('rejects cross-origin or unauthenticated WebSockets and closes a logged-out socket',async()=>{
     const f=await fixture();const path=`/api/events?conversationId=${f.conversation.id}`;
     const address=await f.app.listen({host:'127.0.0.1',port:0});
-    const connect=(headers:Record<string,string>)=>new Promise<WebSocket>((resolve,reject)=>{const s=new WebSocket(address.replace('http:','ws:')+path,{headers});s.once('open',()=>resolve(s));s.once('error',reject);});
+    const connect=(headers:Record<string,string>,requestPath=path)=>new Promise<WebSocket>((resolve,reject)=>{const s=new WebSocket(address.replace('http:','ws:')+requestPath,{headers});s.once('open',()=>resolve(s));s.once('error',reject);});
     await expect(connect({origin})).rejects.toThrow('401');
     await expect(connect({cookie:f.cookie})).rejects.toThrow('403');
     await expect(connect({cookie:f.cookie,origin:'https://other.example'})).rejects.toThrow('403');
-    const socket=await connect({cookie:f.cookie,origin});
+    for(const requestPath of [`/%61pi/events?conversationId=${f.conversation.id}`,`/a%70i/audio?kind=stt&conversationId=${f.conversation.id}`]){
+      await expect(connect({origin},requestPath)).rejects.toThrow('401');
+      await expect(connect({cookie:f.cookie},requestPath)).rejects.toThrow('403');
+      await expect(connect({cookie:f.cookie,origin:'https://other.example'},requestPath)).rejects.toThrow('403');
+    }
+    const socket=await connect({cookie:f.cookie,origin},`/%61pi/events?conversationId=${f.conversation.id}`);
     const closed=new Promise<number>(resolve=>socket.once('close',code=>resolve(code)));
     expect((await f.app.inject({method:'POST',url:'/api/auth/logout',headers:f.headers})).statusCode).toBe(200);
     expect(await closed).toBe(1008);
@@ -109,6 +145,20 @@ describe('owner boundary',()=>{
   });
 });
 describe('native OpenClaw lifecycle',()=>{
+  it('restores only local owner image metadata to user history, including an image-only turn',async()=>{
+    const f=await fixture(),url=`/api/conversations/${f.conversation.id}`,store=(f.app as any).vc.store;
+    const meta={id:'local-photo',name:'image-local.png',mimeType:'image/png',width:2,height:2,previewUrl:'/api/attachments/local-photo'};
+    store.saveAttachment(meta,await sharp({create:{width:2,height:2,channels:3,background:'#884422'}}).png().toBuffer());
+    expect((await f.app.inject({method:'POST',url:`${url}/turns`,headers:f.headers,payload:{id:'photo-turn',text:'',attachments:['local-photo']}})).json().delivery).toBe('accepted');
+    f.setHistory({sessionInfo:{lastRunId:'photo-turn',status:'done'},messages:[
+      {id:'native-photo-user',role:'user',runId:'photo-turn',content:[{type:'image',data:'raw-native-image-not-for-ui'}]},
+      {id:'native-photo-assistant',role:'assistant',runId:'photo-turn',content:[{type:'text',text:'I can see the picture.'},{type:'image',data:'raw-tool-image-not-for-ui'}]},
+    ]});
+    const view=await f.app.inject({method:'GET',url,headers:f.headers});expect(view.statusCode).toBe(200);
+    expect(view.json().messages[0]).toMatchObject({role:'user',text:'',attachments:[meta]});
+    expect(view.json().messages[1]).not.toHaveProperty('attachments');expect(view.body).not.toContain('raw-native-image');expect(view.body).not.toContain('raw-tool-image');
+    const refreshed=await f.app.inject({method:'GET',url,headers:f.headers});expect(refreshed.json().messages[0].attachments).toEqual([meta]);
+  });
   it('omits an unassigned native sessionId, then preserves the assigned identifier',async()=>{
     const f=await fixture(),url=`/api/conversations/${f.conversation.id}`;
     expect((f.app as any).vc.store.mapping(f.conversation.id)).not.toHaveProperty('sessionId');

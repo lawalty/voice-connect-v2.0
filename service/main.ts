@@ -8,6 +8,7 @@ import { hash, verify } from '@node-rs/argon2';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, unlinkSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type WebSocket from 'ws';
 import type { AppStatus, AppSettings, ServerEvent, Attachment } from '../contract/types.js';
@@ -22,6 +23,12 @@ const id=z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 const nativeId=z.string().min(1).max(128).regex(/^[a-zA-Z0-9_.:-]+$/).refine(v=>v!=='.'&&v!=='..');
 export interface AppOptions {config?:Partial<ServiceConfig>;gatewayFactory?:(cfg:ServiceConfig,store:Store,publish:(e:ServerEvent)=>void)=>GatewayPort;}
 function equal(a:string,b:string):boolean {const aa=Buffer.from(digest(a)),bb=Buffer.from(digest(b));return timingSafeEqual(aa,bb);}
+function securityPath(req:FastifyRequest):string {
+  // Router matching decodes unreserved escapes. Gate the matched API route itself,
+  // otherwise /%61pi/... could bypass a check against the raw request URL.
+  if(req.routeOptions.url?.startsWith('/api/'))return req.routeOptions.url;
+  try {return decodeURI(new URL(req.url,'http://voice-connect.invalid').pathname);}catch{return '';}
+}
 export async function buildApp(options:AppOptions={}) {
   const cfg=loadConfig(options.config),store=new Store(cfg.stateDir,cfg.masterKey);
   const app=Fastify({logger:false,bodyLimit:128*1024,trustProxy:false,requestTimeout:30000});
@@ -48,14 +55,24 @@ export async function buildApp(options:AppOptions={}) {
     reply.header('X-Content-Type-Options','nosniff').header('Referrer-Policy','same-origin').header('Cross-Origin-Opener-Policy','same-origin').header('Cross-Origin-Embedder-Policy','require-corp');
     reply.header('Permissions-Policy','microphone=(self), camera=(self), geolocation=()');
     reply.header('Content-Security-Policy',"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
-    if(!req.url.startsWith('/api/'))return;
+    const path=securityPath(req);if(!path.startsWith('/api/'))return;
     reply.header('Cache-Control','no-store');
-    const path=req.url.split('?')[0],authEntry=path==='/api/auth/setup'||path==='/api/auth/login';
+    const authEntry=path==='/api/auth/setup'||path==='/api/auth/login';
     const mutating=!['GET','HEAD','OPTIONS'].includes(req.method),ws=path==='/api/events'||path==='/api/audio';
     if((mutating||ws)&&req.headers.origin!==cfg.origin)return reply.code(403).send({error:'This request must come from Voice Connect.'});
     if(path==='/api/status'||authEntry)return;
     const s=session(req);if(!s)return reply.code(401).send({error:'Sign in to continue.'});
     if(mutating&&!equal(String(req.headers['x-csrf-token']??''),s.csrf))return reply.code(403).send({error:'Refresh Voice Connect and try again.'});
+  });
+  app.addHook('onSend',async(req,reply,payload)=>{
+    // The legacy Vosk binding evaluates generated JS only inside this external worker.
+    // Exact asset + script response checks prevent the SPA fallback or other files
+    // from inheriting its exception; the application document remains strict.
+    const workerPath=req.url.split('?')[0]==='/audio/vosk.worker.js';
+    const scriptType=/^(?:application|text)\/(?:java|ecma)script(?:;|$)/i.test(String(reply.getHeader('content-type')??''));
+    const cachedWorker=reply.statusCode===304&&existsSync(join(cfg.staticDir,'audio','vosk.worker.js'));
+    if(workerPath&&['GET','HEAD'].includes(req.method)&&((reply.statusCode===200&&scriptType)||cachedWorker))reply.header('Content-Security-Policy',"default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+    return payload;
   });
   app.setErrorHandler((error,req,reply)=>{
     const validation=error instanceof z.ZodError;
@@ -119,7 +136,7 @@ export async function buildApp(options:AppOptions={}) {
   app.post('/api/questions/:id',async(req,reply)=>{const p=z.object({id}).parse(req.params),b=z.object({answer:z.string().min(1).max(4000)}).strict().parse(req.body);try{await gateway.answer(p.id,b.answer);return {ok:true};}catch{return reply.code(409).send({error:'This question is no longer available.'});}});
   function bindSocket(socket:WebSocket,req:FastifyRequest):string|undefined {
     const q=z.object({conversationId:id}).passthrough().safeParse(req.query);if(!q.success||!store.conversation(q.data.conversationId)||sockets.size>=12){socket.close(1008,'Conversation unavailable');return;}
-    sockets.set(socket,{conversationId:q.data.conversationId,token:req.cookies.vc_session!,events:req.url.startsWith('/api/events'),alive:true});socket.on('pong',()=>{const binding=sockets.get(socket);if(binding)binding.alive=true;});socket.on('close',()=>sockets.delete(socket));socket.on('error',()=>{});return q.data.conversationId;
+    sockets.set(socket,{conversationId:q.data.conversationId,token:req.cookies.vc_session!,events:req.routeOptions.url==='/api/events',alive:true});socket.on('pong',()=>{const binding=sockets.get(socket);if(binding)binding.alive=true;});socket.on('close',()=>sockets.delete(socket));socket.on('error',()=>{});return q.data.conversationId;
   }
   app.get('/api/events',{websocket:true},(socket,req)=>{const conversationId=bindSocket(socket,req);if(!conversationId)return;socket.send(JSON.stringify({type:'hello',conversationId,capabilities:gateway.capabilities()}));});
   app.get('/api/audio',{websocket:true},(socket,req)=>{
@@ -128,7 +145,7 @@ export async function buildApp(options:AppOptions={}) {
     const key=store.deepgramKey();if(!q.success||!key){socket.send(JSON.stringify({type:'error',message:'Set a Deepgram key in Settings to use Premium speech.'}));socket.close(1008,'Speech unavailable');return;}
     bridgeAudio(socket,q.data.kind,key,q.data.voice,()=>Boolean(session(req)));
   });
-  if(existsSync(cfg.staticDir)){await app.register(serveStatic,{root:cfg.staticDir,prefix:'/',index:['index.html']});app.setNotFoundHandler((req,reply)=>req.url.startsWith('/api/')?reply.code(404).send({error:'Not found.'}):reply.type('text/html').sendFile('index.html'));}
+  if(existsSync(cfg.staticDir)){await app.register(serveStatic,{root:cfg.staticDir,prefix:'/',index:['index.html']});app.setNotFoundHandler((req,reply)=>securityPath(req).startsWith('/api/')?reply.code(404).send({error:'Not found.'}):reply.type('text/html').sendFile('index.html'));}
   app.addHook('onClose',async()=>{clearInterval(heartbeat);for(const socket of sockets.keys())socket.close(1001,'Service restarting');gateway.close();store.close();});
   await app.ready();return app;
 }

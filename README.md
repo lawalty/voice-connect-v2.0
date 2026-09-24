@@ -73,6 +73,7 @@ No default microphone recording or emotion database exists. Uploaded camera imag
 are deliberately captured, decoded, stripped of metadata, and stored on the VPS;
 submitted images may also be retained by OpenClaw and its configured model provider.
 Deleting application state alone does not erase those downstream copies.
+Drafts, provider selections, and downloaded speech models remain on the device.
 
 The product is a release candidate until the physical and credential-dependent
 gates in the acceptance document have been completed. Browser emulation and

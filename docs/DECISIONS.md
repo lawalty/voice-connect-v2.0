@@ -47,6 +47,11 @@ deprecated ScriptProcessor examples were not adopted. Model assets are separatel
 downloadable, verified, and removable. Audio and inferred emotions are not recorded
 by default. The app is foreground-first and does not promise Android lock-screen capture.
 
+The binding's generated JavaScript requires dynamic evaluation. It executes only
+inside an external broker Worker and its descendant Worker; the exact broker asset
+has a dedicated CSP response. Application documents retain their stricter CSP and
+never load the binding. Production-header and cached-offline tests cover this boundary.
+
 ## Security and operational limits
 
 The owner authenticates with an Argon2id-hashed password and HttpOnly session cookie.

@@ -7,7 +7,7 @@ Measured on September 24, 2026 with the repository's pinned dependencies, Window
 ```sh
 npm run prepare:assets
 npm run check
-npx vitest run checks/audio.test.ts checks/audio-output.test.ts checks/audio-scenarios.test.ts checks/audio-adapters.test.ts checks/audio-diagnostics.test.ts
+npx vitest run checks/audio.test.ts checks/audio-output.test.ts checks/audio-scenarios.test.ts checks/audio-adapters.test.ts checks/audio-diagnostics.test.ts checks/audio-vosk-broker.test.ts
 node checks/audio-browser.mjs
 ```
 
@@ -15,12 +15,20 @@ The browser check starts its own Vite server on `127.0.0.1:5192`. It downloads t
 
 ## Proven results
 
-- TypeScript and production Vite build pass. Twenty-five deterministic tests pass: streaming resampling across block boundaries, signed PCM encoding, noise-floor adaptation, speech hysteresis, evidence-only acoustic signals, coherent transcript accumulation, unresolved-tail rejection, cumulative speech snapshots, final sentence flushing, cancellation of late native/provider playback callbacks, independent recognizer lifecycle races, diagnostics privacy/bounds, and the annotated scenario replays below.
+- TypeScript and production Vite build pass. Twenty-seven deterministic tests cover streaming resampling across block boundaries, signed PCM encoding, noise-floor adaptation, speech hysteresis, evidence-only acoustic signals, coherent transcript accumulation, unresolved-tail rejection, cumulative speech snapshots, final sentence flushing, cancellation of late native/provider playback callbacks, independent recognizer lifecycle races, broker drain/final acknowledgements, diagnostics privacy/bounds, and the annotated scenario replays below.
 - Real Chromium loaded the verified 41,706,199-byte Vosk archive, initialized its WASM recognizer and the Silero ONNX worker, captured through `AudioWorklet`, and reached listening only after both engines were ready. A 1.2-second silent capture produced 39–40 signal callbacks across successful runs and no submitted turn. Callback count includes lifecycle signals; it is not a latency benchmark.
 - With browser network access disabled after the first initialization, a new Vosk recognizer loaded the cached archive and transcribed the official WAV. Actual result: `one zero zero zero one nah no to i know zero one eight zero three`. The first and last number sequences are asserted. The middle substitutions remain visible: this is a functional test, not an accuracy claim.
 - Removing the downloaded model cleared its verified archive cache and Vosk's extracted `/vosk` IndexedDB database. Conversation storage is untouched.
 
 The offline check proves a **warm application can initialize a fresh recognizer from cached model bytes**. It does not prove a cold offline page load, service-worker update recovery, or offline NorthPointe replies. Those require separate qualification; NorthPointe still needs connectivity.
+
+### Production security-policy regression
+
+The initial developer-server check lacked CSP and did not expose a release-blocking incompatibility: the pinned Vosk binding's embedded Emscripten worker uses `new Function` for Embind wrappers. Allowing WebAssembly alone does not permit that JavaScript code generation.
+
+The binding now loads only inside `/audio/vosk.worker.js`, an external classic broker worker. Only that exact worker response receives the limited `unsafe-eval` exception; its nested blob worker inherits the broker policy. The application document and ordinary runtime-script responses retain strict CSP without JavaScript `unsafe-eval`. The broker accepts a verified same-origin model blob, bounded PCM frames, finalize, and stop controls; it accepts no source code or arbitrary script URLs.
+
+`audio-browser.mjs` now applies the production document and broker policies, COOP, and COEP. An externally loaded probe confirms that the document rejects `Function(...)`. Real capture/Vosk/Silero initialization then succeeds, `window.Vosk` remains absent, and a fresh broker transcribes the fixture after browser networking is disabled. The service worker preserves the broker response and its CSP headers in the exact runtime allowlist. These local policy checks are required alongside the real deployed HTTPS check; development-server success alone is insufficient.
 
 ### Annotated scenario counts
 

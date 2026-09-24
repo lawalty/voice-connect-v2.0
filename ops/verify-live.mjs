@@ -2,7 +2,7 @@
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { request, chromium } from '@playwright/test';
+import { request, chromium, expect } from '@playwright/test';
 import WebSocket from 'ws';
 import sharp from 'sharp';
 
@@ -62,6 +62,8 @@ if(!upload.ok())throw Error(`Image upload ${upload.status()}`);
 const attachment=await upload.json();
 const visual=await turn('Synthetic camera acceptance. Read the code and name the circle color in the attached image. Do not use tools or change saved memory. Answer in one sentence.',[attachment.id]);
 if(!/739/.test(visual.text)||!/red/i.test(visual.text))throw Error('Image understanding did not match the test card');
+const visualHistory=await get(`/api/conversations/${conversation.id}`);
+if(!visualHistory.messages.some(m=>m.role==='user'&&m.attachments?.some(a=>a.id===attachment.id)))throw Error('Captured image metadata did not survive history refresh');
 passed('Actual image upload and visual understanding');
 const cancelId=randomUUID();
 const pending=await post(`/api/conversations/${conversation.id}/turns`,{id:cancelId,text:'Synthetic interruption check. Without tools, produce a 1200-word fictional story about a quiet garden. Do not save anything.'});
@@ -81,7 +83,7 @@ try{
   const context=await browser.newContext({storageState:await api.storageState(),viewport:{width:1440,height:960}});
   const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin);await page.evaluate(id=>localStorage.setItem('vc2:conversation',id),conversation.id);await page.reload();
-  await page.getByRole('button',{name:'Start talking',exact:true}).waitFor();
+  await expect(page.getByRole('button',{name:'Start talking',exact:true})).toBeEnabled();
   await page.getByRole('log',{name:'Messages'}).getByText(visual.text,{exact:true}).waitFor({timeout:20000});
   await mkdir('.local/release-evidence',{recursive:true});await page.screenshot({path:'.local/release-evidence/live-desktop.png',fullPage:true});
   await page.getByRole('button',{name:'Open settings'}).click();await page.screenshot({path:'.local/release-evidence/live-settings.png',fullPage:true});

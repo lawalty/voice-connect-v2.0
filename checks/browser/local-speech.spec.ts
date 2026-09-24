@@ -1,0 +1,31 @@
+import {test,expect} from '@playwright/test';
+
+test('production security headers allow isolated local recognition without permitting page eval',async({page,context},info)=>{
+  test.skip(info.project.name!=='desktop','One production runtime check; layout is covered separately.');
+  test.setTimeout(150000);
+  await context.grantPermissions(['microphone']);
+  const errors:string[]=[],submissions:string[]=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/turns'))submissions.push(r.url());});
+  const response=await page.goto('/');
+  expect(response!.headers()['content-security-policy']).not.toContain("'unsafe-eval'");
+  await page.getByLabel('Password',{exact:true}).fill('browser-fixture-password-2026');
+  await page.getByRole('button',{name:'Enter your space'}).click();
+  await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
+  await page.getByRole('button',{name:'Open settings'}).click();
+  await page.getByRole('button',{name:/On this device/}).click();
+  await page.getByRole('button',{name:'Download',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Remove',exact:true})).toBeVisible({timeout:60000});
+  await page.getByRole('button',{name:'Save preferences'}).click();
+  await page.getByRole('button',{name:'Start talking'}).click();
+  await expect(page.getByText('Listening to you',{exact:true})).toBeVisible({timeout:90000});
+  await page.waitForTimeout(1500);
+  await page.getByRole('button',{name:'End voice session'}).click();
+  await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
+  await page.getByRole('button',{name:'Open settings'}).click();
+  await page.getByText('Device diagnostics',{exact:true}).click();
+  await page.screenshot({path:info.outputPath('local-speech.png'),fullPage:true});
+  await page.getByRole('button',{name:'Remove',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Download',exact:true})).toBeVisible({timeout:15000});
+  expect(errors).toEqual([]);expect(submissions).toEqual([]);
+});

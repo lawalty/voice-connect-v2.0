@@ -42,12 +42,21 @@ commit and container image. Verify an authenticated native text response, same
 conversation after reload, deliberate image understanding, and cancellation. The
 public health endpoint alone is not a release gate.
 
+A failed deployment health gate exits without marking the release current; the
+candidate container may still be running. Restore the recorded previous image
+explicitly with the rollback command below, then verify authenticated behavior.
+
 To roll back the application, execute `bash ops/rollback.sh <previous-full-sha>`
 from a release directory. It verifies the image already exists, replaces only the
 application service, preserves state, and checks health. If a future migration is
 incompatible, stop the application before restoring the corresponding SQLite
 backup together with its matching master key; do not overwrite a live database.
 The initial schema uses additive creation only.
+
+After running `node ops/verify-live.mjs`, use `node ops/verify-release.mjs <full-sha>`
+to check source identity, authenticated persisted conversation/image state, encoded
+API authentication/CSRF/origin handling, and served asset hashes against the local
+production build. The verifier reads only the restricted ignored owner-access file.
 
 Use `docker compose -f ops/compose.yaml logs --tail 100 app` with the release's
 `VC_RELEASE` set. Diagnostics contain bounded operational events and timings,

@@ -16,7 +16,24 @@ catch {
 }
 const fixture = await readFile(fixturePath);
 console.log(`Vosk official WAV fixture: ${fixture.length} bytes; SHA256 ${createHash('sha256').update(fixture).digest('hex')}`);
-const server = await createServer({ server: { host: '127.0.0.1', port: 5192, strictPort: true }, logLevel: 'error' });
+// These match service/main.ts; backend tests separately assert exact-route scoping.
+const DOCUMENT_CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+const BROKER_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+const server = await createServer({
+  server: { host: '127.0.0.1', port: 5192, strictPort: true }, logLevel: 'error',
+  plugins: [{ name: 'audio-production-csp', configureServer(server) {
+    server.middlewares.use((request, response, next) => {
+      const path = request.url?.split('?')[0];
+      response.setHeader('Content-Security-Policy', path === '/audio/vosk.worker.js' ? BROKER_CSP : DOCUMENT_CSP);
+      response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+      response.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+      if (path === '/audio-csp-probe.js') {
+        response.setHeader('Content-Type', 'text/javascript');
+        response.end("try { Function('return 1')(); window.__documentEvalBlocked = false; } catch { window.__documentEvalBlocked = true; }");
+      } else next();
+    });
+  } }],
+});
 await server.listen();
 const browser = await chromium.launch({ headless: true, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
 try {
@@ -25,8 +42,23 @@ try {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => { if (message.text().startsWith('AUDIO-CHECK')) console.log(message.text()); });
-  await page.route('**/audio-harness', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Audio runtime acceptance</title>' }));
+  await page.route('**/audio-harness', (route) => route.fulfill({ contentType: 'text/html',
+    headers: { 'Content-Security-Policy': DOCUMENT_CSP, 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' },
+    body: '<!doctype html><title>Audio runtime acceptance</title>' }));
   await page.goto('http://127.0.0.1:5192/audio-harness');
+  const policy = await page.evaluate(async () => {
+    await new Promise((resolve, reject) => { const probe = document.createElement('script'); probe.src = '/audio-csp-probe.js'; probe.onload = resolve; probe.onerror = reject; document.head.append(probe); });
+    const broker = await fetch('/audio/vosk.worker.js');
+    await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Service worker did not claim the audio test.')), 5000);
+      navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(timeout); resolve(); }, { once: true });
+    });
+    return { blocked: window.__documentEvalBlocked, brokerCsp: broker.headers.get('content-security-policy') };
+  });
+  assert.equal(policy.blocked, true, 'application document still blocks JavaScript string evaluation');
+  assert.equal(policy.brokerCsp, BROKER_CSP);
+  console.log('Production CSP: document eval blocked; exception confined to external Vosk broker.');
   const download = await page.evaluate(async () => {
     const model = await import('/audio/model.ts');
     await model.downloadModel();
@@ -41,12 +73,13 @@ try {
     await engine.start({ recognition: 'vosk', output: 'browser', browserVoice: '', premiumVoice: 'flux-haley-en', handsFree: false, keepAwake: false }, 'local-runtime-check');
     await new Promise((resolve) => setTimeout(resolve, 1200));
     await engine.finish(); engine.dispose();
-    return { phases, errors, turns, signals };
+    return { phases, errors, turns, signals, documentVosk: typeof window.Vosk !== 'undefined' };
   });
   assert.deepEqual(startup.errors, []);
   assert.ok(startup.phases.includes('listening'), 'real Worklet, Vosk and Silero become ready');
   assert.ok(startup.signals > 5, 'real Silero inference emits acoustic evidence');
   assert.deepEqual(startup.turns, [], 'fake microphone silence does not submit a turn');
+  assert.equal(startup.documentVosk, false, 'legacy Vosk binding never enters the application document');
   console.log('Real capture + Silero/Vosk startup passed', JSON.stringify(startup));
 
   // The runtime has already been loaded; prove recognizer reinitialization uses cached
