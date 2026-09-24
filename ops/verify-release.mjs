@@ -6,6 +6,8 @@ import {request} from '@playwright/test';
 
 const expected=process.argv[2];
 assert.match(expected||'',/^[a-f0-9]{40}$/,'Provide the full expected source SHA');
+const recorded=process.argv.includes('--recorded-assets')?JSON.parse(await readFile(`.local/release-evidence/release-${expected}.json`,'utf8')):null;
+if(recorded)assert.equal(recorded.build,expected);
 const access=JSON.parse(await readFile(process.env.VC_LIVE_CREDENTIAL_FILE||'.local/owner-access.json','utf8'));
 assert.equal(access.origin,'https://srv2003889.hstgr.cloud');
 const evidence=JSON.parse(await readFile('.local/release-evidence/live.json','utf8'));
@@ -36,11 +38,12 @@ try{
   for(const path of assets){
     const remote=await api.get(path);assert.equal(remote.status(),200);
     const digest=b=>createHash('sha256').update(b).digest('hex');
-    const local=await readFile(`dist/client${path}`);
-    assert.equal(digest(await remote.body()),digest(local),`Served asset matches build: ${path}`);
-    verified.push({path,sha256:digest(local)});
+    const expectedDigest=recorded?recorded.assets.find(asset=>asset.path===path)?.sha256:digest(await readFile(`dist/client${path}`));
+    assert.match(expectedDigest||'',/^[a-f0-9]{64}$/);
+    assert.equal(digest(await remote.body()),expectedDigest,`Served asset matches build: ${path}`);
+    verified.push({path,sha256:expectedDigest});
   }
-  const result={time:new Date().toISOString(),build:expected,nativeConnected:true,persistedConversationId:evidence.conversationId,persistedImage:true,encodedRouteAuthentication:true,originAndCsrf:true,assets:verified};
+  const result={time:new Date().toISOString(),build:expected,assetReference:recorded?'previously verified immutable build':'local production build',nativeConnected:true,persistedConversationId:evidence.conversationId,persistedImage:true,encodedRouteAuthentication:true,originAndCsrf:true,assets:verified};
   await mkdir('.local/release-evidence',{recursive:true});
   await writeFile(`.local/release-evidence/release-${expected}.json`,JSON.stringify(result,null,2));
   console.log('PASS release identity, persisted native conversation/image, security boundaries, and served assets',JSON.stringify(result));

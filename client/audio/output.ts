@@ -30,7 +30,9 @@ export class BrowserOutput implements SpeechOutput {
     const id = this.generation.current;
     const utterance = this.utterance = new SpeechSynthesisUtterance(text.trim());
     const voices = speechSynthesis.getVoices();
-    const preferred = voices.find((voice) => voice.voiceURI === this.preferences.browserVoice || voice.name === this.preferences.browserVoice);
+    const saved = voices.find((voice) => voice.voiceURI === this.preferences.browserVoice || voice.name === this.preferences.browserVoice);
+    const localEnglish = (voice: SpeechSynthesisVoice) => voice.localService && /^en(?:[-_]|$)/i.test(voice.lang);
+    const preferred = saved ?? voices.find(voice => localEnglish(voice) && voice.default) ?? voices.find(localEnglish);
     if (preferred) utterance.voice = preferred;
     utterance.lang = preferred?.lang ?? 'en-US';
     this.active = true;

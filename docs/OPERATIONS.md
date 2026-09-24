@@ -57,6 +57,9 @@ After running `node ops/verify-live.mjs`, use `node ops/verify-release.mjs <full
 to check source identity, authenticated persisted conversation/image state, encoded
 API authentication/CSRF/origin handling, and served asset hashes against the local
 production build. The verifier reads only the restricted ignored owner-access file.
+During rollback, pass `--recorded-assets` to compare against that older release's
+previously verified digests instead of the newer local build. Verify the older
+release before using it as a rollback target.
 
 Use `docker compose -f ops/compose.yaml logs --tail 100 app` with the release's
 `VC_RELEASE` set. Diagnostics contain bounded operational events and timings,
