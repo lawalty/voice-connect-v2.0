@@ -21,6 +21,8 @@ export class VoiceEngine {
   private vadPending = 0;
   private vadSequence = 0;
   private vadIgnoreBefore = 0;
+  private vadProcessed = -1;
+  private vadFence?: { sequence: number; resolve(): void; reject(error: Error): void; timeout: ReturnType<typeof setTimeout> };
   private analysisBuffer: number[] = [];
   private prebuffer: Float32Array[] = [];
   private prebufferSamples = 0;
@@ -41,6 +43,11 @@ export class VoiceEngine {
   private muted = false;
   private turnAudio = false;
   private finishing = false;
+  private deferredAudio: Float32Array[] = [];
+  private deferredSamples = 0;
+  private deferredOnset = false;
+  private deferredEndpoint = false;
+  private playbackGeneration = 0;
   private outputActive = false;
   private responseOpen = false;
   private wakeLock?: { release(): Promise<void> };
@@ -155,14 +162,34 @@ export class VoiceEngine {
           else this.captureFailure('Speech detection stopped. Review your draft before restarting.');
         } else if (event.data.type === 'signal') {
           this.vadPending = Math.max(0, this.vadPending - 1);
+          this.vadProcessed = Math.max(this.vadProcessed, event.data.sequence);
+          if (this.vadFence && this.vadProcessed >= this.vadFence.sequence) {
+            clearTimeout(this.vadFence.timeout); this.vadFence.resolve(); this.vadFence = undefined;
+          }
           if (this.muted || !this.ready || event.data.sequence < this.vadIgnoreBefore) return;
           this.callbacks.onSignal(event.data.signal as AcousticSignal);
-          if (event.data.transition === 'start') this.speechStarted();
-          else if (event.data.transition === 'end' && this.recognizer?.capabilities.endpointing === 'local-vad' && this.preferences?.handsFree && this.turnAudio) void this.finish();
+          if (event.data.transition === 'start') {
+            if (this.finishing) { this.deferredOnset = true; this.deferredEndpoint = false; }
+            else this.speechStarted();
+          } else if (event.data.transition === 'end' && this.recognizer?.capabilities.endpointing === 'local-vad' && this.preferences?.handsFree) {
+            if (this.finishing && this.deferredOnset) this.deferredEndpoint = true;
+            else if (this.turnAudio) void this.finish('automatic');
+          }
         }
       };
       worker.onerror = () => { clearTimeout(timeout); if (!ready) reject(new Error('Speech detector could not load.')); else this.captureFailure('Speech detector stopped.'); };
       worker.postMessage({ type: 'init' });
+    });
+  }
+  private waitForVad(): Promise<void> {
+    const sequence = this.vadSequence - 1;
+    if (!this.vad || this.vadProcessed >= sequence) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.vadFence = undefined;
+        reject(new Error('Speech detection did not confirm the turn boundary in time. Review the draft before restarting.'));
+      }, 600);
+      this.vadFence = { sequence, resolve, reject, timeout };
     });
   }
   private acceptsInput() { return this.active && !this.gap && !this.muted && !this.finishing && (this.phase === 'listening' || this.phase === 'hearing' || Boolean(this.preferences?.handsFree && this.recognizer?.capabilities.handsFree)); }
@@ -176,6 +203,11 @@ export class VoiceEngine {
         if (this.vadPending >= 12) { this.trace.record('backpressure', { reason: 'vad-backlog', pendingFrames: this.vadPending }); this.captureFailure('This device could not keep up with speech detection. Nothing incomplete was sent.'); return; }
         this.vadPending++; this.vad!.postMessage({ type: 'frame', samples: frame, sequence: this.vadSequence++ }, [frame.buffer]);
       }
+    }
+    if (this.finishing && !this.gap && this.preferences?.handsFree && this.recognizer?.capabilities.input === 'pcm16k') {
+      if (this.deferredSamples + samples.length > 64000) { this.captureFailure('Speech finalization fell behind. Your complete draft is preserved; review it before restarting.'); return; }
+      this.deferredAudio.push(samples.slice()); this.deferredSamples += samples.length;
+      return;
     }
     if (!this.acceptsInput()) return;
     this.prebuffer.push(samples.slice()); this.prebufferSamples += samples.length;
@@ -198,7 +230,7 @@ export class VoiceEngine {
     const events: RecognizerEvents = {
       result: (result) => {
         if (generation !== this.generation || !this.active || this.gap || this.muted) return;
-        if (result.started && this.preferences?.handsFree && (this.outputActive || this.responseOpen)) this.interrupt();
+        if (result.started && this.preferences?.handsFree) this.speechStarted();
         this.callbacks.onDraft(this.transcript.update(result.text, result.final));
         if (result.text && !this.finishing) this.setPhase('hearing');
         if (result.turnComplete && !this.finishing && this.preferences?.handsFree) {
@@ -226,18 +258,40 @@ export class VoiceEngine {
     if (this.preferences!.recognition === 'vosk') return new LocalRecognizer(events);
     return new FluxRecognizer(this.conversationId, events);
   }
-  async finish(): Promise<void> {
+  async finish(source: 'manual' | 'automatic' = 'manual'): Promise<void> {
     if (this.finishing || !this.preferences || this.gap) { if (this.gap) this.callbacks.onNotice('Recording was interrupted. Review or edit the draft and send it as text.'); return; }
     const generation = this.generation; this.finishing = true; this.setPhase('finalizing');
+    this.deferredAudio = []; this.deferredSamples = 0; this.deferredOnset = false; this.deferredEndpoint = false;
     const requestedAt = performance.now(); this.trace.record('endpoint-request', { provider: this.preferences.recognition });
     try {
       await this.recognizer?.finish();
-      if (generation === this.generation) {
-        this.trace.record('endpoint-ready', { provider: this.preferences.recognition, durationMs: performance.now() - requestedAt }); this.commit();
+      // Recognition and VAD use different workers. Fence the VAD frames that
+      // existed at the final ACK before deciding whether speech has resumed.
+      // The fixed sequence prevents a continuously moving capture tail.
+      if (generation === this.generation && source === 'automatic' && this.recognizer?.capabilities.endpointing === 'local-vad') await this.waitForVad();
+      if (generation === this.generation && this.active && !this.gap && !this.muted) {
+        this.trace.record('endpoint-ready', { provider: this.preferences.recognition, durationMs: performance.now() - requestedAt });
+        const continued = this.deferredOnset;
+        const ended = this.deferredEndpoint;
+        const buffered = this.deferredAudio;
+        // A local silence endpoint is still tentative while recognition drains.
+        // If speech resumes before acknowledgement, keep the stable words and
+        // continue the same thought instead of submitting a premature prefix.
+        if (source !== 'automatic' || !continued) this.commit();
+        this.finishing = false; this.turnAudio = false;
+        this.prebuffer = buffered; this.prebufferSamples = this.deferredSamples;
+        this.deferredAudio = []; this.deferredSamples = 0; this.deferredOnset = false; this.deferredEndpoint = false;
+        if (this.recognizer?.capabilities.endpointing === 'provider-turn') for (const frame of buffered) this.recognizer.push(frame);
+        if (continued) {
+          this.speechStarted();
+          if (ended) void this.finish('automatic');
+        } else {
+          while (this.prebufferSamples > 8000 && this.prebuffer.length > 1) this.prebufferSamples -= this.prebuffer.shift()!.length;
+        }
       }
     } catch (error) {
-      if (generation === this.generation) { this.gap = true; this.setPhase('paused'); this.callbacks.onNotice(error instanceof Error ? error.message : String(error)); }
-    } finally { if (generation === this.generation) this.finishing = false; }
+      if (generation === this.generation) this.captureFailure(error instanceof Error ? error.message : String(error));
+    } finally { if (generation === this.generation && this.phase !== 'finalizing') this.finishing = false; }
   }
   private commit() {
     clearTimeout(this.maxTurnTimer); this.turnAudio = false; this.prebuffer = []; this.prebufferSamples = 0;
@@ -273,12 +327,14 @@ export class VoiceEngine {
     clearTimeout(this.maxTurnTimer); this.recognizer?.stop(); this.recognizer = undefined;
     this.closeCapture();
     this.prebuffer = []; this.prebufferSamples = 0; this.analysisBuffer = []; this.turnAudio = false;
+    this.deferredAudio = []; this.deferredSamples = 0; this.deferredOnset = false; this.deferredEndpoint = false;
     void this.wakeLock?.release().catch(() => {}); this.wakeLock = undefined;
     this.callbacks.onSignal({ energy: 0, speechProbability: 0, noiseFloor: 0, pitch: null, confidence: 0 });
     if (!this.outputActive && !this.responseOpen) this.setPhase('off');
   }
   private closeCapture() {
     this.lastCaptureAt = 0;
+    if (this.vadFence) { clearTimeout(this.vadFence.timeout); this.vadFence.reject(new Error('Capture stopped before the turn boundary was confirmed.')); this.vadFence = undefined; }
     this.vad?.terminate(); this.vad = undefined; this.vadPending = 0;
     this.worklet?.disconnect(); this.worklet = undefined; this.source?.disconnect(); this.source = undefined;
     this.stream?.getTracks().forEach((track) => { track.onended = null; track.onmute = null; track.stop(); }); this.stream = undefined;
@@ -291,11 +347,12 @@ export class VoiceEngine {
   }
   private enqueue(text: string) {
     if (!this.output) {
+      const playbackGeneration = ++this.playbackGeneration;
       this.outputRequestedAt = performance.now();
       const events = {
-        started: () => { this.outputActive = true; this.outputStartedAt = performance.now(); this.trace.record('output-start', { provider: this.preferences?.output, durationMs: this.outputStartedAt - this.outputRequestedAt }); this.setPhase('speaking'); },
-        ended: () => { this.outputActive = false; this.trace.record('output-end', { provider: this.preferences?.output, durationMs: this.outputStartedAt ? performance.now() - this.outputStartedAt : 0 }); if (!this.responseOpen) { this.output?.dispose(); this.output = undefined; this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); } },
-        error: (message: string) => this.callbacks.onNotice(message),
+        started: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = true; this.outputStartedAt = performance.now(); this.trace.record('output-start', { provider: this.preferences?.output, durationMs: this.outputStartedAt - this.outputRequestedAt }); this.setPhase('speaking'); },
+        ended: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = false; this.trace.record('output-end', { provider: this.preferences?.output, durationMs: this.outputStartedAt ? performance.now() - this.outputStartedAt : 0 }); if (!this.responseOpen) { this.output?.dispose(); this.output = undefined; this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); } },
+        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) this.callbacks.onNotice(message); },
       };
       this.output = this.preferences!.output === 'deepgram'
         ? new PremiumOutput(this.warmContext(), this.conversationId, this.preferences!.premiumVoice, events)
@@ -310,6 +367,7 @@ export class VoiceEngine {
     else this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off');
   }
   interrupt() {
+    ++this.playbackGeneration;
     const pending = this.outputActive || this.responseOpen || Boolean(this.output);
     const requestedAt = performance.now();
     this.output?.cancel(); this.output?.dispose(); this.output = undefined;
@@ -334,7 +392,7 @@ export class VoiceEngine {
     if (this.active && this.recognizer?.capabilities.processing !== 'local') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.');
   };
   dispose() {
-    this.disposed = true; this.stop(); this.output?.dispose(); this.output = undefined;
+    this.disposed = true; ++this.playbackGeneration; this.stop(); this.output?.dispose(); this.output = undefined;
     void this.context?.close().catch(() => {}); this.context = undefined;
     document.removeEventListener('visibilitychange', this.visibility); window.removeEventListener('offline', this.offline);
   }

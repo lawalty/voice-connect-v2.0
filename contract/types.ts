@@ -7,10 +7,12 @@ export interface SpeechPreferences {
   browserVoice: string;
   premiumVoice: string;
   handsFree: boolean;
+  /** Remember an explicit manual-turn choice when switching recognizers. */
+  turnMode?: 'automatic' | 'manual';
   keepAwake: boolean;
 }
 export const DEFAULT_SPEECH: SpeechPreferences = {
-  recognition: 'browser', output: 'browser', browserVoice: '', premiumVoice: 'flux-haley-en', handsFree: false, keepAwake: true,
+  recognition: 'vosk', output: 'browser', browserVoice: '', premiumVoice: 'flux-haley-en', handsFree: true, turnMode: 'automatic', keepAwake: true,
 };
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }
 export interface HarnessCapabilities { connected: boolean; images: boolean; cancellation: boolean; approvals: boolean; version: string; reason?: string; }

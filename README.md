@@ -10,14 +10,26 @@ requirements and failure lessons only. See [architecture decisions](docs/DECISIO
 
 ## Speech
 
+The primary flow is continuous conversation: complete the one-time local recognition
+setup, press **Start** once, speak, and pause. Voice activity detection closes the
+utterance automatically, the assistant replies, and listening resumes for your next
+turn. **Finish** is an optional way to deliberately end a turn, not a required step
+after every utterance.
+
+Fresh devices default to Vosk with hands-free conversation enabled. The approximately
+40 MB recognition download requires an explicit setup action. Previously saved
+provider and manual-mode preferences remain in effect; the visible local setup
+action lets you opt into the continuous flow without discarding those preferences.
+
 Recognition and speech output are independent, per-device preferences:
 
-- **Browser recognition:** quick start where supported. The browser may use an
-  online speech service. Tap-to-talk with explicit Finish is the safe default;
-  continuous recognition and interruption depend on the browser/audio route.
-- **Vosk:** downloadable, hash-verified English recognition on your device.
+- **Vosk:** default recognition for continuous conversation, with downloadable,
+  hash-verified English recognition on your device.
   Approximately 40 MB download; runtime memory is substantially larger. No raw
   microphone audio goes to the application server in this mode.
+- **Browser recognition:** a manual fallback where supported, with explicit Finish
+  available. The browser may use an online speech service; continuous recognition
+  and interruption vary with the browser and audio route.
 - **Deepgram Flux:** optional paid recognition and speech output through the
   authenticated server. Requires a credential in Settings. No silent fallback.
 - **Browser speech:** default output, with local voices preferred when available.
@@ -25,8 +37,14 @@ Recognition and speech output are independent, per-device preferences:
 Local acoustic measurements move the orb; they do not establish emotions or enter
 agent memory. The app requests echo cancellation/noise suppression. A Silero model
 and recognition progress inform local turn detection; loudness alone cannot commit
-a turn. OpenClaw always requires connectivity. Android support is foreground-first;
+a turn. Automatic boundaries estimate pauses in speech, not whether you have finished
+a thought; a pause within a sentence can still end a turn. OpenClaw always requires
+connectivity. Android support is foreground-first;
 locked-screen and background capture are not guaranteed.
+
+Physical echo rejection, interruption during speaker playback, and reliable turn
+boundaries in a noisy car remain unqualified. Browser fixtures cannot establish
+those real-device results.
 
 ## Development
 

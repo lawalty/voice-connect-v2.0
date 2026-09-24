@@ -15,6 +15,8 @@ async function enterPrivateSpace(page:Page,context:BrowserContext){
 
 async function useNativeSpeechFixture(page:Page){
   await page.addInitScript(()=>{
+    // This fixture deliberately exercises the supported browser fallback, not the new-device default.
+    localStorage.setItem('vc2:speech',JSON.stringify({recognition:'browser',output:'browser',handsFree:false}));
     class NativeSpeechFixture{
       onstart?:()=>void;onend?:()=>void;onresult?:(event:unknown)=>void;aborted=false;
       start(){(window as unknown as {vcTestSpeech:NativeSpeechFixture}).vcTestSpeech=this;queueMicrotask(()=>this.onstart?.());}
@@ -36,27 +38,40 @@ test('production security headers allow isolated local recognition without permi
     const capture=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     navigator.mediaDevices.getUserMedia=async constraints=>{const stream=await capture(constraints);tracks.push(...stream.getAudioTracks());return stream;};
   });
-  const errors:string[]=[],submissions:string[]=[];
+  const errors:string[]=[],submissions:string[]=[],downloads:string[]=[];
   page.on('pageerror',e=>errors.push(e.message));
-  page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/turns'))submissions.push(r.url());});
+  page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/turns'))submissions.push(r.url());if(r.url().endsWith('/models/vosk-en-us-0.15.tar.gz.bin'))downloads.push(r.url());});
   const response=await enterPrivateSpace(page,context);
   expect(response!.headers()['content-security-policy']).not.toContain("'unsafe-eval'");
-  await page.getByRole('button',{name:'Open settings'}).click();
-  await page.getByRole('button',{name:/On this device/}).click();
-  await page.getByRole('button',{name:'Download',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Remove',exact:true})).toBeVisible({timeout:60000});
-  await page.getByRole('button',{name:'Save preferences'}).click();
   const composer=page.getByRole('textbox',{name:'Message NorthPointe'});
   await composer.fill('Keep my existing text draft.');
   const conversation=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
+  expect(downloads).toEqual([]);
   await page.getByRole('button',{name:'Start talking'}).click();
+  const setup=page.getByRole('dialog',{name:'A conversation that keeps listening'});
+  await expect(setup).toBeVisible();
+  expect(downloads).toEqual([]);
+  expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.length)).toBe(0);
+  await setup.getByRole('button',{name:'Download English model · 40 MB',exact:true}).click();
+  await expect(setup.getByRole('button',{name:'Start talking',exact:true})).toBeEnabled({timeout:60000});
+  expect(downloads).toHaveLength(1);
+  expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.length)).toBe(0);
+  await page.screenshot({path:info.outputPath('voice-setup.png'),fullPage:true});
+  await setup.getByRole('button',{name:'Start talking',exact:true}).click();
   await expect(page.getByText('Listening to you',{exact:true})).toBeVisible({timeout:90000});
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('vc2:speech')!))).toMatchObject({recognition:'vosk',handsFree:true,turnMode:'automatic'});
   expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.some(track=>track.readyState==='live'))).toBe(true);
   await composer.focus();
   await expect(composer).toHaveValue('Keep my existing text draft.');
   await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
   expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.every(track=>track.readyState==='ended'))).toBe(true);
   expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(conversation);
+  await page.getByRole('button',{name:'Open settings'}).click();
+  await page.getByRole('checkbox',{name:/Hands-free turns/}).uncheck();
+  await page.getByRole('button',{name:'Save preferences',exact:true}).click();
+  await page.getByRole('button',{name:'Use automatic turns',exact:true}).click();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('vc2:speech')!))).toMatchObject({recognition:'vosk',handsFree:true,turnMode:'automatic'});
+  expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.every(track=>track.readyState==='ended'))).toBe(true);
   // Let any queued local endpoint arrive: typing must not leave a recognizer capable of sending it.
   await page.waitForTimeout(1500);
   await page.getByRole('button',{name:'Open settings'}).click();
@@ -75,6 +90,13 @@ for(const handoff of ['composer focus','Edit as text','direct Send'] as const){
     const submissions:{url:string;text:string}[]=[];
     page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/turns'))submissions.push({url:request.url(),text:request.postDataJSON().text});});
     await enterPrivateSpace(page,context);
+    await expect(page.getByRole('button',{name:'Set up continuous voice',exact:true})).toBeVisible();
+    if(handoff==='composer focus'){
+      await page.getByRole('button',{name:'Set up continuous voice',exact:true}).click();
+      await expect(page.getByRole('dialog',{name:'A conversation that keeps listening'})).toBeVisible();
+      await page.keyboard.press('Escape');
+      expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('vc2:speech')!))).toMatchObject({recognition:'browser',handsFree:false});
+    }
     const conversation=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
     const composer=page.getByRole('textbox',{name:'Message NorthPointe'});
     await composer.fill('An existing typed thought.');
@@ -125,8 +147,19 @@ for(const source of ['voice','text'] as const){
     try{
       await page.getByRole('button',{name:source==='voice'?'Finish thought':'Send message',exact:true}).click();
       await admitted;
+      if(source==='voice'){
+        await page.getByRole('button',{name:'End voice session',exact:true}).click();
+        await page.getByRole('button',{name:'Start talking',exact:true}).click();
+        await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
+        await page.evaluate(()=>(window as unknown as {vcTestSpeech:{emit(text:string):void}}).vcTestSpeech.emit('A second completed thought.'));
+        await page.getByRole('button',{name:'Finish thought',exact:true}).click();
+        await expect(page.getByRole('button',{name:'Start talking',exact:true})).toBeEnabled();
+        await expect(page.getByText(/Your next thought is kept in the composer/)).toBeVisible();
+        expect(submissions).toHaveLength(1);
+        expect(await page.evaluate(()=>(window as unknown as {vcTestSpeech:{aborted:boolean}}).vcTestSpeech.aborted)).toBe(true);
+      }
       await composer.focus();
-      await expect(composer).toHaveValue(source==='voice'?'An earlier typed draft.':'An earlier typed draft.\nA complete spoken turn.');
+      await expect(composer).toHaveValue(source==='voice'?'An earlier typed draft.\nA second completed thought.':'An earlier typed draft.\nA complete spoken turn.');
       await composer.fill('New words typed while the receipt is delayed.');
       const received=page.waitForResponse(response=>response.url().endsWith('/turns')&&response.request().method()==='POST');
       releaseReceipt();await received;

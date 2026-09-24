@@ -82,6 +82,62 @@ try {
   assert.equal(startup.documentVosk, false, 'legacy Vosk binding never enters the application document');
   console.log('Real capture + Silero/Vosk startup passed', JSON.stringify(startup));
 
+  // Real Vosk + Silero + capture Worklet exercise two automatic turns. Inject a
+  // MediaStream from the public WAV rather than using a physical microphone.
+  // Only synthesis is simulated: no claim about speakers, AEC or audible delay.
+  const continuous = await page.evaluate(async (bytes) => {
+    const { VoiceEngine } = await import('/audio/engine.ts');
+    const sourceAudio = new AudioContext(), destination = sourceAudio.createMediaStreamDestination();
+    const decoded = await sourceAudio.decodeAudioData(Uint8Array.from(bytes).buffer);
+    const phrase = sourceAudio.createBuffer(1, Math.floor(3.5 * decoded.sampleRate), decoded.sampleRate);
+    phrase.copyToChannel(decoded.getChannelData(0).subarray(0, phrase.length), 0);
+    const originalCapture = Object.getOwnPropertyDescriptor(navigator.mediaDevices, 'getUserMedia');
+    const originalSynthesis = Object.getOwnPropertyDescriptor(window, 'speechSynthesis');
+    let captureCalls = 0, outputStarts = 0, outputEnds = 0, outputTimer;
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => { captureCalls++; return destination.stream; } });
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
+      getVoices: () => [], cancel: () => clearTimeout(outputTimer),
+      speak: (utterance) => {
+        outputStarts++; queueMicrotask(() => utterance.onstart?.(new Event('start')));
+        outputTimer = setTimeout(() => { outputEnds++; utterance.onend?.(new Event('end')); }, 150);
+      },
+    } });
+    const phases = [], turns = [], errors = [], notices = []; let signals = 0;
+    const engine = new VoiceEngine({ onPhase: (phase) => phases.push(phase), onDraft() {}, onTurn: (text) => turns.push(text), onSignal: () => signals++, onError: (message) => errors.push(message), onInterrupt() {}, onNotice: (message) => notices.push(message) });
+    const waitFor = async (predicate, label) => {
+      const deadline = performance.now() + 15000;
+      while (!predicate()) {
+        if (performance.now() > deadline || errors.length || phases.at(-1) === 'paused') throw new Error(`${label}: ${JSON.stringify({ phases, turns, errors, notices })}`);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      }
+    };
+    try {
+      await sourceAudio.resume();
+      await engine.start({ recognition: 'vosk', output: 'browser', browserVoice: '', premiumVoice: 'flux-haley-en', handsFree: true, keepAwake: false }, 'automatic-runtime-check');
+      if (phases.at(-1) !== 'listening') throw new Error(`Automatic voice did not start: ${errors.join('; ')}`);
+      for (let index = 0; index < 2; index++) {
+        const source = sourceAudio.createBufferSource(); source.buffer = phrase; source.connect(destination); source.start();
+        await waitFor(() => turns.length > index, 'Automatic silence endpoint did not submit');
+        engine.speak('Synthetic streamed '); engine.speak('reply.'); engine.responseDone();
+        await waitFor(() => outputEnds > index && phases.at(-1) === 'listening', 'Playback did not rearm listening');
+        source.disconnect();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      return { phases: [...phases], turns: [...turns], errors: [...errors], captureCalls, outputStarts, outputEnds, signals };
+    } finally {
+      engine.dispose(); await sourceAudio.close();
+      if (originalCapture) Object.defineProperty(navigator.mediaDevices, 'getUserMedia', originalCapture); else delete navigator.mediaDevices.getUserMedia;
+      if (originalSynthesis) Object.defineProperty(window, 'speechSynthesis', originalSynthesis); else delete window.speechSynthesis;
+    }
+  }, Array.from(fixture));
+  assert.deepEqual(continuous.errors, []);
+  assert.deepEqual(continuous.turns, ['one zero zero zero one', 'one zero zero zero one']);
+  assert.equal(continuous.captureCalls, 1, 'one capture session spans both automatic turns');
+  assert.equal(continuous.outputStarts, 2); assert.equal(continuous.outputEnds, 2);
+  assert.equal(continuous.phases.filter((phase) => phase === 'finalizing').length, 2);
+  assert.equal(continuous.phases.at(-1), 'listening');
+  console.log('Real automatic VAD two-turn capture + recognition passed; synthesis callbacks simulated:', JSON.stringify(continuous));
+
   // The runtime has already been loaded; prove recognizer reinitialization uses cached
   // archive bytes without downloading audio or depending on a network speech API.
   await context.setOffline(true);

@@ -1,13 +1,13 @@
 # Audio qualification
 
-Measured on September 24, 2026 with the repository's pinned dependencies, Windows host, headless Playwright Chromium, and a fake microphone. These results qualify the implementation and browser WASM integration; they do **not** qualify a physical Android phone, car, Bluetooth route, speaker echo cancellation, or production speech-provider account.
+Measured on September 24, 2026 with the repository's pinned dependencies, Windows host, headless Playwright Chromium, and synthetic capture. These results qualify the implementation and browser WASM integration; they do **not** qualify a physical Android phone, car, Bluetooth route, speaker echo cancellation, or production speech-provider account.
 
 ## Reproduce
 
 ```sh
 npm run prepare:assets
 npm run check
-npx vitest run checks/audio.test.ts checks/audio-output.test.ts checks/audio-scenarios.test.ts checks/audio-adapters.test.ts checks/audio-diagnostics.test.ts checks/audio-vosk-broker.test.ts
+npx vitest run checks/audio.test.ts checks/audio-output.test.ts checks/audio-scenarios.test.ts checks/audio-adapters.test.ts checks/audio-continuous.test.ts checks/audio-diagnostics.test.ts checks/audio-vosk-broker.test.ts
 node checks/audio-browser.mjs
 ```
 
@@ -15,8 +15,9 @@ The browser check starts its own Vite server on `127.0.0.1:5192`. It downloads t
 
 ## Proven results
 
-- TypeScript and production Vite build pass. Twenty-seven deterministic tests cover streaming resampling across block boundaries, signed PCM encoding, noise-floor adaptation, speech hysteresis, evidence-only acoustic signals, coherent transcript accumulation, unresolved-tail rejection, cumulative speech snapshots, final sentence flushing, cancellation of late native/provider playback callbacks, independent recognizer lifecycle races, broker drain/final acknowledgements, diagnostics privacy/bounds, and the annotated scenario replays below.
+- TypeScript and production Vite build pass. Thirty-seven deterministic tests cover streaming resampling across block boundaries, signed PCM encoding, noise-floor adaptation, speech hysteresis, evidence-only acoustic signals, coherent transcript accumulation, unresolved-tail rejection, cumulative speech snapshots, final sentence flushing, cancellation of late native/provider playback callbacks, independent recognizer lifecycle races, broker drain/final acknowledgements, diagnostics privacy/bounds, continuous automatic turns, and the annotated scenario replays below.
 - Real Chromium loaded the verified 41,706,199-byte Vosk archive, initialized its WASM recognizer and the Silero ONNX worker, captured through `AudioWorklet`, and reached listening only after both engines were ready. A 1.2-second silent capture produced 39–40 signal callbacks across successful runs and no submitted turn. Callback count includes lifecycle signals; it is not a latency benchmark.
+- Real Chromium also passed **two automatic turns in one capture session, with no Finish call**. An `AudioContext` played the first 3.5 seconds of the public WAV into a `MediaStreamAudioDestinationNode` supplied to `getUserMedia`. Real capture Worklet, Silero inference, Vosk recognition, and `VoiceEngine` produced `one zero zero zero one` once per turn, then returned to listening after each streamed synthetic reply. There were two finalizations, two submitted turns, one capture acquisition, and no engine errors. Browser synthesis start/end callbacks were simulated; this checks playback lifecycle integration, not audible output or acoustic echo cancellation.
 - With browser network access disabled after the first initialization, a new Vosk recognizer loaded the cached archive and transcribed the official WAV. Actual result: `one zero zero zero one nah no to i know zero one eight zero three`. The first and last number sequences are asserted. The middle substitutions remain visible: this is a functional test, not an accuracy claim.
 - Removing the downloaded model cleared its verified archive cache and Vosk's extracted `/vosk` IndexedDB database. Conversation storage is untouched.
 
@@ -42,12 +43,18 @@ Both seeded replays run the production noise estimator, turn detector, and trans
 
 These are acoustic-feature fixtures with supplied RMS levels, speech probabilities, and transcript segments. They test boundary policy and accumulation under known evidence; they do **not** measure Silero's real-noise classification, STT hallucinations, semantic completeness, physical cancellation latency, or noisy-car accuracy. The fixture intentionally does not claim that longer thinking pauses or sustained classifier false positives are solved. Cancellation checks prove synchronous call ordering and stale-generation rejection, not a measured microphone-to-speaker delay.
 
+### Continuous-turn races
+
+Nine deterministic `VoiceEngine` tests exercise automatic local endpoints and premium provider endpoints without a Finish action. They verify two complete turns on one capture session, return to listening after output, one callback per complete provider turn, no submission of provider partials, and preservation of words spoken during interruption. Late playback callbacks cannot overwrite the next listening/hearing state or reactivate a disposed engine.
+
+Local finalization now retains up to four seconds of PCM while the recognizer drains and acknowledges. If speech resumes before that boundary is confirmed, it retains the stable transcript and replays the buffered continuation into the fresh recognizer, producing one complete turn. Recognition and VAD acknowledgements come from separate workers: automatic finalization therefore fences the fixed VAD sequence already submitted at recognition acknowledgement, with a 600 ms limit, before deciding whether speech resumed. Tests explicitly deliver recognition acknowledgement before the delayed VAD onset. A missing VAD acknowledgement, capture stop, or mute cannot send the draft; timeout pauses capture for review. This is a bounded race fix, not semantic endpoint detection or a guarantee for arbitrarily long thinking pauses.
+
 ## Supported paths and deliberate limits
 
 | Selection | Behavior and qualification limit |
 | --- | --- |
 | Browser recognition + either output | Tap-to-talk. The browser may process audio through its vendor. Native recording duration, availability, concurrent microphone capture, and audio-track input differ by browser. Unexpected native end preserves the draft for explicit send; it never blindly restarts or submits a partial. If microphone sharing fails, the next attempt disables the independent visualizer. |
-| Local Vosk + either output | Explicit model download; browser WASM, 16 kHz mono input, worker recognition, local Silero VAD, noise adaptation, bounded onset prebuffer. Recognizer endpoints accumulate into one application turn. Hands-free uses a 900 ms silence candidate after speech detection. This does not prove semantic completeness or noisy-car accuracy. |
+| Local Vosk + either output | Explicit model download; browser WASM, 16 kHz mono input, worker recognition, local Silero VAD, noise adaptation, bounded onset prebuffer. Automatic conversation uses a 900 ms silence candidate after speech detection, finalized recognition, and a bounded VAD fence. Recognition segments accumulate into one application turn. Capture stays available through thinking/playback and rearms after output; no repeated Finish action is required. This does not prove semantic completeness or noisy-car accuracy. |
 | Deepgram recognition + either output | Same controlled microphone capture; 16 kHz PCM in 80 ms WebSocket frames through the authenticated server. Provider end-of-turn events can commit in hands-free mode; manual mode retains segments until Finish. Only protocol and local lifecycle behavior are tested without a provider key. Live quality, availability, latency, billing, and current account entitlement remain unverified. |
 | Browser output | Sentence-sized native utterances; cancellation is immediate locally. Native voices expose no PCM, dependable acoustic echo reference, or uniformly reliable word timing. No synthetic playback measurements are presented as real acoustic evidence. |
 | Deepgram output | PCM playback at the provider's declared sample rate, local source cancellation before the network interrupt, bounded buffering, and generation guards that reject late audio. No live premium voice was used in these tests. |

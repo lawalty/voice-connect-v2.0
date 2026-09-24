@@ -13,6 +13,7 @@ export class FluxRecognizer implements SpeechRecognizer {
   private generation = 0;
   private samples: number[] = [];
   private turnOpen = false;
+  private awaitingNextTurn = false;
   private pendingFinish?: Promise<void>;
   private finishResolve?: () => void;
   private finishReject?: (error: Error) => void;
@@ -35,6 +36,8 @@ export class FluxRecognizer implements SpeechRecognizer {
           clearTimeout(this.startTimer); this.startReject = undefined; this.ready = true; resolve();
         } else if (event.type === 'error') this.fail(event.message);
         else if (event.type === 'stt') {
+          if (event.final && this.awaitingNextTurn && !event.started) return;
+          this.awaitingNextTurn = event.final;
           this.turnOpen = !event.final;
           this.events.result(event);
           if (event.turnComplete) {
@@ -83,6 +86,6 @@ export class FluxRecognizer implements SpeechRecognizer {
     this.startReject?.(new Error('Premium speech startup stopped.')); this.startReject = undefined;
     this.finishReject?.(new Error('Premium speech stopped before finalization.')); this.finishReject = undefined; this.finishResolve = undefined;
     this.pendingFinish = undefined;
-    this.socket?.close(); this.socket = undefined; this.samples = []; this.turnOpen = false;
+    this.socket?.close(); this.socket = undefined; this.samples = []; this.turnOpen = false; this.awaitingNextTurn = false;
   }
 }

@@ -6,7 +6,7 @@ prompts, implementation structures, or file layouts were imported from them.
 
 ## Requirements learned from history
 
-- Recognition segments are not conversational turns. Never invoke tools for a partial thought.
+- Recognition segments are not conversational turns. Buffer fragments into a committed utterance before invoking the agent; acoustic pauses cannot prove a thought is complete.
 - Local audible cancellation precedes network cancellation. Both need durable ownership.
 - Readiness, generated text, agent completion, and finished playback are different events.
 - Voice, text, and camera share an authoritative harness conversation.
@@ -26,10 +26,25 @@ OpenClaw connector. OpenClaw owns reasoning, tools, persona, and canonical histo
 SQLite is not a second conversational memory and is never used to reconstruct a
 parallel LLM context.
 
-Browser STT provides quick start. Vosk offers downloadable local recognition.
+Vosk with hands-free mode is the default for fresh devices. Its approximately 40 MB
+local recognition download requires an explicit one-time setup action. The primary
+interaction is one Start, followed by speaking and pausing to send a turn, hearing
+the assistant, and speaking again when listening resumes. Finish remains an optional
+override. Browser recognition remains a manual fallback; it is not the default
+conversation design. Existing saved browser or manual preferences are preserved,
+with a visible local setup action for switching to the continuous flow.
+
 Deepgram is opt-in premium recognition and synthesis. Provider changes never happen
 silently and do not create a new conversation. The UI discloses browser/vendor speech
 processing. OpenClaw connectivity remains necessary even when Vosk can recognize offline.
+
+Automatic turn closure combines acoustic speech/silence evidence with recognition
+progress. It estimates an utterance boundary rather than inferring semantic intent:
+a person can pause before finishing a sentence. Interruption must stop local playback
+before awaiting network cancellation, but echo rejection, barge-in through physical
+speakers or Bluetooth, and noisy-car turn timing still require real-device acceptance.
+Enabling hands-free by default is a product interaction choice, not evidence that
+those physical audio conditions have been qualified.
 
 HTTPS/WSS is the selected initial transport: most speech modes send only text to our
 server. Separate audio sockets keep audio backpressure away from control messages.

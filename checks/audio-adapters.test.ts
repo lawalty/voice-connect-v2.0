@@ -97,6 +97,21 @@ describe('independent Flux recognition adapter', () => {
     socket.event({ type: 'stt', text: 'late words', final: true, turnComplete: true });
     expect(callbacks.result).not.toHaveBeenCalled();
   });
+  it('ignores duplicate final endpoints and accepts the next provider-started turn without reconnecting', async () => {
+    const sockets = socketFixture(), callbacks = events(), recognizer = new FluxRecognizer('conversation', callbacks);
+    const started = recognizer.start(), socket = sockets[0]!;
+    socket.event({ type: 'ready', sampleRate: 16000 }); await started;
+    for (const text of ['First complete thought.', 'Second complete thought.']) {
+      socket.event({ type: 'stt', text: '', final: false, turnComplete: false, started: true });
+      socket.event({ type: 'stt', text, final: false, turnComplete: false });
+      socket.event({ type: 'stt', text, final: true, turnComplete: true });
+      socket.event({ type: 'stt', text, final: true, turnComplete: true });
+    }
+    expect(vi.mocked(callbacks.result).mock.calls.filter(([result]) => result.turnComplete).map(([result]) => result.text))
+      .toEqual(['First complete thought.', 'Second complete thought.']);
+    expect(recognizer.running).toBe(true); expect(sockets).toHaveLength(1);
+    recognizer.stop();
+  });
   it('preserves startup failure reasons and rejects an unsupported negotiated sample rate', async () => {
     const sockets = socketFixture(), recognizer = new FluxRecognizer('conversation', events());
     const assertion = expect(recognizer.start()).rejects.toThrow('unsupported audio rate');

@@ -22,7 +22,15 @@ test('private entry, continuous text conversation, and refresh preserve history'
   await page.getByRole('button',{name:'Send message',exact:true}).click();
   if(info.project.name==='android-layout')await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await expect(page.getByText('Your second message is in the same conversation.',{exact:true})).toBeVisible();
-  await page.reload();
+  let releaseHistory=()=>{};
+  const historyReady=new Promise<void>(resolve=>{releaseHistory=resolve;});
+  await page.route('**/api/conversations',async route=>{const response=await route.fetch();await historyReady;await route.fulfill({response});},{times:1});
+  try{
+    await page.reload();
+    await expect(page.getByLabel('Message NorthPointe')).toBeDisabled();
+    await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
+    await expect(page.getByRole('button',{name:'Attach a camera photo',exact:true})).toBeDisabled();
+  }finally{releaseHistory();}
   await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
   if(info.project.name==='android-layout')await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await expect(page.getByRole('log',{name:'Messages'}).getByText('A browser acceptance thought.',{exact:true})).toBeVisible();
@@ -63,12 +71,25 @@ test('settings disclose speech processing and preserve the active conversation',
   await signIn(page);
   const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
   await page.getByRole('button',{name:'Open settings'}).click();
+  await expect(page.getByRole('button',{name:/On this device/})).toHaveClass(/selected/);
+  const automatic=page.getByRole('checkbox',{name:/Hands-free turns/});
+  await expect(automatic).toBeChecked();
+  await page.getByRole('button',{name:/Browser fallback/}).click();
+  await expect(automatic).toBeDisabled();
+  await expect(automatic).not.toBeChecked();
   await expect(page.getByText(/may send microphone audio to its vendor/)).toBeVisible();
   await page.getByRole('button',{name:/On this device/}).click();
+  await expect(automatic).toBeChecked();
   await expect(page.getByRole('button',{name:'Download',exact:true})).toBeVisible();
   await page.getByRole('button',{name:/Premium Deepgram Flux/}).click();
+  await expect(automatic).toBeChecked();
   await expect(page.getByText(/Audio is streamed to Deepgram/)).toBeVisible();
   await expect(page.getByRole('button',{name:'Save preferences'})).toBeDisabled();
+  await automatic.uncheck();
+  await page.getByRole('button',{name:/On this device/}).click();
+  await expect(automatic).not.toBeChecked();
+  await page.getByRole('button',{name:/Premium Deepgram Flux/}).click();
+  await expect(automatic).not.toBeChecked();
   await page.screenshot({path:info.outputPath('settings.png'),fullPage:true});
   await page.keyboard.press('Escape');
   expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(before);
