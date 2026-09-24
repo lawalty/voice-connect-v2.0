@@ -59,7 +59,7 @@ try {
     const buffer = await audio.decodeAudioData(Uint8Array.from(bytes).buffer);
     const samples = new Resampler(buffer.sampleRate).push(buffer.getChannelData(0));
     const transcript = new Transcript(), errors = [];
-    const recognizer = new LocalRecognizer((text, final) => transcript.update(text, final), (error) => errors.push(error));
+    const recognizer = new LocalRecognizer({ result: ({ text, final }) => transcript.update(text, final), error: (error) => errors.push(error.message), ended() {} });
     await recognizer.start();
     for (let offset = 0; offset < samples.length; offset += 1600) {
       recognizer.push(samples.subarray(offset, offset + 1600));

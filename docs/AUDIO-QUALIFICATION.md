@@ -7,7 +7,7 @@ Measured on September 24, 2026 with the repository's pinned dependencies, Window
 ```sh
 npm run prepare:assets
 npm run check
-npx vitest run checks/audio.test.ts checks/audio-output.test.ts checks/audio-scenarios.test.ts
+npx vitest run checks/audio.test.ts checks/audio-output.test.ts checks/audio-scenarios.test.ts checks/audio-adapters.test.ts checks/audio-diagnostics.test.ts
 node checks/audio-browser.mjs
 ```
 
@@ -15,7 +15,7 @@ The browser check starts its own Vite server on `127.0.0.1:5192`. It downloads t
 
 ## Proven results
 
-- TypeScript check passes. Thirteen deterministic tests pass: streaming resampling across block boundaries, signed PCM encoding, noise-floor adaptation, speech hysteresis, evidence-only acoustic signals, coherent transcript accumulation, unresolved-tail rejection, cumulative speech snapshots, final sentence flushing, cancellation of late native/provider playback callbacks, and the annotated scenario replays below.
+- TypeScript and production Vite build pass. Twenty-five deterministic tests pass: streaming resampling across block boundaries, signed PCM encoding, noise-floor adaptation, speech hysteresis, evidence-only acoustic signals, coherent transcript accumulation, unresolved-tail rejection, cumulative speech snapshots, final sentence flushing, cancellation of late native/provider playback callbacks, independent recognizer lifecycle races, diagnostics privacy/bounds, and the annotated scenario replays below.
 - Real Chromium loaded the verified 41,706,199-byte Vosk archive, initialized its WASM recognizer and the Silero ONNX worker, captured through `AudioWorklet`, and reached listening only after both engines were ready. A 1.2-second silent capture produced 39–40 signal callbacks across successful runs and no submitted turn. Callback count includes lifecycle signals; it is not a latency benchmark.
 - With browser network access disabled after the first initialization, a new Vosk recognizer loaded the cached archive and transcribed the official WAV. Actual result: `one zero zero zero one nah no to i know zero one eight zero three`. The first and last number sequences are asserted. The middle substitutions remain visible: this is a functional test, not an accuracy claim.
 - Removing the downloaded model cleared its verified archive cache and Vosk's extracted `/vosk` IndexedDB database. Conversation storage is untouched.
@@ -45,6 +45,16 @@ These are acoustic-feature fixtures with supplied RMS levels, speech probabiliti
 | Deepgram output | PCM playback at the provider's declared sample rate, local source cancellation before the network interrupt, bounded buffering, and generation guards that reject late audio. No live premium voice was used in these tests. |
 
 Recognition and output are independently selectable. Browser recognition is not advertised as hands-free. Local or premium recognition with browser speech can attempt hands-free interruption, but native TTS echo cancellation depends on the device. Headphones and speakerphone must each be tested physically; no browser API guarantees that the native voice is part of its echo-cancellation reference.
+
+`BrowserRecognizer`, `LocalRecognizer`, and `FluxRecognizer` independently implement `SpeechRecognizer`: lifecycle, normalized PCM input, running status, and capability reporting. Browser session events and Flux WebSocket/framing logic live in their adapters. `VoiceEngine` handles shared capture, transcript accumulation, turn policy, and output orchestration. Capability `available` reports required browser primitives; it does not claim a downloaded model, valid provider credential, or physical hands-free qualification.
+
+The tested stateful 16 kHz resampler now runs inside the bundled capture `AudioWorklet`, off the UI thread. It transfers bounded 512-sample blocks. The UI thread performs message routing and bounded buffering; the separate Silero worker performs inference. The production capture script is a hashed `/assets/capture.worklet-*.js` resource; the earlier `/audio/capture.js` is no longer used.
+
+## Local device diagnostics
+
+`VoiceEngine.diagnostics()` returns at most 160 in-memory, allowlisted events for the most recent voice session. They include reported microphone settings, provider initialization duration, endpoint request/acknowledgement timing, output callbacks, local cancellation-call duration, and capture/backpressure failures. Snapshots are defensive copies; nothing is persisted or uploaded by this buffer. Runtime validation rejects transcript/audio data, device identifiers, labels, arbitrary strings, unknown fields, nonfinite numbers, and caller-supplied getters.
+
+These timings support device qualification but need precise interpretation: endpoint duration begins at the explicit finalization request and excludes the preceding VAD silence window; native output starts at its browser callback, while premium output starts when its first PCM buffer is scheduled; interruption duration measures the synchronous local cancellation call, not audible hardware stop latency. Missing microphone settings remain unknown. Six tests verify the diagnostics bounds, allowed fields, defensive snapshots, and monotonic relative timing.
 
 ## Failure behavior and remaining acceptance
 

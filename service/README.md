@@ -4,6 +4,10 @@ Voice Connect uses native Gateway protocol 4. Its `GatewayPort` implements the s
 `HarnessAdapter`; OpenClaw owns model execution and canonical history. Each local
 conversation has an independently generated native session key under the discovered
 default agent. Never substitute a guessed `main` agent or a null `sessionId`.
+The stored backing ID is passed to `chat.send` only. Normal `chat.history` requests
+omit it because native history requires `messageId` when selecting by `sessionId`;
+`chat.abort` does not accept that field at all. History and abort use the persistent
+session key and discovered agent ID.
 
 ## First connection and device approval
 
@@ -109,6 +113,9 @@ also require the administrative step above.
 Native history reconciles exact terminal run IDs, live run IDs, and local delivery
 receipts. A missing run remains uncertain without appearing permanently active.
 Cancellation is persisted before contacting the Gateway and replayed after restart.
+The abort endpoint reports `agentConfirmed: true` only after native confirmation.
+A rejected/unavailable abort returns HTTP 202 with `agentConfirmed: false` and a
+visible explanation; local playback stays stopped and cancelled output stays fenced.
 Approvals/questions from unrelated sessions are not exposed. Authentication protects
 image previews; uploaded images are decoded, size checked, re-encoded and stripped
 of metadata before storage or forwarding.

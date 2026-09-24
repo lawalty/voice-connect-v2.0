@@ -10,6 +10,7 @@ const credentials=JSON.parse(await readFile(process.env.VC_LIVE_CREDENTIAL_FILE|
 const origin=credentials.origin;
 if(origin!=='https://srv2003889.hstgr.cloud')throw Error('Unexpected acceptance target');
 const report={time:new Date().toISOString(),origin,checks:[],timings:[]};
+function passed(label){report.checks.push(label);console.log(`PASS ${label}`);}
 const api=await request.newContext({baseURL:origin,extraHTTPHeaders:{Origin:origin}});
 const login=await api.post('/api/auth/login',{data:{password:credentials.password}});
 if(!login.ok())throw Error(`Login failed (${login.status()})`);
@@ -19,7 +20,7 @@ async function get(url){const r=await api.get(url);if(!r.ok())throw Error(`${url
 async function post(url,data={}){const r=await api.post(url,{data,headers});if(!r.ok())throw Error(`${url} returned ${r.status()}`);return r.json();}
 const settings=await get('/api/settings');
 if(!settings.harness.connected)throw Error('Native gateway not connected');
-report.harness=settings.harness;report.checks.push('Authenticated native Gateway connected');
+report.harness=settings.harness;passed('Authenticated native Gateway connected');
 const conversation=await post('/api/conversations',{title:'VC2 release acceptance'});report.conversationId=conversation.id;
 let socket;const events=[];
 async function connect(){
@@ -48,12 +49,12 @@ async function turn(text,attachments){
 }
 const identity=await turn('Synthetic Voice Connect release check. Do not use tools or change files or saved memories. State your configured agent name, then the code ORBIT 482. Keep the answer to one sentence.');
 if(!/NorthPointe/i.test(identity.text)||!identity.text.includes('482'))throw Error('Native persona or test code did not match');
-report.checks.push('NorthPointe identity and native text round-trip');
+passed('NorthPointe identity and native text round-trip');
 const follow=await turn('Without tools or changing saved memory, what code did I give in the previous message? Answer just the code.');
 if(!follow.text.includes('482'))throw Error('Conversation continuity failed');
 const history=await get(`/api/conversations/${conversation.id}`);
 if(history.messages.filter(m=>m.role==='user'&&m.text.includes('ORBIT 482')).length!==1)throw Error('Duplicate message in native history');
-report.checks.push('Same-session follow-up and idempotent duplicate delivery');
+passed('Same-session follow-up and idempotent duplicate delivery');
 if(!settings.harness.images)throw Error('Previously verified camera capability missing');
 const card=await sharp(Buffer.from('<svg width="640" height="400"><rect width="640" height="400" fill="#10202c"/><rect x="30" y="30" width="580" height="340" fill="white"/><circle cx="145" cy="165" r="65" fill="red"/><text x="260" y="190" font-family="sans-serif" font-size="54" fill="black">VC2 739</text></svg>')).png().toBuffer();
 const upload=await api.post('/api/uploads',{headers,multipart:{image:{name:'release-card.png',mimeType:'image/png',buffer:card}}});
@@ -61,18 +62,20 @@ if(!upload.ok())throw Error(`Image upload ${upload.status()}`);
 const attachment=await upload.json();
 const visual=await turn('Synthetic camera acceptance. Read the code and name the circle color in the attached image. Do not use tools or change saved memory. Answer in one sentence.',[attachment.id]);
 if(!/739/.test(visual.text)||!/red/i.test(visual.text))throw Error('Image understanding did not match the test card');
-report.checks.push('Actual image upload and visual understanding');
+passed('Actual image upload and visual understanding');
 const cancelId=randomUUID();
 const pending=await post(`/api/conversations/${conversation.id}/turns`,{id:cancelId,text:'Synthetic interruption check. Without tools, produce a 1200-word fictional story about a quiet garden. Do not save anything.'});
-const cancelStart=performance.now();await post(`/api/conversations/${conversation.id}/turns/${cancelId}/abort`);
+const cancelStart=performance.now();const cancellation=await post(`/api/conversations/${conversation.id}/turns/${cancelId}/abort`);
+if(cancellation.agentConfirmed!==true)throw Error('Native cancellation was not confirmed');
+const cancelApiMs=Math.round(performance.now()-cancelStart);
 const cancelled=await waitFor(()=>events.find(e=>e.type==='turn'&&e.turnId===cancelId&&e.delivery==='cancelled'));
 await sleep(1500);
 if(events.some(e=>e.turnId===cancelId&&e.at>cancelled.at&&(e.type==='assistant'||(e.type==='complete'&&!e.cancelled))))throw Error('Cancelled text resumed');
-report.timings.push({turnId:cancelId,cancelApiMs:Math.round(performance.now()-cancelStart-1500)});
-report.checks.push('Exact owned run cancellation, late output suppressed');
+report.timings.push({turnId:cancelId,cancelApiMs});
+passed('Exact owned run cancellation, late output suppressed');
 const reconnectStart=performance.now();await connect();await get(`/api/conversations/${conversation.id}`);
 report.timings.push({reconnectHistoryMs:Math.round(performance.now()-reconnectStart)});
-report.checks.push('Control socket reconnection and authoritative history');
+passed('Control socket reconnection and authoritative history');
 const browser=await chromium.launch();
 try{
   const context=await browser.newContext({storageState:await api.storageState(),viewport:{width:1440,height:960}});
@@ -83,7 +86,7 @@ try{
   await mkdir('.local/release-evidence',{recursive:true});await page.screenshot({path:'.local/release-evidence/live-desktop.png',fullPage:true});
   await page.getByRole('button',{name:'Open settings'}).click();await page.screenshot({path:'.local/release-evidence/live-settings.png',fullPage:true});
   if(errors.length)throw Error(`Browser page errors: ${errors.join('; ')}`);
-  report.checks.push('Authenticated deployed browser reload, transcript and settings');
+  passed('Authenticated deployed browser reload, transcript and settings');
 }finally{await browser.close();}
 report.diagnostics=await get('/api/diagnostics');
 await mkdir('.local/release-evidence',{recursive:true});await writeFile('.local/release-evidence/live.json',JSON.stringify(report,null,2));

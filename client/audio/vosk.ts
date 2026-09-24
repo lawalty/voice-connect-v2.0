@@ -1,4 +1,5 @@
 import type { Model, KaldiRecognizer } from 'vosk-browser';
+import type { RecognizerCapabilities, RecognizerEvents, SpeechRecognizer } from '../../contract/types';
 import { clearExtractedModel, modelArchiveURL } from './model';
 type VoskGlobal = { Model: typeof Model };
 let runtime: Promise<VoskGlobal> | undefined;
@@ -17,7 +18,11 @@ function loadRuntime(): Promise<VoskGlobal> {
   return runtime;
 }
 
-export class LocalRecognizer {
+export class LocalRecognizer implements SpeechRecognizer {
+  readonly capabilities: RecognizerCapabilities = {
+    provider: 'vosk', available: typeof Worker !== 'undefined' && typeof WebAssembly !== 'undefined', input: 'pcm16k', processing: 'local',
+    handsFree: true, endpointing: 'local-vad', reason: 'Requires the downloaded model; speed and speaker echo cancellation need device qualification.',
+  };
   private model?: Model;
   private recognizer?: KaldiRecognizer;
   private pending = 0;
@@ -25,7 +30,9 @@ export class LocalRecognizer {
   private flushed?: () => void;
   private failed?: (error: Error) => void;
   private closed = false;
-  constructor(private result: (text: string, final: boolean) => void, private error: (message: string) => void) {}
+  constructor(private events: RecognizerEvents) {}
+  get running() { return Boolean(this.recognizer) && !this.closed; }
+  private error(message: string, overload = false) { this.events.error({ code: overload ? 'overload' : 'unavailable', message, fatal: true }); }
   async start() {
     const api = await loadRuntime();
     // Blob archive URLs are per-session. Remove stale extraction rather than accumulating copies.
@@ -48,11 +55,11 @@ export class LocalRecognizer {
     const recognizer = this.recognizer = new this.model.KaldiRecognizer(16000);
     recognizer.on('partialresult', (message) => {
       if (this.recognizer !== recognizer || this.closed || message.event !== 'partialresult') return;
-      this.result(message.result.partial, false); this.ack();
+      this.events.result({ text: message.result.partial, final: false, turnComplete: false }); this.ack();
     });
     recognizer.on('result', (message) => {
       if (this.recognizer !== recognizer || this.closed || message.event !== 'result') return;
-      this.result(message.result.text, true);
+      this.events.result({ text: message.result.text, final: true, turnComplete: false });
       if (this.flushed) { const done = this.flushed; this.flushed = undefined; done(); }
       else this.ack();
     });
@@ -66,7 +73,7 @@ export class LocalRecognizer {
   }
   push(samples: Float32Array) {
     if (!this.recognizer || this.closed) return;
-    if (this.pending >= 64) { this.error('Local speech cannot keep up with this device. Turn paused to avoid missing words.'); this.stop(); return; }
+    if (this.pending >= 64) { this.error('Local speech cannot keep up with this device. Turn paused to avoid missing words.', true); this.stop(); return; }
     this.pending++;
     this.recognizer.acceptWaveformFloat(samples.slice(), 16000);
   }

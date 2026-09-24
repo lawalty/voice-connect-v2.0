@@ -1,17 +1,11 @@
-import type { AcousticSignal, AudioEvent, SpeechOutput, SpeechPreferences, VoicePhase } from '../../contract/types';
-import { acousticSignal, pcm16, Resampler, SentenceStream, Transcript } from './dsp';
-import { audioURL, BrowserOutput, PremiumOutput } from './output';
+import type { AcousticSignal, RecognizerCapabilities, RecognizerEvents, SpeechOutput, SpeechPreferences, SpeechRecognizer, VoicePhase } from '../../contract/types';
+import { acousticSignal, SentenceStream, Transcript } from './dsp';
+import { BrowserOutput, PremiumOutput } from './output';
 import { LocalRecognizer } from './vosk';
-
-interface RecognitionEvent { resultIndex: number; results: { length: number; [index: number]: { isFinal: boolean; 0: { transcript: string } } }; }
-interface NativeRecognition {
-  lang: string; interimResults: boolean; continuous: boolean;
-  onstart: (() => void) | null; onend: (() => void) | null;
-  onresult: ((event: RecognitionEvent) => void) | null;
-  onerror: ((event: { error: string }) => void) | null;
-  start(): void; stop(): void; abort(): void;
-}
-type RecognitionConstructor = new () => NativeRecognition;
+import { BrowserRecognizer } from './browser-recognizer';
+import { FluxRecognizer } from './flux-recognizer';
+import { AudioDiagnostics, type AudioDiagnosticEntry } from './diagnostics';
+import captureWorkletURL from './capture.worklet.ts?worker&url';
 export interface VoiceCallbacks {
   onPhase(phase: VoicePhase): void; onDraft(text: string): void; onTurn(text: string): void;
   onSignal(signal: AcousticSignal): void; onError(message: string): void;
@@ -27,20 +21,14 @@ export class VoiceEngine {
   private vadPending = 0;
   private vadSequence = 0;
   private vadIgnoreBefore = 0;
-  private resampler?: Resampler;
   private analysisBuffer: number[] = [];
-  private providerBuffer: number[] = [];
   private prebuffer: Float32Array[] = [];
   private prebufferSamples = 0;
-  private local?: LocalRecognizer;
-  private recognition?: NativeRecognition;
-  private recognitionActive = false;
-  private recognitionEnded?: () => void;
-  private stt?: WebSocket;
-  private sttReady = false;
-  private providerTurnOpen = false;
-  private sttEnded?: () => void;
-  private sttFailure?: (error: Error) => void;
+  private recognizer?: SpeechRecognizer;
+  private lastCapabilities?: RecognizerCapabilities;
+  private trace = new AudioDiagnostics();
+  private outputRequestedAt = 0;
+  private outputStartedAt = 0;
   private output?: SpeechOutput;
   private sentences = new SentenceStream();
   private transcript = new Transcript();
@@ -65,12 +53,14 @@ export class VoiceEngine {
     document.addEventListener('visibilitychange', this.visibility);
     window.addEventListener('offline', this.offline);
   }
-  private setPhase(phase: VoicePhase) { if (this.phase !== phase) { this.phase = phase; this.callbacks.onPhase(phase); } }
+  diagnostics(): AudioDiagnosticEntry[] { return this.trace.snapshot(); }
+  capabilities(): RecognizerCapabilities | undefined { return this.lastCapabilities ? { ...this.lastCapabilities } : undefined; }
+  private setPhase(phase: VoicePhase) { if (this.phase !== phase) { this.phase = phase; this.trace.record('phase', { phase }); this.callbacks.onPhase(phase); } }
   private warmContext(): AudioContext {
     if (!this.context || this.context.state === 'closed') {
       this.context = new AudioContext({ latencyHint: 'interactive' });
       this.context.onstatechange = () => {
-        if (this.active && this.ready && this.context?.state !== 'running') this.captureFailure('Browser audio was suspended. Review the draft before restarting.');
+        if (this.active && this.ready && this.context?.state !== 'running') { this.trace.record('capture-gap', { reason: 'suspended' }); this.captureFailure('Browser audio was suspended. Review the draft before restarting.'); }
       };
     }
     void this.context.resume().catch(() => this.callbacks.onNotice('Tap the microphone or speaker to allow audio playback.'));
@@ -80,6 +70,7 @@ export class VoiceEngine {
     if (this.disposed) return;
     if (this.outputActive || this.responseOpen) this.interrupt();
     this.stop();
+    this.trace.clear();
     const generation = ++this.generation;
     this.preferences = { ...preferences }; this.conversationId = conversationId;
     this.active = true; this.muted = false; this.gap = false; this.transcript.clear();
@@ -87,30 +78,28 @@ export class VoiceEngine {
     const context = this.warmContext();
     try {
       if (!window.isSecureContext) throw new Error('Voice requires HTTPS or localhost.');
-      if (preferences.recognition === 'browser') {
+      const recognizer = this.recognizer = this.createRecognizer(generation);
+      this.lastCapabilities = { ...recognizer.capabilities };
+      if (!recognizer.capabilities.available) throw new Error(`The ${preferences.recognition} recognition engine is unavailable in this browser.`);
+      if (recognizer.capabilities.input === 'browser-managed') {
         if (preferences.handsFree) this.callbacks.onNotice('Browser speech uses tap-to-talk here. Choose local Vosk or premium recognition for hands-free turns.');
         this.callbacks.onNotice('Browser recognition may send microphone audio to your browser vendor. Availability and recording duration depend on your browser.');
         // Built-in recognition owns its capture. A separate meter is best effort only.
         try { if (this.browserMeterSupported) await this.openCapture(context, generation, false); }
         catch { this.closeCapture(); this.callbacks.onNotice('Live microphone visualization is unavailable with browser speech on this device.'); }
         if (generation !== this.generation) return;
-        await this.startBrowser(generation);
       } else {
         await this.openCapture(context, generation, true);
         if (generation !== this.generation) return;
-        if (preferences.recognition === 'vosk') {
-          this.callbacks.onNotice('Loading the downloaded local Vosk model. Audio stays on this device.');
-          this.local = new LocalRecognizer((text, final) => {
-            if (generation !== this.generation || !this.active) return;
-            this.callbacks.onDraft(this.transcript.update(text, final));
-          }, (message) => { if (generation === this.generation) this.captureFailure(message); });
-          await this.local.start();
-        } else await this.startPremium(generation);
-        if (generation !== this.generation) return;
-        this.ready = true; this.setPhase('listening');
+        if (recognizer.capabilities.processing === 'local') this.callbacks.onNotice('Loading the downloaded local Vosk model. Audio stays on this device.');
         if (preferences.handsFree && preferences.output === 'browser') this.callbacks.onNotice('Hands-free interruption with a browser voice depends on this device’s echo cancellation. Headphones can improve it.');
       }
       if (generation !== this.generation) return;
+      const startedAt = performance.now(); this.trace.record('provider-starting', { provider: preferences.recognition });
+      await recognizer.start();
+      if (generation !== this.generation) return;
+      this.trace.record('provider-ready', { provider: preferences.recognition, durationMs: performance.now() - startedAt });
+      this.ready = recognizer.running; this.setPhase(this.ready ? 'listening' : 'paused');
       if (preferences.keepAwake) await this.requestWakeLock(generation);
     } catch (error) {
       if (generation !== this.generation) return;
@@ -123,24 +112,27 @@ export class VoiceEngine {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
     if (generation !== this.generation) { stream.getTracks().forEach((track) => track.stop()); return; }
     this.stream = stream;
+    const settings = stream.getAudioTracks()[0]?.getSettings();
+    this.trace.record('capture-settings', { sampleRate: settings?.sampleRate ?? context.sampleRate, channelCount: settings?.channelCount,
+      echoCancellation: typeof settings?.echoCancellation === 'boolean' ? settings.echoCancellation : undefined,
+      noiseSuppression: settings?.noiseSuppression, autoGainControl: settings?.autoGainControl });
     stream.getAudioTracks().forEach((track) => {
-      track.onended = () => { if (generation === this.generation) this.captureFailure('Microphone disconnected. Your unsent draft is preserved.'); };
-      track.onmute = () => { if (generation === this.generation && this.ready) this.captureFailure('Microphone capture was interrupted. Review your draft before sending.'); };
+      track.onended = () => { if (generation === this.generation) { this.trace.record('capture-gap', { reason: 'mic-ended' }); this.captureFailure('Microphone disconnected. Your unsent draft is preserved.'); } };
+      track.onmute = () => { if (generation === this.generation && this.ready) { this.trace.record('capture-gap', { reason: 'mic-muted' }); this.captureFailure('Microphone capture was interrupted. Review your draft before sending.'); } };
     });
-    await context.audioWorklet.addModule('/audio/capture.js');
+    await context.audioWorklet.addModule(captureWorkletURL);
     if (generation !== this.generation) return;
-    this.resampler = new Resampler(context.sampleRate);
     this.source = context.createMediaStreamSource(stream);
     const worklet = this.worklet = new AudioWorkletNode(context, 'voice-capture');
     worklet.port.onmessage = (event) => {
       worklet.port.postMessage('ack');
       if (generation !== this.generation || !this.active) return;
-      if (event.data.dropped > 0 && this.ready) { this.captureFailure('Microphone processing fell behind. Review your draft; incomplete audio was not sent.'); return; }
+      if (event.data.dropped > 0 && this.ready) { this.trace.record('backpressure', { reason: 'capture-backlog', pendingFrames: Math.ceil(event.data.dropped / 512) }); this.captureFailure('Microphone processing fell behind. Review your draft; incomplete audio was not sent.'); return; }
       if (this.muted || !this.ready) return;
       const now = performance.now();
-      if (this.lastCaptureAt && now - this.lastCaptureAt > 500) { this.captureFailure('Microphone audio had an unexpected gap. Review your draft before sending.'); return; }
+      if (this.lastCaptureAt && now - this.lastCaptureAt > 500) { this.trace.record('capture-gap', { reason: 'capture-gap', durationMs: now - this.lastCaptureAt }); this.captureFailure('Microphone audio had an unexpected gap. Review your draft before sending.'); return; }
       this.lastCaptureAt = now;
-      this.process(this.resampler!.push(event.data.samples as Float32Array));
+      this.process(event.data.samples as Float32Array);
     };
     this.source.connect(this.worklet); this.worklet.connect(context.destination);
     try { await this.startVad(generation); }
@@ -166,14 +158,14 @@ export class VoiceEngine {
           if (this.muted || !this.ready || event.data.sequence < this.vadIgnoreBefore) return;
           this.callbacks.onSignal(event.data.signal as AcousticSignal);
           if (event.data.transition === 'start') this.speechStarted();
-          else if (event.data.transition === 'end' && this.preferences?.recognition === 'vosk' && this.preferences.handsFree && this.turnAudio) void this.finish();
+          else if (event.data.transition === 'end' && this.recognizer?.capabilities.endpointing === 'local-vad' && this.preferences?.handsFree && this.turnAudio) void this.finish();
         }
       };
       worker.onerror = () => { clearTimeout(timeout); if (!ready) reject(new Error('Speech detector could not load.')); else this.captureFailure('Speech detector stopped.'); };
       worker.postMessage({ type: 'init' });
     });
   }
-  private acceptsInput() { return this.active && !this.muted && !this.finishing && (this.phase === 'listening' || this.phase === 'hearing' || Boolean(this.preferences?.handsFree && this.preferences.recognition !== 'browser')); }
+  private acceptsInput() { return this.active && !this.gap && !this.muted && !this.finishing && (this.phase === 'listening' || this.phase === 'hearing' || Boolean(this.preferences?.handsFree && this.recognizer?.capabilities.handsFree)); }
   private process(samples: Float32Array) {
     if (!samples.length) return;
     if (!this.vad) this.callbacks.onSignal(acousticSignal(samples, 0, 0.008));
@@ -181,121 +173,68 @@ export class VoiceEngine {
       this.analysisBuffer.push(...samples);
       while (this.analysisBuffer.length >= 512) {
         const frame = Float32Array.from(this.analysisBuffer.splice(0, 512));
-        if (this.vadPending >= 12) { this.captureFailure('This device could not keep up with speech detection. Nothing incomplete was sent.'); return; }
+        if (this.vadPending >= 12) { this.trace.record('backpressure', { reason: 'vad-backlog', pendingFrames: this.vadPending }); this.captureFailure('This device could not keep up with speech detection. Nothing incomplete was sent.'); return; }
         this.vadPending++; this.vad!.postMessage({ type: 'frame', samples: frame, sequence: this.vadSequence++ }, [frame.buffer]);
       }
     }
     if (!this.acceptsInput()) return;
     this.prebuffer.push(samples.slice()); this.prebufferSamples += samples.length;
     while (this.prebufferSamples > 8000 && this.prebuffer.length > 1) this.prebufferSamples -= this.prebuffer.shift()!.length;
-    if (this.preferences?.recognition === 'vosk') {
-      if (this.turnAudio) this.local?.push(samples);
-    } else if (this.preferences?.recognition === 'deepgram' && this.sttReady) {
-      this.providerBuffer.push(...samples);
-      while (this.providerBuffer.length >= 1280) {
-        if (!this.stt || this.stt.bufferedAmount > 64000) { this.captureFailure('Speech upload is too slow. Your unsent draft is preserved.'); return; }
-        this.stt.send(pcm16(Float32Array.from(this.providerBuffer.splice(0, 1280))));
-      }
-    }
+    if (this.recognizer?.capabilities.input === 'pcm16k' && (this.recognizer.capabilities.endpointing !== 'local-vad' || this.turnAudio)) this.recognizer.push(samples);
   }
   private speechStarted() {
-    if (!this.acceptsInput() || this.preferences?.recognition === 'browser') return;
+    if (!this.acceptsInput() || this.recognizer?.capabilities.input === 'browser-managed') return;
     if (this.outputActive || this.responseOpen) this.interrupt();
     if (!this.turnAudio) {
       this.turnAudio = true;
-      if (this.preferences?.recognition === 'vosk') for (const frame of this.prebuffer) this.local?.push(frame);
+      if (this.recognizer?.capabilities.endpointing === 'local-vad') for (const frame of this.prebuffer) this.recognizer.push(frame);
       this.prebuffer = []; this.prebufferSamples = 0;
       clearTimeout(this.maxTurnTimer);
       this.maxTurnTimer = setTimeout(() => { this.callbacks.onNotice('This turn reached two minutes. Review and send your draft.'); this.captureFailure('Long recording paused to keep the turn complete.'); }, 120000);
     }
     this.setPhase('hearing');
   }
-  private async startBrowser(generation: number) {
-    const browser = window as unknown as { SpeechRecognition?: RecognitionConstructor; webkitSpeechRecognition?: RecognitionConstructor };
-    const Constructor = browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
-    if (!Constructor) throw new Error('Browser recognition is unavailable. Choose downloaded local Vosk or premium speech.');
-    const recognition = this.recognition = new Constructor();
-    recognition.lang = 'en-US'; recognition.interimResults = true; recognition.continuous = false;
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Browser recognition did not start. Check microphone permission.')), 15000);
-      recognition.onstart = () => {
-        clearTimeout(timeout); if (generation !== this.generation) { recognition.abort(); return; }
-        this.recognitionActive = true; this.ready = true; this.setPhase('listening'); resolve();
-      };
-      recognition.onresult = (event) => {
-        if (generation !== this.generation || this.muted) return;
-        for (let i = event.resultIndex; i < event.results.length; i++) this.transcript.update(event.results[i]![0].transcript, event.results[i]!.isFinal);
-        this.callbacks.onDraft(this.transcript.text); if (!this.finishing) this.setPhase('hearing');
-      };
-      recognition.onend = () => {
-        clearTimeout(timeout);
-        if (generation !== this.generation) return;
-        this.recognitionActive = false;
+  private createRecognizer(generation: number): SpeechRecognizer {
+    const events: RecognizerEvents = {
+      result: (result) => {
+        if (generation !== this.generation || !this.active || this.gap || this.muted) return;
+        if (result.started && this.preferences?.handsFree && (this.outputActive || this.responseOpen)) this.interrupt();
+        this.callbacks.onDraft(this.transcript.update(result.text, result.final));
+        if (result.text && !this.finishing) this.setPhase('hearing');
+        if (result.turnComplete && !this.finishing && this.preferences?.handsFree) {
+          this.trace.record('endpoint-ready', { provider: this.preferences.recognition }); this.commit();
+        }
+      },
+      ended: (expected) => {
+        if (generation !== this.generation || !this.active) return;
         this.ready = false;
-        this.recognitionEnded?.(); this.recognitionEnded = undefined;
-        this.closeCapture();
-        if (!this.finishing && this.active) {
-          this.ready = false; this.setPhase('paused');
-          this.callbacks.onNotice('Browser recording ended. Review your words, then send the turn. Tap the microphone to record again.');
+        if (this.recognizer?.capabilities.input === 'browser-managed') this.closeCapture();
+        if (!expected && !this.finishing) {
+          this.setPhase('paused');
+          this.callbacks.onNotice('Recording ended. Review your words before sending. Tap the microphone to record again.');
         }
-      };
-      recognition.onerror = (event) => {
-        clearTimeout(timeout); if (generation !== this.generation || event.error === 'aborted') return;
-        if (event.error === 'audio-capture') { this.browserMeterSupported = false; this.closeCapture(); }
-        const message = event.error === 'not-allowed' ? 'Microphone permission was denied. Allow it in browser settings, then tap to retry.' : event.error === 'audio-capture' ? 'This browser could not share the microphone. Tap to retry with the microphone visualizer disabled, or choose local Vosk or premium recognition.' : event.error === 'no-speech' ? 'No speech was detected. Tap the microphone to try again.' : 'Browser speech disconnected. Review the draft before sending.';
-        if (!this.ready) reject(new Error(message)); else { this.gap = event.error !== 'no-speech'; this.callbacks.onNotice(message); }
-      };
-      try { recognition.start(); } catch (error) { clearTimeout(timeout); reject(error); }
-    });
-  }
-  private startPremium(generation: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const socket = this.stt = new WebSocket(audioURL('stt', this.conversationId));
-      const timeout = setTimeout(() => reject(new Error('Premium recognition did not become ready.')), 15000);
-      socket.onmessage = (message) => {
+      },
+      error: (error) => {
         if (generation !== this.generation) return;
-        let event: AudioEvent; try { event = JSON.parse(String(message.data)); } catch { return; }
-        if (event.type === 'ready') { clearTimeout(timeout); this.sttReady = true; resolve(); }
-        else if (event.type === 'error') { clearTimeout(timeout); reject(new Error(event.message)); this.sttFailure?.(new Error(event.message)); if (this.ready) this.captureFailure(event.message); }
-        else if (event.type === 'stt' && !this.gap && !this.muted) {
-          this.providerTurnOpen = !event.final;
-          if (event.started && this.preferences?.handsFree && (this.outputActive || this.responseOpen)) this.interrupt();
-          this.callbacks.onDraft(this.transcript.update(event.text, event.final));
-          if (event.text && !this.finishing) this.setPhase('hearing');
-          if (event.turnComplete) {
-            if (this.finishing) { this.sttEnded?.(); this.sttEnded = undefined; }
-            else if (this.preferences?.handsFree) this.commit();
-          }
-        }
-      };
-      socket.onerror = () => { clearTimeout(timeout); reject(new Error('Premium speech connection failed.')); };
-      socket.onclose = () => {
-        clearTimeout(timeout); if (generation !== this.generation) return;
-        const error = new Error('Premium recognition disconnected. Draft preserved; tap to restart.');
-        reject(error); this.sttFailure?.(error); if (this.ready) this.captureFailure(error.message);
-      };
-    });
+        if (error.code === 'capture' && this.recognizer?.capabilities.input === 'browser-managed') { this.browserMeterSupported = false; this.closeCapture(); }
+        this.trace.record(error.code === 'overload' ? 'backpressure' : 'capture-gap', { provider: this.preferences?.recognition, reason: 'provider-error' });
+        if (this.ready && error.fatal) this.captureFailure(error.message);
+        else if (!error.fatal) this.callbacks.onNotice(error.message);
+      },
+    };
+    if (this.preferences!.recognition === 'browser') return new BrowserRecognizer(events);
+    if (this.preferences!.recognition === 'vosk') return new LocalRecognizer(events);
+    return new FluxRecognizer(this.conversationId, events);
   }
   async finish(): Promise<void> {
     if (this.finishing || !this.preferences || this.gap) { if (this.gap) this.callbacks.onNotice('Recording was interrupted. Review or edit the draft and send it as text.'); return; }
     const generation = this.generation; this.finishing = true; this.setPhase('finalizing');
+    const requestedAt = performance.now(); this.trace.record('endpoint-request', { provider: this.preferences.recognition });
     try {
-      if (this.preferences.recognition === 'browser' && this.recognitionActive) {
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => { this.recognitionEnded = undefined; this.recognition?.abort(); reject(new Error('Browser recognition did not finish. Review the draft and send as text.')); }, 2500);
-          this.recognitionEnded = () => { clearTimeout(timeout); resolve(); }; this.recognition!.stop();
-        });
-      } else if (this.preferences.recognition === 'vosk') await this.local?.finish();
-      else if (this.preferences.recognition === 'deepgram' && this.sttReady && (this.providerTurnOpen || !this.transcript.stable && this.transcript.text)) {
-        if (this.providerBuffer.length) { this.stt!.send(pcm16(Float32Array.from(this.providerBuffer))); this.providerBuffer = []; }
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => { this.sttEnded = undefined; this.sttFailure = undefined; reject(new Error('Speech provider did not finalize. Review the draft and send as text.')); }, 6000);
-          this.sttEnded = () => { clearTimeout(timeout); this.sttFailure = undefined; resolve(); };
-          this.sttFailure = (error) => { clearTimeout(timeout); reject(error); };
-          this.stt!.send(JSON.stringify({ type: 'finish' }));
-        });
+      await this.recognizer?.finish();
+      if (generation === this.generation) {
+        this.trace.record('endpoint-ready', { provider: this.preferences.recognition, durationMs: performance.now() - requestedAt }); this.commit();
       }
-      if (generation === this.generation) this.commit();
     } catch (error) {
       if (generation === this.generation) { this.gap = true; this.setPhase('paused'); this.callbacks.onNotice(error instanceof Error ? error.message : String(error)); }
     } finally { if (generation === this.generation) this.finishing = false; }
@@ -317,12 +256,12 @@ export class VoiceEngine {
     this.lastCaptureAt = 0;
     this.stream?.getAudioTracks().forEach((track) => { track.enabled = !muted; });
     if (muted) {
-      if (this.recognitionActive) this.recognition?.abort();
-      this.prebuffer = []; this.prebufferSamples = 0; this.providerBuffer = [];
+      if (this.recognizer?.capabilities.input === 'browser-managed') { this.recognizer.stop(); this.ready = false; this.closeCapture(); }
+      this.prebuffer = []; this.prebufferSamples = 0;
       this.callbacks.onSignal({ energy: 0, speechProbability: 0, noiseFloor: 0, pitch: null, confidence: 0 });
       if (this.turnAudio || this.transcript.text) { this.gap = true; this.callbacks.onNotice('Recording paused. Review the unsent draft before continuing.'); }
       this.setPhase('paused');
-    } else if (this.preferences?.recognition === 'browser' || this.gap) this.callbacks.onNotice('Tap the microphone to start a new recording. Your draft is preserved.');
+    } else if (this.recognizer?.capabilities.input === 'browser-managed' || this.gap) this.callbacks.onNotice('Tap the microphone to start a new recording. Your draft is preserved.');
     else if (this.active && this.ready) { this.vad?.postMessage({ type: 'reset' }); this.setPhase('listening'); }
   }
   private captureFailure(message: string) {
@@ -331,11 +270,9 @@ export class VoiceEngine {
   }
   stop() {
     ++this.generation; this.active = false; this.ready = false; this.finishing = false;
-    clearTimeout(this.maxTurnTimer); this.recognition?.abort(); this.recognition = undefined; this.recognitionActive = false;
-    this.local?.stop(); this.local = undefined; this.stt?.close(); this.stt = undefined; this.sttReady = false; this.providerTurnOpen = false;
+    clearTimeout(this.maxTurnTimer); this.recognizer?.stop(); this.recognizer = undefined;
     this.closeCapture();
-    this.prebuffer = []; this.prebufferSamples = 0; this.analysisBuffer = []; this.providerBuffer = []; this.turnAudio = false;
-    this.recognitionEnded = undefined; this.sttEnded = undefined; this.sttFailure = undefined;
+    this.prebuffer = []; this.prebufferSamples = 0; this.analysisBuffer = []; this.turnAudio = false;
     void this.wakeLock?.release().catch(() => {}); this.wakeLock = undefined;
     this.callbacks.onSignal({ energy: 0, speechProbability: 0, noiseFloor: 0, pitch: null, confidence: 0 });
     if (!this.outputActive && !this.responseOpen) this.setPhase('off');
@@ -354,9 +291,10 @@ export class VoiceEngine {
   }
   private enqueue(text: string) {
     if (!this.output) {
+      this.outputRequestedAt = performance.now();
       const events = {
-        started: () => { this.outputActive = true; this.setPhase('speaking'); },
-        ended: () => { this.outputActive = false; if (!this.responseOpen) { this.output?.dispose(); this.output = undefined; this.setPhase(this.active && this.ready && this.preferences?.recognition !== 'browser' ? 'listening' : this.active ? 'paused' : 'off'); } },
+        started: () => { this.outputActive = true; this.outputStartedAt = performance.now(); this.trace.record('output-start', { provider: this.preferences?.output, durationMs: this.outputStartedAt - this.outputRequestedAt }); this.setPhase('speaking'); },
+        ended: () => { this.outputActive = false; this.trace.record('output-end', { provider: this.preferences?.output, durationMs: this.outputStartedAt ? performance.now() - this.outputStartedAt : 0 }); if (!this.responseOpen) { this.output?.dispose(); this.output = undefined; this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); } },
         error: (message: string) => this.callbacks.onNotice(message),
       };
       this.output = this.preferences!.output === 'deepgram'
@@ -373,10 +311,12 @@ export class VoiceEngine {
   }
   interrupt() {
     const pending = this.outputActive || this.responseOpen || Boolean(this.output);
+    const requestedAt = performance.now();
     this.output?.cancel(); this.output?.dispose(); this.output = undefined;
     this.outputActive = false; this.responseOpen = false; this.sentences.reset();
+    if (pending) this.trace.record('output-interrupt', { provider: this.preferences?.output, durationMs: performance.now() - requestedAt });
     if (pending) this.callbacks.onInterrupt();
-    if (this.active) this.setPhase(this.ready && (this.preferences?.recognition !== 'browser' || this.recognitionActive) ? 'listening' : 'paused');
+    if (this.active) this.setPhase(this.ready && this.recognizer?.running ? 'listening' : 'paused');
   }
   private async requestWakeLock(generation: number) {
     try {
@@ -391,7 +331,7 @@ export class VoiceEngine {
     if (document.visibilityState === 'hidden' && this.active) this.captureFailure('Voice paused because the page was hidden. Reopen it and tap the microphone to resume.');
   };
   private offline = () => {
-    if (this.active && this.preferences?.recognition !== 'vosk') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.');
+    if (this.active && this.recognizer?.capabilities.processing !== 'local') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.');
   };
   dispose() {
     this.disposed = true; this.stop(); this.output?.dispose(); this.output = undefined;

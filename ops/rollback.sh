@@ -15,7 +15,7 @@ cat ops/Caddyfile > "$base/Caddyfile"
 docker compose --project-directory "$source_dir" -f ops/compose.yaml up -d --no-build app
 healthy=0
 for attempt in $(seq 1 30); do
-    if curl --fail --silent http://127.0.0.1:18880/health | python3 -c 'import json,sys; h=json.load(sys.stdin); sys.exit(0 if h.get("build")==sys.argv[1] and h.get("openclaw") is True else 1)' "$release"; then healthy=1; break; fi
+    if curl --fail --silent http://127.0.0.1:18880/health | python3 -c 'import json,sys; h=json.loads(sys.stdin.read() or "{}"); sys.exit(0 if h.get("build")==sys.argv[1] and h.get("openclaw") is True else 1)' "$release"; then healthy=1; break; fi
     sleep 2
 done
 test "$healthy" = 1 || { echo 'Rollback did not restore the expected build and gateway connection.'; exit 1; }

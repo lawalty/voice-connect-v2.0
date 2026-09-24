@@ -32,6 +32,12 @@ test('private entry, continuous text conversation, and refresh preserve history'
 });
 test('camera captures deliberately and attaches to the current conversation',async({page,context},info)=>{
   await context.grantPermissions(['camera']);
+  await page.addInitScript(()=>{
+    const tracks:MediaStreamTrack[]=[];
+    Object.assign(window,{__vcTestTracks:tracks});
+    const capture=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia=async constraints=>{const stream=await capture(constraints);tracks.push(...stream.getTracks());return stream;};
+  });
   await signIn(page);
   const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
   const uploads:string[]=[],turns:string[]=[];
@@ -44,6 +50,7 @@ test('camera captures deliberately and attaches to the current conversation',asy
   expect(uploads).toHaveLength(0);
   await page.getByRole('button',{name:'Attach photo',exact:true}).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await page.evaluate(()=>((window as unknown as {__vcTestTracks:MediaStreamTrack[]}).__vcTestTracks).every(track=>track.readyState==='ended'))).toBe(true);
   expect(uploads).toHaveLength(1);expect(turns).toHaveLength(0);
   await page.getByLabel('Message NorthPointe').fill('A deliberately captured test image.');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
@@ -78,8 +85,10 @@ test('offline draft remains unsent and cancellation cannot resurrect old output'
   await context.setOffline(true);
   await page.getByLabel('Message NorthPointe').fill('Keep this offline thought.');
   await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
+  const recoveryStarted=Date.now();
   await context.setOffline(false);
-  await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled({timeout:5000});
+  await info.attach('reconnection-timing',{body:JSON.stringify({recoveredMs:Date.now()-recoveryStarted}),contentType:'application/json'});
   await expect(page.getByLabel('Message NorthPointe')).toHaveValue('Keep this offline thought.');
   await expect(page.getByText('Your conversation stays together. I’m here with you.',{exact:true})).toHaveCount(0);
   await page.screenshot({path:info.outputPath('recovery.png'),fullPage:true});

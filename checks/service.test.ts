@@ -19,15 +19,16 @@ async function fixture(unremovableBootstrap=false) {
   const dir=mkdtempSync(join(tmpdir(),'vc2-service-'));
   const server=new WebSocketServer({port:0});await new Promise<void>(resolve=>server.once('listening',()=>resolve()));
   const calls:{method:string;params:any}[]=[],clients=new Set<WebSocket>(),events:ServerEvent[]=[];
-  let holdSend=false,history:any,pendingApprovals:any[]=[];const held:(()=>void)[]=[];
+  let holdSend=false,rejectAbort=false,history:any,pendingApprovals:any[]=[];const held:(()=>void)[]=[];
   server.on('connection',socket=>{
     clients.add(socket);socket.on('close',()=>clients.delete(socket));
     socket.send(JSON.stringify({type:'event',event:'connect.challenge',payload:{nonce:'fixture',ts:Date.now()}}));
     socket.on('message',raw=>{
       const request=JSON.parse(raw.toString());calls.push({method:request.method,params:request.params});
       if('sessionId'in request.params&&typeof request.params.sessionId!=='string'){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST'}}));return;}
+      if((request.method==='chat.abort'&&('sessionId'in request.params||rejectAbort))||(request.method==='chat.history'&&'sessionId'in request.params&&!request.params.messageId)){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST'}}));return;}
       let payload:any={};
-      if(request.method==='connect')payload={type:'hello-ok',protocol:4,server:{version:'2026.9.6-fixture'},features:{methods:['chat.send','chat.history','chat.abort','models.list','sessions.messages.subscribe','exec.approval.resolve','exec.approval.list','question.resolve']},snapshot:{sessionDefaults:{model:'openai/verified-image-model'}}};
+      if(request.method==='connect')payload={type:'hello-ok',protocol:4,server:{version:'2026.9.6-fixture'},features:{methods:['chat.send','chat.history','chat.abort','agents.list','models.list','sessions.messages.subscribe','exec.approval.resolve','exec.approval.list','question.resolve']},snapshot:{sessionDefaults:{model:'openai/verified-image-model'}}};
       if(request.method==='agents.list')payload={defaultId:'northpointe',agents:[{id:'northpointe',name:'NorthPointe'}]};
       if(request.method==='models.list')payload={models:[{id:'verified-image-model',provider:'openai',input:['text','image']}]};
       if(request.method==='chat.history')payload=history??{sessionId:'session-fixture',messages:[],sessionInfo:{model:'verified-image-model',modelProvider:'openai'}};
@@ -53,7 +54,7 @@ async function fixture(unremovableBootstrap=false) {
   const created=await app.inject({method:'POST',url:'/api/conversations',headers,payload:{}});expect(created.statusCode).toBe(200);
   const conversation=created.json();
   const emit=(event:string,payload:any)=>{for(const socket of clients)socket.send(JSON.stringify({type:'event',event,payload}));};
-  return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
+  return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
 }
 describe('owner boundary',()=>{
   it('finishes one-time setup when a token mount cannot be deleted, and never guesses an agent',async()=>{
@@ -115,6 +116,18 @@ describe('native OpenClaw lifecycle',()=>{
     expect(f.calls.find(c=>c.method==='chat.history')?.params).not.toHaveProperty('sessionId');
     await f.app.inject({method:'POST',url:`${url}/turns`,headers:f.headers,payload:{id:'assigned-session',text:'Continue the same native session'}});
     expect(f.calls.find(c=>c.method==='chat.send')?.params.sessionId).toBe('session-fixture');
+    expect((await f.app.inject({method:'GET',url,headers:f.headers})).statusCode).toBe(200);
+    const abort=await f.app.inject({method:'POST',url:`${url}/turns/assigned-session/abort`,headers:f.headers});expect(abort.statusCode).toBe(200);expect(abort.json().agentConfirmed).toBe(true);
+    expect(f.calls.filter(c=>c.method==='chat.history'||c.method==='chat.abort').every(c=>!('sessionId'in c.params))).toBe(true);
+  });
+  it('keeps playback cancelled while reporting unconfirmed native cancellation honestly',async()=>{
+    const f=await fixture(),url=`/api/conversations/${f.conversation.id}/turns`;
+    await f.app.inject({method:'POST',url,headers:f.headers,payload:{id:'unconfirmed-cancel',text:'Cancel this safely'}});f.rejectCancellation();
+    const result=await f.app.inject({method:'POST',url:`${url}/unconfirmed-cancel/abort`,headers:f.headers});expect(result.statusCode).toBe(202);expect(result.json()).toEqual({ok:true,agentConfirmed:false});
+    expect((f.app as any).vc.store.turn('unconfirmed-cancel')).toMatchObject({delivery:'cancelled',cancelRequested:true});
+    expect(f.events.find(e=>e.type==='turn'&&e.delivery==='cancelled'&&e.error)).toMatchObject({error:expect.stringContaining('not confirmed')});
+    f.emit('chat',{runId:'unconfirmed-cancel',sessionKey:`agent:northpointe:vc2:${f.conversation.id}`,seq:1,state:'delta',deltaText:'Stale speech'});
+    await new Promise(resolve=>setTimeout(resolve,20));expect(f.events.some(e=>e.type==='assistant')).toBe(false);
   });
   it('signs the exact challenge with a stable encrypted application identity and no admin permission',async()=>{
     const f=await fixture();const p=f.calls.find(c=>c.method==='connect')!.params,d=p.device;
@@ -205,6 +218,41 @@ describe('native OpenClaw lifecycle',()=>{
     await expect.poll(()=>f.events.some(e=>e.type==='approval'&&e.id==='vc:approval.1')).toBe(true);
     expect(JSON.stringify(f.events)).not.toContain('foreign private');
     expect((await f.app.inject({method:'POST',url:'/api/approvals/vc%3Aapproval.1',headers:f.headers,payload:{decision:'allow-once'}})).statusCode).toBe(200);
+  });
+  it('filters sensitive and mismatched questions and resolves a complete answer group safely',async()=>{
+    const f=await fixture(),conversationPath=`/api/conversations/${f.conversation.id}`;
+    await f.app.inject({method:'GET',url:conversationPath,headers:f.headers});
+    await f.app.inject({method:'POST',url:`${conversationPath}/turns`,headers:f.headers,payload:{id:'question-turn',text:'Ask me two useful questions'}});
+    const base={runId:'question-turn',sessionKey:`agent:northpointe:vc2:${f.conversation.id}`,sessionId:'session-fixture',expiresAtMs:Date.now()+10000};
+    f.emit('question.requested',{...base,id:'secret-direct',questions:[{id:'s',question:'Private direct field',isSecret:true}]});
+    f.emit('question.requested',{...base,id:'secret-store',questions:[{id:'s',question:'Private secret store field',secretStore:{name:'credential'}}]});
+    f.emit('question.requested',{...base,id:'other-session',sessionKey:'agent:northpointe:unrelated',questions:[{id:'s',question:'Wrong conversation'}]});
+    f.emit('question.requested',{...base,id:'other-session-id',sessionId:'unrelated-native-session',questions:[{id:'s',question:'Wrong native session'}]});
+    f.emit('question.requested',{...base,id:'other-run',runId:'unknown-old-run',questions:[{id:'s',question:'Unknown run'}]});
+    f.emit('question.requested',{...base,id:'duplicate-ids',questions:[{id:'s',question:'Duplicate one'},{id:'s',question:'Duplicate two'}]});
+    f.emit('question.requested',{...base,id:'valid-questions',questions:[{id:'__proto__',question:'What is the first choice?'},{id:'choice',question:'What is the second choice?'}]});
+    await expect.poll(()=>f.events.filter(e=>e.type==='question').length).toBe(2);
+    const prompts=f.events.filter(e=>e.type==='question');expect(prompts.map(e=>e.text)).toEqual(['What is the first choice?','What is the second choice?']);
+    expect((await f.app.inject({method:'POST',url:`/api/questions/${prompts[0].id}`,headers:f.headers,payload:{answer:'First'}})).statusCode).toBe(200);
+    expect(f.calls.filter(c=>c.method==='question.resolve')).toHaveLength(0);
+    expect((await f.app.inject({method:'POST',url:`/api/questions/${prompts[1].id}`,headers:f.headers,payload:{answer:'Second'}})).statusCode).toBe(200);
+    const sent=f.calls.find(c=>c.method==='question.resolve')!.params;expect(sent.id).toBe('valid-questions');expect(Object.keys(sent.answers.answers)).toEqual(['__proto__','choice']);expect(sent.answers.answers.__proto__).toEqual(['First']);expect(sent.answers.answers.choice).toEqual(['Second']);
+  });
+});
+describe('gateway compatibility failures',()=>{
+  it.each([
+    {name:'unapproved device',error:{code:'NOT_PAIRED',details:{code:'PAIRING_REQUIRED'}},reason:'one-time device approval'},
+    {name:'incompatible hello',payload:{protocol:3},reason:'protocol 4'},
+    {name:'native protocol rejection',error:{code:'INVALID_REQUEST',message:'protocol mismatch: raw-value-must-not-leak'},reason:'protocol 4'},
+    {name:'missing required methods',payload:{protocol:4,features:{methods:['chat.send','chat.history']}},reason:'missing a required'},
+  ])('explains $name without exposing raw native errors',async item=>{
+    const dir=mkdtempSync(join(tmpdir(),'vc2-compat-')),store=new Store(dir,randomBytes(32));
+    const server=new WebSocketServer({port:0});await new Promise<void>(resolve=>server.once('listening',resolve));
+    server.on('connection',socket=>{socket.send(JSON.stringify({type:'event',event:'connect.challenge',payload:{nonce:'compatibility-fixture',ts:Date.now()}}));socket.on('message',raw=>{const req=JSON.parse(raw.toString());socket.send(JSON.stringify({type:'res',id:req.id,ok:!item.error,...item.error?{error:item.error}:{payload:item.payload}}));});});
+    const address=server.address();if(!address||typeof address==='string')throw new Error('Fixture address unavailable');
+    const gateway=new Gateway(loadConfig({stateDir:dir,masterKey:randomBytes(32),gatewayToken:'fixture-only',gatewayUrl:`ws://127.0.0.1:${address.port}`}),store,()=>{});
+    cleanup.push(async()=>{gateway.close();for(const socket of server.clients)socket.terminate();await new Promise<void>(resolve=>server.close(()=>resolve()));store.close();rmSync(dir,{recursive:true,force:true});});
+    await expect.poll(()=>gateway.capabilities().reason).toContain(item.reason);expect(gateway.capabilities().connected).toBe(false);expect(gateway.capabilities().approvals).toBe(false);expect(JSON.stringify(gateway.capabilities())).not.toContain('raw-value-must-not-leak');
   });
 });
 it('preserves a cancellation tombstone when service storage reopens',()=>{

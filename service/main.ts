@@ -105,7 +105,7 @@ export async function buildApp(options:AppOptions={}) {
     const prior=store.turn(turn.id);if(prior&&prior.conversationId!==p.id)return reply.code(409).send({error:'This message belongs to another conversation.'});
     try{return await gateway.send(p.id,turn);}catch{return reply.code(409).send({error:'This message could not be sent. Check image support or start a new message.'});}
   });
-  app.post('/api/conversations/:id/turns/:turnId/abort',async(req,reply)=>{const p=z.object({id,turnId:id}).parse(req.params);const t=store.turn(p.turnId);if(!t||t.conversationId!==p.id)return reply.code(404).send({error:'Turn not found.'});await gateway.abort(p.id,p.turnId);return {ok:true};});
+  app.post('/api/conversations/:id/turns/:turnId/abort',async(req,reply)=>{const p=z.object({id,turnId:id}).parse(req.params);const t=store.turn(p.turnId);if(!t||t.conversationId!==p.id)return reply.code(404).send({error:'Turn not found.'});try {await gateway.abort(p.id,p.turnId);return {ok:true,agentConfirmed:true};}catch{return reply.code(202).send({ok:true,agentConfirmed:false});}});
   app.post('/api/uploads',{config:{rateLimit:{max:20,timeWindow:60000}}},async(req,reply)=>{
     const file=await req.file();if(!file)return reply.code(400).send({error:'Choose an image.'});
     let decoded:Awaited<ReturnType<typeof normalizeImage>>;

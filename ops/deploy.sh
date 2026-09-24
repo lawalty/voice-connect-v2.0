@@ -46,7 +46,7 @@ chmod 644 "$base/Caddyfile"
 docker compose --project-directory "$source_dir" -f ops/compose.yaml up -d --no-build
 healthy=0
 for attempt in $(seq 1 30); do
-    if curl --fail --silent http://127.0.0.1:18880/health | python3 -c 'import json,sys; h=json.load(sys.stdin); sys.exit(0 if h.get("build")==sys.argv[1] and h.get("openclaw") is True else 1)' "$release"; then healthy=1; break; fi
+    if curl --fail --silent http://127.0.0.1:18880/health | python3 -c 'import json,sys; h=json.loads(sys.stdin.read() or "{}"); sys.exit(0 if h.get("build")==sys.argv[1] and h.get("openclaw") is True else 1)' "$release"; then healthy=1; break; fi
     sleep 2
 done
 if test "$healthy" != 1; then echo 'New VC service failed health check. Previous image and backup remain available.'; exit 1; fi

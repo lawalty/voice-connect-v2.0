@@ -8,6 +8,7 @@ import { Timings, type TimingSample } from './telemetry.js';
 
 type Json = Record<string, any>;
 class RejectedRequest extends Error {constructor(readonly code?:string){super('OpenClaw declined the request');}}
+class IncompatibleGateway extends Error {constructor(readonly reason:string){super('Gateway compatibility check failed');}}
 const terminal=new Set(['complete','failed','cancelled']);
 export interface GatewayPort extends HarnessAdapter {
   approval(id:string,decision:string):Promise<void>; answer(id:string,answer:string):Promise<void>; diagnostics?():TimingSample[];
@@ -22,7 +23,7 @@ export class Gateway implements GatewayPort {
   private timings=new Timings();
   private socket?:WebSocket; private ready=false; private stopped=false; private timer?:NodeJS.Timeout;
   private connectingTimer?:NodeJS.Timeout; private backoff=1000; private version=''; private methods=new Set<string>();
-  private pairingRequired=false;
+  private disconnectedReason?:string;
   private pending=new Map<string,{resolve:(v:Json)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout}>();
   private sequence=new Map<string,number>(); private text=new Map<string,string>(); private modelImages=new Set<string>();
   private images=false; private approvals=false; private subscribed=new Set<string>();
@@ -31,7 +32,7 @@ export class Gateway implements GatewayPort {
   constructor(private cfg:ServiceConfig, private store:Store, private publish:(event:ServerEvent)=>void) {
     if(cfg.gatewayEnabled&&cfg.gatewayToken)this.connect();
   }
-  capabilities():HarnessCapabilities {return {connected:this.ready,images:this.images,cancellation:this.methods.has('chat.abort'),approvals:this.ready&&this.approvals,version:this.version,...!this.ready?{reason:this.pairingRequired?'Voice Connect requires one-time device approval on the OpenClaw server.':'OpenClaw is reconnecting. Your conversation is preserved.'}:{}};}
+  capabilities():HarnessCapabilities {return {connected:this.ready,images:this.images,cancellation:this.methods.has('chat.abort'),approvals:this.ready&&this.approvals,version:this.version,...!this.ready?{reason:this.disconnectedReason??'OpenClaw is reconnecting. Your conversation is preserved.'}:{}};}
   diagnostics():TimingSample[]{return this.timings.snapshot();}
   private connect():void {
     if(this.stopped)return;
@@ -51,7 +52,8 @@ export class Gateway implements GatewayPort {
     if(ws!==this.socket)return;
     if(frame.type==='res'){
       const p=this.pending.get(frame.id);if(!p)return;this.pending.delete(frame.id);clearTimeout(p.timer);
-      frame.ok?p.resolve(frame.payload??{}):p.reject(new RejectedRequest(frame.error?.code==='NOT_PAIRED'&&frame.error?.details?.code==='PAIRING_REQUIRED'?'PAIRING_REQUIRED':undefined));return;
+      if(frame.ok)p.resolve(frame.payload??{});
+      else {const code=frame.error?.code==='NOT_PAIRED'&&frame.error?.details?.code==='PAIRING_REQUIRED'?'PAIRING_REQUIRED':/protocol.{0,40}(?:mismatch|unsupported|incompatible)|(?:unsupported|incompatible).{0,40}protocol/i.test(String(frame.error?.message??'').slice(0,256))?'PROTOCOL_MISMATCH':undefined;p.reject(new RejectedRequest(code));}return;
     }
     if(frame.type!=='event')return;
     if(frame.event==='connect.challenge'){
@@ -60,19 +62,19 @@ export class Gateway implements GatewayPort {
       const device=signGatewayChallenge(this.store,this.cfg.gatewayToken,frame.payload.nonce,frame.payload.ts,scopes);
       void this.request('connect',{minProtocol:4,maxProtocol:4,client:{id:'gateway-client',version:'2.0.0',platform:'linux',mode:'backend'},role:'operator',scopes,caps:['tool-events'],device,auth:{token:this.cfg.gatewayToken},locale:'en-US'},true).then(async hello=>{
         clearTimeout(this.connectingTimer);if(this.socket!==ws)return;
-        if(hello.protocol!==4)throw new Error('Unsupported gateway protocol');
+        if(hello.protocol!==4)throw new IncompatibleGateway('This OpenClaw version does not support the required Gateway protocol 4.');
         this.version=String(hello.server?.version??'');this.methods=new Set(hello.features?.methods??[]);
-        if(!this.methods.has('chat.send')||!this.methods.has('chat.history')||!this.methods.has('chat.abort'))throw new Error('Gateway chat methods unavailable');
+        if(!['chat.send','chat.history','chat.abort','agents.list','sessions.messages.subscribe'].every(method=>this.methods.has(method)))throw new IncompatibleGateway('This OpenClaw version is missing a required chat, session, or agent method.');
         const agents=await this.request('agents.list',{},true);
         if(typeof agents.defaultId!=='string'||!/^[a-z0-9_-]+$/i.test(agents.defaultId))throw new Error('No default OpenClaw agent');
         this.store.set('default-agent',agents.defaultId);
-        this.ready=true;this.pairingRequired=false;this.backoff=1000;this.publish({type:'connection',connected:true});
+        this.ready=true;this.disconnectedReason=undefined;this.backoff=1000;this.publish({type:'connection',connected:true});
         await this.discoverImages(hello).catch(()=>{});
         for(const row of this.store.outstanding()) {
           if(row.cancelRequested){void this.request('chat.abort',{...this.target(row.conversationId),runId:row.runId??row.id}).catch(()=>{});}
         }
         for(const c of this.store.conversations().slice(0,20)){void this.history(c.id).then(()=>this.publish({type:'reconcile',conversationId:c.id})).catch(()=>{});}
-      }).catch(error=>{this.pairingRequired=error instanceof RejectedRequest&&error.code==='PAIRING_REQUIRED';ws.close(1008,'Gateway unavailable');});return;
+      }).catch(error=>{this.disconnectedReason=error instanceof IncompatibleGateway?error.reason:error instanceof RejectedRequest&&error.code==='PAIRING_REQUIRED'?'Voice Connect requires one-time device approval on the OpenClaw server.':error instanceof RejectedRequest&&error.code==='PROTOCOL_MISMATCH'?'This OpenClaw version does not support the required Gateway protocol 4.':undefined;ws.close(1008,'Gateway unavailable');});return;
     }
     if(!this.ready)return;
     if(frame.event==='chat')this.chat(frame.payload??{});
@@ -93,7 +95,7 @@ export class Gateway implements GatewayPort {
     const defaultModel=hello.snapshot?.sessionDefaults?.model??hello.snapshot?.defaults?.model??this.cfg.gatewayModel;
     if(typeof defaultModel==='string')this.images=this.modelImages.has(defaultModel);
   }
-  private target(id:string):{sessionKey:string;agentId:string;sessionId?:string} {const mapping=this.store.mapping(id);return {...mapping,agentId:mapping.sessionKey.split(':')[1]};}
+  private target(id:string,includeSessionId=false):{sessionKey:string;agentId:string;sessionId?:string} {const mapping=this.store.mapping(id);return {sessionKey:mapping.sessionKey,agentId:mapping.sessionKey.split(':')[1],...includeSessionId&&mapping.sessionId?{sessionId:mapping.sessionId}:{}};}
   private async subscribe(id:string):Promise<void> {
     if(this.subscribed.has(id))return;const t=this.target(id);
     const approvals=this.methods.has('exec.approval.resolve');
@@ -166,7 +168,7 @@ export class Gateway implements GatewayPort {
     try{
       await this.subscribe(id);if(this.store.turn(row.id)?.cancelRequested)return this.store.receipt(this.store.turn(row.id)!);
       const attachments=(turn.attachments??[]).map(a=>{const value=this.store.attachment(a)!;return {type:'image',mimeType:value.meta.mimeType,fileName:value.meta.name,content:value.bytes.toString('base64')};});
-      const response=await this.request('chat.send',{...this.target(id),message:turn.text,idempotencyKey:turn.id,...attachments.length?{attachments}:{}});
+      const response=await this.request('chat.send',{...this.target(id,true),message:turn.text,idempotencyKey:turn.id,...attachments.length?{attachments}:{}});
       const runId=typeof response.runId==='string'?response.runId:row.id;
       this.store.updateTurn(row.id,'accepted',runId);
       this.timings.record(row.id,'admitted',row.createdAt);
@@ -178,7 +180,14 @@ export class Gateway implements GatewayPort {
     const row=this.store.turn(turnId);if(!row||row.conversationId!==id)throw new Error('Turn not found');
     this.store.cancelTurn(turnId);this.clearPrompts(id);this.text.delete(row.runId??row.id);this.sequence.delete(row.runId??row.id);this.publish({type:'turn',conversationId:id,turnId,delivery:'cancelled',runId:row.runId});
     const startedAt=Date.now();this.timings.record(turnId,'cancel-requested',startedAt);
-    if(this.ready)await this.request('chat.abort',{...this.target(id),runId:row.runId??row.id}).then(()=>this.timings.record(turnId,'cancel-confirmed',startedAt)).catch(()=>{});
+    try {
+      const result=await this.request('chat.abort',{...this.target(id),runId:row.runId??row.id});
+      if(result.aborted!==true&&!(Array.isArray(result.runIds)&&result.runIds.includes(row.runId??row.id)))throw new Error('Agent cancellation not confirmed');
+      this.timings.record(turnId,'cancel-confirmed',startedAt);
+    }catch {
+      this.publish({type:'turn',conversationId:id,turnId,delivery:'cancelled',runId:row.runId,error:'Playback stopped. OpenClaw cancellation is not confirmed; reconnect will retry.'});
+      throw new Error('Agent cancellation not confirmed');
+    }
   }
   private chat(p:Json):void {
     const row=this.store.findRun(p.runId);if(!row)return;
@@ -214,11 +223,15 @@ export class Gateway implements GatewayPort {
     this.boundState();
     const runId=p.runId??p.request?.runId;
     const sessionKey=p.sessionKey??p.request?.sessionKey;
+    const sessionId=p.sessionId??p.request?.sessionId;
     const conversationId=typeof sessionKey==='string'?this.store.conversationForSession(sessionKey):undefined;
     const row=typeof runId==='string'?this.store.findRun(runId):undefined;
-    const owner=row??(conversationId?this.store.conversationTurns(conversationId).find(t=>!t.cancelRequested&&!terminal.has(t.delivery)):undefined);
+    const candidates=conversationId?this.store.conversationTurns(conversationId).filter(t=>!t.cancelRequested&&['pending','accepted'].includes(t.delivery)):[];
+    if(event==='question.requested'&&typeof runId==='string'&&!row)return;
+    const owner=row??(candidates.length===1?candidates[0]:undefined);
     if(!owner||owner.cancelRequested||terminal.has(owner.delivery)||typeof p.id!=='string'||p.id.length>128||this.prompts.size>=100||this.prompts.has(p.id)||this.questionGroups.has(p.id))return;
     if(typeof sessionKey==='string'&&sessionKey!==this.store.mapping(owner.conversationId).sessionKey)return;
+    if(typeof sessionId==='string'&&this.store.mapping(owner.conversationId).sessionId&&sessionId!==this.store.mapping(owner.conversationId).sessionId)return;
     const expiresAt=Math.min(typeof p.expiresAtMs==='number'?p.expiresAtMs:Date.now()+120000,Date.now()+600000);if(expiresAt<=Date.now())return;
     if(event==='exec.approval.requested'){
       if(!this.approvals)return;
@@ -230,9 +243,9 @@ export class Gateway implements GatewayPort {
       const outgoing:ServerEvent={type:'approval',conversationId:owner.conversationId,id:p.id,label:allow?'OpenClaw requests permission to run this command.':'This command requires review in OpenClaw; it cannot be safely displayed here.',...(allow?{detail}:{}),expiresAt};
       this.prompts.set(p.id,{kind:'approval',conversationId:owner.conversationId,expiresAt,allow,event:outgoing});this.publish(outgoing);
     }else if(this.methods.has('question.resolve')&&Array.isArray(p.questions)&&p.questions.length>0&&p.questions.length<=10){
-      const valid=p.questions.filter((q:Json)=>typeof q.id==='string'&&typeof q.question==='string'&&q.question.length<=4000&&!q.isSecret);
-      if(valid.length!==p.questions.length)return;
-      this.questionGroups.set(p.id,{ids:valid.map((q:Json)=>q.id),answers:{},expiresAt});
+      const valid=p.questions.filter((q:Json)=>q&&typeof q.id==='string'&&q.id.length>0&&q.id.length<=128&&typeof q.question==='string'&&q.question.length<=4000&&!q.isSecret&&q.secretStore===undefined);
+      if(valid.length!==p.questions.length||new Set(valid.map((q:Json)=>q.id)).size!==valid.length)return;
+      this.questionGroups.set(p.id,{ids:valid.map((q:Json)=>q.id),answers:Object.create(null) as Record<string,string[]>,expiresAt});
       for(const q of valid){const localId=randomUUID();const outgoing:ServerEvent={type:'question',conversationId:owner.conversationId,id:localId,text:q.question,options:Array.isArray(q.options)?q.options.slice(0,20).map((v:Json)=>v.label).filter((v:unknown)=>typeof v==='string'&&v.length<=500):undefined};this.prompts.set(localId,{kind:'question',conversationId:owner.conversationId,expiresAt,requestId:p.id,questionId:q.id,event:outgoing});this.publish(outgoing);}
     }
   }

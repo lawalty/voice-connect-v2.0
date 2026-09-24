@@ -36,6 +36,12 @@ server. Separate audio sockets keep audio backpressure away from control message
 Mandatory WebRTC/TURN infrastructure would not improve the default text-only server
 path. Revisit transport only using measured loss/latency evidence.
 
+Capture and stateful resampling run in the AudioWorklet, keeping the UI thread out
+of per-sample work. Silero and Vosk run in Workers. Premium output uses bounded,
+scheduled Web Audio PCM sources with generation-based cancellation; browser speech
+uses native utterances. A playback worklet is not needed to obtain local stop
+control, and cannot repair device-level echo cancellation for browser voices.
+
 Vosk's third-party WASM binding is pinned and isolated. New AudioWorklets feed it;
 deprecated ScriptProcessor examples were not adopted. Model assets are separately
 downloadable, verified, and removable. Audio and inferred emotions are not recorded

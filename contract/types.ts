@@ -48,8 +48,32 @@ export interface HarnessAdapter {
   abort(conversationId: string, turnId: string): Promise<void>;
   close(): void;
 }
+export interface RecognizerCapabilities {
+  provider: RecognizerKind;
+  available: boolean;
+  input: 'browser-managed' | 'pcm16k';
+  processing: 'browser-vendor' | 'local' | 'remote';
+  handsFree: boolean;
+  endpointing: 'native-session' | 'local-vad' | 'provider-turn';
+  reason?: string;
+}
+export interface RecognizerResult { text: string; final: boolean; turnComplete: boolean; started?: boolean; }
+export interface RecognizerError {
+  code: 'permission' | 'capture' | 'no-speech' | 'network' | 'unavailable' | 'overload' | 'unknown';
+  message: string;
+  fatal: boolean;
+}
+export interface RecognizerEvents {
+  result(result: RecognizerResult): void;
+  ended(expected: boolean): void;
+  error(error: RecognizerError): void;
+}
 export interface SpeechRecognizer {
+  readonly capabilities: RecognizerCapabilities;
+  readonly running: boolean;
   start(): Promise<void>;
+  /** Normalized mono PCM at 16 kHz; browser-managed capture ignores this input. */
+  push(samples: Float32Array): void;
   finish(): Promise<void>;
   stop(): void;
 }
