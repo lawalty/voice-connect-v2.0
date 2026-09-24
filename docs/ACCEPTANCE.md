@@ -9,7 +9,7 @@ qualified Android/car release. All agent checks used clearly labeled synthetic t
 | --- | --- |
 | Independent implementation | Fresh Git root and history; requirements provenance in DECISIONS.md. No historical application implementation imported. |
 | Build and dependencies | Strict TypeScript, production Vite/Node build, and npm vulnerability audit pass. Linux CI repeats them. Node and Caddy container bases are digest pinned. |
-| Backend, audio and orb regressions | 56 tests pass: authentication/origin/CSRF, native targeting, duplicate delivery, terminal ordering, cancellation, question ownership, provider lifecycle, resampling, model boundaries, uncertainty and reduced motion. |
+| Backend, audio and orb regressions | 58 tests pass: authentication/origin/CSRF, exact login/global throttle thresholds and HTTP 429 responses, native targeting, duplicate delivery, terminal ordering, cancellation, question ownership, provider lifecycle, resampling, model boundaries, uncertainty and reduced motion. |
 | Desktop/mobile browser flows | 14 checks pass: private sign-in, same conversation after refresh, camera capture/upload and track cleanup, settings, keyboard dialogs, offline drafts, reconnect, local speech, voice-to-text handoff and delayed receipts. Six speech runtime/ownership checks run on desktop only and are explicitly skipped in the mobile layout project. Mobile is Chromium viewport emulation, not a phone. |
 | Input handoff | Focusing the composer, Edit as text, and direct typed Send stop capture and preserve typed plus unsent spoken words. Late recognition cannot submit stale speech. Delayed voice/text receipts cannot erase newer typing; submitted voice text is not duplicated into the composer. |
 | Native OpenClaw | Actual 2026.9.6 Gateway with signed, approved application identity; read/write/approval/question scopes. NorthPointe name confirmed by live exchange. Existing OpenClaw deployment and persona preserved. |
@@ -20,6 +20,7 @@ qualified Android/car release. All agent checks used clearly labeled synthetic t
 | Local speech | Real Chromium AudioWorklet, Silero and Vosk startup under production security headers; cached offline sample recognition; model removal. Actual HTTPS deployment also passed: 7,030 ms startup, 2.5 seconds synthetic silence, zero submissions and page errors, successful download/removal. This is a startup observation, not a turn-latency benchmark. |
 | Voice to native agent | A verified public number-recording WAV passed through the actual HTTPS browser microphone path, AudioWorklet, Silero and Vosk. Finish submitted exactly one full turn, and NorthPointe returned VOICE-TEST-ACK in the same conversation as the typed prelude. No interim submission, duplicate, premium connection or page error occurred. |
 | Security boundaries | Encoded API route aliases require authentication, origin and CSRF checks. HTTP and WebSocket regression coverage plus actual HTTPS probes pass. Dynamic evaluation is allowed only on the exact Vosk broker Worker response; application documents remain strict. |
+| Rollback | Immutable release 1ccd824 was rolled back to d973af7 and restored. Authenticated history, the newest voice conversation, image bytes, native connectivity and each release's served asset digests survived both transitions. Evidence is in `.local/release-evidence/rollback-state.json`. |
 
 Run `node ops/verify-live.mjs` for authenticated deployment evidence, using a
 restricted, ignored owner-credential file. It writes sanitized results and screenshots
@@ -30,6 +31,9 @@ Neither script belongs in an unattended job with a real microphone.
 microphone and makes two clearly labeled synthetic native turns. It records no
 real microphone input and writes results to `live-voice.json` in the evidence directory.
 Run `node checks/audio-browser.mjs` first to fetch and verify that public WAV fixture.
+Desktop and mobile layout projects use separate temporary server/Gateway fixtures,
+so the fast combined CI workload does not share a production request-limit budget.
+Production authentication and global request limits remain enabled and regression tested.
 
 The measurements below were repeated against immutable application source
 `d973af7b869d4515a5aa7922b8d3cdd5b944683a`. Its [Linux CI run](https://github.com/lawalty/voice-connect-v2.0/actions/runs/36066112065)

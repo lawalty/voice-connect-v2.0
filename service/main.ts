@@ -45,7 +45,7 @@ export async function buildApp(options:AppOptions={}) {
   const gateway=options.gatewayFactory?.(cfg,store,publish)??new Gateway(cfg,store,publish);
   app.decorate('vc',{cfg,store,gateway});
   await app.register(cookie);
-  await app.register(rateLimit,{max:240,timeWindow:60000,errorResponseBuilder:()=>({error:'Too many requests. Please wait a moment.'})});
+  await app.register(rateLimit,{max:240,timeWindow:60000,errorResponseBuilder:()=>({statusCode:429,error:'Too many requests. Please wait a moment.'})});
   await app.register(multipart,{limits:{fileSize:5*1024*1024,files:1,fields:0,parts:1}});
   await app.register(websocket,{options:{maxPayload:128*1024,perMessageDeflate:false}});
   const session=(req:FastifyRequest)=>store.session(req.cookies.vc_session??'');

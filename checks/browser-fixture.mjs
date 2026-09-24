@@ -7,13 +7,16 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 
+const [appPort=5180,readinessPort=5181,gatewayPort=18791]=process.argv.slice(2).map(Number);
+if([appPort,readinessPort,gatewayPort].some(port=>!Number.isInteger(port)||port<1024||port>65535)||new Set([appPort,readinessPort,gatewayPort]).size!==3)throw new Error('Fixture ports must be three distinct unprivileged ports');
+const origin=`http://127.0.0.1:${appPort}`;
 const dir=await mkdtemp(join(tmpdir(),'vc2-browser-'));
 const token=randomBytes(24).toString('hex');
 await mkdir(join(dir,'state'));
 await writeFile(join(dir,'master'),randomBytes(32).toString('hex'));
 await writeFile(join(dir,'bootstrap'),token);
 await writeFile(join(dir,'gateway'),'fixture-token');
-const gateway=new WebSocketServer({host:'127.0.0.1',port:18791});
+const gateway=new WebSocketServer({host:'127.0.0.1',port:gatewayPort});
 const sessions=new Map(), timers=new Map(), receipts=new Map();
 gateway.on('connection',ws=>{
   ws.send(JSON.stringify({type:'event',event:'connect.challenge',payload:{nonce:'fixture',ts:Date.now()}}));
@@ -51,17 +54,17 @@ gateway.on('connection',ws=>{
     res({ok:true});
   });
 });
-const app=spawn(process.execPath,['dist/service/main.js'],{stdio:['ignore','inherit','inherit'],env:{...process.env,NODE_ENV:'test',VC_HOST:'127.0.0.1',VC_PORT:'5180',VC_ORIGIN:'http://127.0.0.1:5180',VC_STATE_DIR:join(dir,'state'),VC_GATEWAY_URL:'ws://127.0.0.1:18791',VC_GATEWAY_TOKEN_FILE:join(dir,'gateway'),VC_MASTER_KEY_FILE:join(dir,'master'),VC_BOOTSTRAP_TOKEN_FILE:join(dir,'bootstrap'),VC_BUILD:'browser-fixture'}});
+const app=spawn(process.execPath,['dist/service/main.js'],{stdio:['ignore','inherit','inherit'],env:{...process.env,NODE_ENV:'test',VC_HOST:'127.0.0.1',VC_PORT:String(appPort),VC_ORIGIN:origin,VC_STATE_DIR:join(dir,'state'),VC_GATEWAY_URL:`ws://127.0.0.1:${gatewayPort}`,VC_GATEWAY_TOKEN_FILE:join(dir,'gateway'),VC_MASTER_KEY_FILE:join(dir,'master'),VC_BOOTSTRAP_TOKEN_FILE:join(dir,'bootstrap'),VC_BUILD:'browser-fixture'}});
 let ready=false;
 for(let n=0;n<100;n++){
-  try { const response=await fetch('http://127.0.0.1:5180/api/status'); if(response.ok){ready=true;break;} }catch{}
+  try { const response=await fetch(`${origin}/api/status`); if(response.ok){ready=true;break;} }catch{}
   await new Promise(r=>setTimeout(r,150));
 }
 if(!ready)throw new Error('Browser fixture application did not start');
-const setup=await fetch('http://127.0.0.1:5180/api/auth/setup',{method:'POST',headers:{Origin:'http://127.0.0.1:5180','Content-Type':'application/json'},body:JSON.stringify({bootstrapToken:token,password:'browser-fixture-password-2026'})});
+const setup=await fetch(`${origin}/api/auth/setup`,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({bootstrapToken:token,password:'browser-fixture-password-2026'})});
 if(!setup.ok)throw new Error(`Fixture setup failed ${setup.status}`);
-console.log('Isolated browser fixture ready.');
-const readiness=createServer((req,res)=>{res.writeHead(200);res.end('ready');}).listen(5181,'127.0.0.1');
+console.log(`Isolated browser fixture ready at ${origin}.`);
+const readiness=createServer((req,res)=>{res.writeHead(200);res.end('ready');}).listen(readinessPort,'127.0.0.1');
 let closing=false;
 async function close(){if(closing)return;closing=true;app.kill();readiness.close();for(const ws of gateway.clients)ws.terminate();gateway.close();for(const group of timers.values())for(const t of group)clearTimeout(t);await new Promise(r=>setTimeout(r,500));if(dir.startsWith(join(tmpdir(),'vc2-browser-')))await rm(dir,{recursive:true,force:true}).catch(()=>{});process.exit(0);}
 process.on('SIGINT',close);process.on('SIGTERM',close);app.on('exit',()=>{if(!closing)void close();});

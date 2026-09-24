@@ -76,6 +76,19 @@ async function fixture(unremovableBootstrap=false) {
   return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
 }
 describe('owner boundary',()=>{
+  it('preserves HTTP 429 for the twelve-attempt authentication limit',async()=>{
+    const f=await fixture();
+    for(let attempt=0;attempt<12;attempt++)expect((await f.app.inject({method:'POST',url:'/api/auth/login',headers:{origin},payload:{password:'an incorrect test password'}})).statusCode).toBe(401);
+    const limited=await f.app.inject({method:'POST',url:'/api/auth/login',headers:{origin},payload:{password:'an incorrect test password'}});
+    expect(limited.statusCode).toBe(429);expect(limited.json()).toEqual({error:'Too many requests. Please wait a moment.'});expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
+  });
+  it('preserves HTTP 429 at the unchanged global 240-request limit',async()=>{
+    const dir=mkdtempSync(join(tmpdir(),'vc2-rate-limit-'));
+    const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),gatewayEnabled:false,gatewayToken:'',staticDir:join(dir,'absent'),origin}});
+    cleanup.push(async()=>{await app.close();rmSync(dir,{recursive:true,force:true});});
+    for(let request=0;request<240;request++)expect((await app.inject({method:'GET',url:'/api/status'})).statusCode).toBe(200);
+    const limited=await app.inject({method:'GET',url:'/api/status'});expect(limited.statusCode).toBe(429);expect(limited.json()).toEqual({error:'Too many requests. Please wait a moment.'});expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
+  });
   it('finishes one-time setup when a token mount cannot be deleted, and never guesses an agent',async()=>{
     const f=await fixture(true);expect((await f.app.inject({method:'GET',url:'/api/status',headers:f.headers})).json().authenticated).toBe(true);
     const store=(f.app as any).vc.store;store.remove('default-agent');
