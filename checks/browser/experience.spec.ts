@@ -116,11 +116,15 @@ test('offline draft remains unsent and cancellation cannot resurrect old output'
   await page.getByRole('button',{name:'Interrupt',exact:true}).click();
   await expect(page.getByRole('button',{name:'Interrupt',exact:true})).toHaveCount(0);
   await context.setOffline(true);
+  await expect(page.locator('.site-header .connection-pill')).toHaveText('Offline');
+  await expect(page.locator('.notice')).toHaveCount(0);
   await page.getByLabel('Message NorthPointe').fill('Keep this offline thought.');
   await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
   const recoveryStarted=Date.now();
   await context.setOffline(false);
   await expect(page.getByRole('button',{name:'Wake NorthPointe'})).toBeEnabled({timeout:5000});
+  await expect(page.locator('.site-header .connection-pill')).toHaveText('Connected');
+  await expect(page.locator('.notice')).toHaveCount(0);
   await info.attach('reconnection-timing',{body:JSON.stringify({recoveredMs:Date.now()-recoveryStarted}),contentType:'application/json'});
   await expect(page.getByLabel('Message NorthPointe')).toHaveValue('Keep this offline thought.');
   await expect(page.getByText('Your conversation stays together. I’m here with you.',{exact:true})).toHaveCount(0);
