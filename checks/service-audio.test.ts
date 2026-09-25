@@ -63,4 +63,43 @@ describe('recognition-only Deepgram Flux transport',()=>{
     const failed=fixture();failed.remote.event({type:'Error',message:'synthetic-recognition-secret'});
     expect(JSON.stringify(failed.client.frames())).not.toContain('synthetic-recognition-secret');expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('classifies HTTP 401 without reading malicious response contents or waiting for close acknowledgement',()=>{
+    const f=fixture();f.remote.readyState=WebSocket.CONNECTING;
+    f.remote.close.mockImplementation(()=>{f.remote.readyState=WebSocket.CLOSING;});
+    f.client.close.mockImplementation(()=>{f.client.readyState=WebSocket.CLOSING;});
+    const readPrivate=vi.fn(()=>{throw new Error('private header/body must never be read');});
+    const request=Object.defineProperty({},'headers',{get:readPrivate});
+    const response=Object.defineProperties({statusCode:401,resume:vi.fn(),destroy:vi.fn()},{
+      headers:{get:readPrivate},body:{get:readPrivate},statusMessage:{get:readPrivate},
+    });
+    f.remote.emit('unexpected-response',request,response);
+    expect(f.client.frames()).toEqual([{type:'error',message:'Deepgram rejected authentication (HTTP 401). Re-enter the intended API key in Settings and choose Save key. If the key is correct, check its project permissions. If the key is already correct, check its project permissions.'}]);
+    expect(readPrivate).not.toHaveBeenCalled();expect(response.resume).toHaveBeenCalledOnce();expect(response.destroy).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+    f.remote.emit('error',new Error('Authorization: synthetic-recognition-secret malicious-provider-response'));
+    f.remote.emit('close');expect(f.client.frames()).toHaveLength(1);
+    expect(JSON.stringify(f.client.frames())).not.toMatch(/synthetic-recognition-secret|malicious-provider-response/);
+  });
+
+  it.each([
+    [400,'Deepgram rejected the recognition request configuration (HTTP 400). Refresh Voice Connect and try again.'],
+    [402,'Deepgram requires account credits (HTTP 402). Check the project billing balance before retrying recognition.'],
+    [403,'Deepgram denied access to Flux recognition (HTTP 403). Check the saved key\'s project permissions and model access.'],
+    [429,'Deepgram recognition is rate limited (HTTP 429). Wait a moment and retry, or choose on-device recognition.'],
+    [500,'Deepgram recognition is temporarily unavailable (HTTP 5xx). Retry later or choose on-device recognition.'],
+    [503,'Deepgram recognition is temporarily unavailable (HTTP 5xx). Retry later or choose on-device recognition.'],
+    [404,'Deepgram rejected the recognition connection. Retry or choose on-device recognition.'],
+  ])('maps rejected upgrade HTTP %s to a static actionable message',(statusCode,message)=>{
+    const f=fixture(),response={statusCode,resume:vi.fn(),destroy:vi.fn(),headers:{'dg-error':'private provider detail'}};
+    f.remote.emit('unexpected-response',{},response);
+    expect(f.client.frames()).toEqual([{type:'error',message}]);expect(response.destroy).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('reports network failures without blaming the key and clears both timers immediately',()=>{
+    const f=fixture();f.client.close.mockImplementation(()=>{f.client.readyState=WebSocket.CLOSING;});
+    f.remote.emit('error',new Error('TLS failure with synthetic-recognition-secret in raw context'));
+    expect(f.client.frames()).toEqual([{type:'error',message:'The server could not connect to Deepgram recognition. Retry or choose on-device recognition.'}]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

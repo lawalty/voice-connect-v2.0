@@ -35,6 +35,14 @@ SQLite using the separate master key. Removing the key disables premium speech;
 it does not silently select another paid service. Back up the master key with
 restricted access separately from source and ordinary diagnostics.
 
+For Deepgram, enter the key under **Deepgram · STT** and use its separate
+**Save key** button. **Save preferences** applies the selected recognition and
+voice options; it does not submit a newly typed credential. A Deepgram HTTP 401
+means the provider rejected the credential used for that connection. It is not
+a Vosk error, and it is distinct from network, credit, permission, and rate-limit
+failures. Connection errors must expose only a safe category/status, never raw
+provider responses or authentication headers.
+
 For Fish Audio, save the API key under **Fish Audio · TTS**, select **Fish
 Audio** as the voice service, enter the voice ID, and use **Test speaker** before
 saving preferences. The voice ID is a per-device setting; the API key never

@@ -9,13 +9,18 @@ been established. Speech diagnostics and an explicit speaker test now distinguis
 requested/reported playback from the user's audibility confirmation. Adding Fish
 Audio does not by itself close that physical acceptance gate.
 
+The owner subsequently confirmed Vosk recognition works after saving its provider
+selection. A separate VPS probe of the configured Deepgram Flux connection returned
+HTTP 401 before any audio was sent. This is an authentication/access rejection, not
+a Vosk failure; live Deepgram transcription remains unqualified.
+
 ## Recorded implementation and deployment checks
 
 | Check | Evidence |
 | --- | --- |
 | Independent implementation | Fresh Git root and history; requirements provenance in DECISIONS.md. No historical application implementation imported. |
 | Build and dependencies | Strict TypeScript, production Vite/Node build, and npm vulnerability audit pass. Linux CI repeats them. Node and Caddy container bases are digest pinned. |
-| Backend, audio and orb regressions | 111 tests pass: authentication/origin/CSRF, exact login/global throttle thresholds and HTTP 429 responses, native targeting, duplicate delivery, terminal ordering, cancellation, question ownership, provider lifecycle, resampling, model boundaries, uncertainty, reduced motion, preference migration, continuous turn finalization races, Fish framing/cancellation, speech-output failure handling, and recognition-only Deepgram routing with no upstream TTS call. |
+| Backend, audio and orb regressions | 120 tests pass: authentication/origin/CSRF, exact login/global throttle thresholds and HTTP 429 responses, native targeting, duplicate delivery, terminal ordering, cancellation, question ownership, provider lifecycle, resampling, model boundaries, uncertainty, reduced motion, preference migration, continuous turn finalization races, Fish framing/cancellation, speech-output failure handling, recognition-only Deepgram routing with no upstream TTS call, and safe classification of Deepgram authentication, credit, permission, rate-limit and network failures. |
 | Desktop/mobile browser flows | 17 checks pass: private sign-in, same conversation after refresh, camera capture/upload and track cleanup, settings, keyboard dialogs, offline drafts, reconnect, local speech, voice-to-text handoff, delayed receipts, active-reply speech after history reconciliation, and speaker/Fish configuration checks. Switching Vosk to Deepgram and back retains the verified model without another download, conversation and output selection; automatic Vosk has no Finish button. Seven speech runtime/ownership checks run on desktop only and are explicitly skipped in the mobile layout project. Mobile is Chromium viewport emulation, not a phone. |
 | Input handoff | Focusing the composer, Edit as text, and direct typed Send stop capture and preserve typed plus unsent spoken words. Late recognition cannot submit stale speech. Delayed voice/text receipts cannot erase newer typing; a second completed voice turn during pending delivery pauses capture and remains in the composer. Composer initialization cannot overwrite fresh typing because input waits for conversation selection. |
 | Native OpenClaw | Actual 2026.9.6 Gateway with signed, approved application identity; read/write/approval/question scopes. NorthPointe name confirmed by live exchange. Existing OpenClaw deployment and persona preserved. |
@@ -124,8 +129,9 @@ improvement over old implementations without matched evidence.
   microphone requires an explicit Start talking.
 - Vosk's older browser binding remains a compatibility risk. Functional sample
   recognition is not a language/accent/noise accuracy evaluation.
-- No live Deepgram credential was available. Its adapters and failure paths are
-  implemented; live provider entitlement, speech quality, and cost remain unverified.
+- A Deepgram credential is configured, but its live Flux handshake returned HTTP
+  401. Provider access must be resolved before speech quality and latency can be
+  qualified. Vosk does not use this credential or upstream connection.
 - The transcript currently loads the latest 200 native messages. OpenClaw retains its
   canonical history. Image storage is bounded to 250 MiB; there is no image-library
   management/deletion interface in this release.
