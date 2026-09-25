@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { bridgeRecognition } from '../service/audio';
+import { bridgeRecognition, deepgramVerificationMessage, verifyDeepgramKey } from '../service/audio';
 
 class Socket extends EventEmitter {
   readyState: number = WebSocket.OPEN;
@@ -9,6 +9,7 @@ class Socket extends EventEmitter {
   sent: { data: string | Buffer; binary: boolean }[] = [];
   send(data: string | Buffer, options?: { binary?: boolean }) { this.sent.push({data,binary:options?.binary??false}); }
   close = vi.fn(() => { this.readyState = WebSocket.CLOSED; this.emit('close'); });
+  terminate = vi.fn(() => { this.readyState = WebSocket.CLOSED; this.emit('close'); });
   event(value: unknown) { this.emit('message',Buffer.from(JSON.stringify(value)),false); }
   frames() { return this.sent.filter(item=>!item.binary).map(item=>JSON.parse(item.data.toString())); }
 }
@@ -20,6 +21,52 @@ function fixture() {
 }
 beforeEach(()=>vi.useFakeTimers());
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();});
+
+describe('no-audio Deepgram credential verification',()=>{
+  function probe() {
+    const remote=new Socket(),factory=vi.fn((_url:URL,_options:WebSocket.ClientOptions)=>remote as unknown as WebSocket);
+    return {remote,factory,result:verifyDeepgramKey('synthetic-probe-secret',factory)};
+  }
+  function cleaned(remote:Socket) {
+    expect(remote.sent).toEqual([]);expect(remote.terminate).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
+    for(const event of ['message','close','unexpected-response'])expect(remote.listenerCount(event)).toBe(0);
+    expect(()=>remote.emit('error',new Error('late private provider detail'))).not.toThrow();
+  }
+  it('uses the exact production Flux configuration and succeeds only on Connected, without sending anything',async()=>{
+    const f=probe(),observed=vi.fn();void f.result.then(observed);
+    const [url,options]=f.factory.mock.calls[0]!;
+    expect(url.origin+url.pathname).toBe('wss://api.deepgram.com/v2/listen');
+    expect(Object.fromEntries(url.searchParams)).toEqual({model:'flux-general-en',encoding:'linear16',sample_rate:'16000',eot_threshold:'0.8',eot_timeout_ms:'5000'});
+    expect(options).toEqual({headers:{Authorization:'Token synthetic-probe-secret'},maxPayload:1024*1024,perMessageDeflate:false,handshakeTimeout:10000});
+    f.remote.emit('open');f.remote.event({type:'TurnInfo'});f.remote.emit('message',Buffer.from('{'),false);f.remote.emit('message',Buffer.from('{"type":"Connected"}'),true);
+    await Promise.resolve();expect(observed).not.toHaveBeenCalled();
+    f.remote.event({type:'Connected'});expect(await f.result).toEqual({ok:true});cleaned(f.remote);
+    f.remote.event({type:'Error'});expect(observed).toHaveBeenCalledOnce();
+  });
+  it('classifies rejected authentication without inspecting or retaining provider response contents',async()=>{
+    const f=probe(),readPrivate=vi.fn(()=>{throw new Error('private response must not be read');});
+    f.remote.readyState=WebSocket.CONNECTING;
+    const request=Object.defineProperty({},'headers',{get:readPrivate});
+    const response=Object.defineProperties({statusCode:401,resume:vi.fn(),destroy:vi.fn()},{headers:{get:readPrivate},body:{get:readPrivate},statusMessage:{get:readPrivate}});
+    f.remote.emit('unexpected-response',request,response);const result=await f.result;
+    expect(result).toEqual({ok:false,reason:'http',status:401});expect(readPrivate).not.toHaveBeenCalled();
+    expect(response.resume).toHaveBeenCalledOnce();expect(response.destroy).toHaveBeenCalledOnce();
+    expect(result.ok?undefined:deepgramVerificationMessage(result)).toContain('HTTP 401');cleaned(f.remote);
+  });
+  it.each(['network','closed','provider','timeout'] as const)('settles %s safely and releases listeners, socket, and timeout',async reason=>{
+    const f=probe();
+    if(reason==='network')f.remote.emit('error',new Error('Authorization: synthetic-probe-secret'));
+    else if(reason==='closed')f.remote.emit('close');
+    else if(reason==='provider')f.remote.event({type:'Error',message:'synthetic-probe-secret'});
+    else await vi.advanceTimersByTimeAsync(12000);
+    const result=await f.result;expect(result).toEqual({ok:false,reason});
+    expect(result.ok?'':deepgramVerificationMessage(result)).not.toContain('synthetic-probe-secret');cleaned(f.remote);
+  });
+  it('contains synchronous connection errors without creating a timeout or exposing their details',async()=>{
+    expect(await verifyDeepgramKey('synthetic-probe-secret',()=>{throw new Error('synthetic-probe-secret');})).toEqual({ok:false,reason:'network'});
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 describe('recognition-only Deepgram Flux transport',()=>{
   it('preserves the Flux v2 configuration, PCM forwarding, turn boundaries, and ForceEndTurn',()=>{

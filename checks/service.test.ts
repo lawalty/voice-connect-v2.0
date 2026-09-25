@@ -60,7 +60,7 @@ async function fixture(unremovableBootstrap=false) {
     });
   });
   const address=server.address();if(typeof address==='string'||!address)throw new Error('No fixture port');
-  const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),bootstrapToken:bootstrap,origin,secureCookie:false,gatewayUrl:`ws://127.0.0.1:${address.port}`,gatewayToken:'fixture-only',staticDir:join(dir,'absent')},gatewayFactory:(cfg,store,publish)=>new Gateway(cfg,store,e=>{events.push(e);publish(e);})});
+  const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),bootstrapToken:bootstrap,origin,secureCookie:false,gatewayUrl:`ws://127.0.0.1:${address.port}`,gatewayToken:'fixture-only',staticDir:join(dir,'absent')},verifyDeepgramKey:async()=>({ok:true}),gatewayFactory:(cfg,store,publish)=>new Gateway(cfg,store,e=>{events.push(e);publish(e);})});
   cleanup.push(async()=>{await app.close();for(const s of clients)s.terminate();await new Promise<void>(resolve=>server.close(()=>resolve()));rmSync(dir,{recursive:true,force:true});});
   await expect.poll(async()=>{const r=await app.inject({method:'GET',url:'/health'});return r.json().openclaw;}).toBe(true);
   const previousBootstrapPath=process.env.VC_BOOTSTRAP_TOKEN_FILE;

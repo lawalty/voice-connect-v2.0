@@ -35,13 +35,22 @@ SQLite using the separate master key. Removing the key disables premium speech;
 it does not silently select another paid service. Back up the master key with
 restricted access separately from source and ordinary diagnostics.
 
-For Deepgram, enter the key under **Deepgram · STT** and use its separate
-**Save key** button. **Save preferences** applies the selected recognition and
-voice options; it does not submit a newly typed credential. A Deepgram HTTP 401
-means the provider rejected the credential used for that connection. It is not
-a Vosk error, and it is distinct from network, credit, permission, and rate-limit
-failures. Connection errors must expose only a safe category/status, never raw
-provider responses or authentication headers.
+For Deepgram, enter the full secret API key (not its key ID) under **Deepgram ·
+STT** and use **Save key**. Leading/trailing whitespace is removed. The server
+opens the actual Flux connection and requires its `Connected` event before
+replacing the encrypted credential. Failed verification preserves the previous
+key. **Test saved key** performs the same check on the existing credential. Both
+checks close immediately without microphone audio or an agent message; they
+verify provider access, not transcription quality. Checks require owner sign-in,
+Origin and CSRF, and share a limit of six requests per minute.
+
+**Save preferences** applies the selected recognition and voice options; it does
+not submit a newly typed credential. On reopening Settings, **Saved · not
+checked** means storage only; **Connection verified** appears only after a
+successful check in that Settings visit. Replacing/removing the key closes active
+Deepgram audio connections. A Deepgram HTTP 401 is a provider authentication or
+permission rejection, distinct from VC sign-in expiry. Errors expose only a safe
+category/status, never raw provider responses or authentication headers.
 
 For Fish Audio, save the API key under **Fish Audio · TTS**, select **Fish
 Audio** as the voice service, enter the voice ID, and use **Test speaker** before

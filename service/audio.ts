@@ -1,7 +1,16 @@
 import WebSocket from 'ws';
+import type { IncomingMessage } from 'node:http';
 import type { AudioEvent } from '../contract/types.js';
 
 type RecognitionRemoteFactory=(url:URL,options:WebSocket.ClientOptions)=>WebSocket;
+export type DeepgramVerification={ok:true}|{ok:false;reason:'http'|'network'|'timeout'|'closed'|'provider';status?:number};
+function recognitionConnection(key:string):[URL,WebSocket.ClientOptions] {
+  const url=new URL('wss://api.deepgram.com/v2/listen');
+  url.searchParams.set('model','flux-general-en');
+  url.searchParams.set('encoding','linear16');url.searchParams.set('sample_rate','16000');
+  url.searchParams.set('eot_threshold','0.8');url.searchParams.set('eot_timeout_ms','5000');
+  return [url,{headers:{Authorization:`Token ${key}`},maxPayload:1024*1024,perMessageDeflate:false,handshakeTimeout:10000}];
+}
 function handshakeFailure(status:number|undefined):string {
   const messages:Record<number,string>={
     400:'Deepgram rejected the recognition request configuration (HTTP 400). Refresh Voice Connect and try again.',
@@ -14,12 +23,49 @@ function handshakeFailure(status:number|undefined):string {
   if(status!==undefined&&status>=500&&status<=599)return 'Deepgram recognition is temporarily unavailable (HTTP 5xx). Retry later or choose on-device recognition.';
   return 'Deepgram rejected the recognition connection. Retry or choose on-device recognition.';
 }
+export function deepgramVerificationMessage(result:Extract<DeepgramVerification,{ok:false}>):string {
+  if(result.reason==='http')return handshakeFailure(result.status);
+  if(result.reason==='timeout')return 'Deepgram did not become ready within 12 seconds. Your saved key was not changed. Try again.';
+  if(result.reason==='closed')return 'Deepgram disconnected before recognition became ready. Your saved key was not changed. Try again.';
+  if(result.reason==='provider')return 'Deepgram could not enable Flux recognition. Your saved key was not changed. Check the project permissions and model access.';
+  return 'The server could not connect to Deepgram recognition. Your saved key was not changed. Check connectivity and try again.';
+}
+/** Verify the production Flux connection without sending audio or control messages. */
+export function verifyDeepgramKey(key:string,remoteFactory:RecognitionRemoteFactory=(url,options)=>new WebSocket(url,options)):Promise<DeepgramVerification> {
+  return new Promise(resolve=>{
+    let remote:WebSocket;
+    try {remote=remoteFactory(...recognitionConnection(key));}
+    catch {resolve({ok:false,reason:'network'});return;}
+    let settled=false;
+    const finish=(result:DeepgramVerification)=>{
+      if(settled)return;settled=true;clearTimeout(timer);
+      remote.off('message',message);remote.off('unexpected-response',rejected);remote.off('close',closed);remote.off('error',failed);
+      // Terminating a connecting ws can emit an asynchronous error. Absorb it
+      // after removing the probe handlers; never retain or expose its contents.
+      remote.on('error',()=>{});
+      if(remote.readyState!==WebSocket.CLOSED)remote.terminate();
+      resolve(result);
+    };
+    const message=(data:WebSocket.RawData,binary:boolean)=>{
+      if(binary)return;
+      let value:unknown;try{value=JSON.parse(data.toString());}catch{return;}
+      if(!value||typeof value!=='object')return;
+      if('type'in value&&value.type==='Connected')finish({ok:true});
+      else if('type'in value&&value.type==='Error')finish({ok:false,reason:'provider'});
+    };
+    const rejected=(_request:unknown,response:IncomingMessage)=>{
+      // Only the HTTP status is relevant. Do not inspect provider body/headers.
+      const status=response.statusCode;
+      try {finish({ok:false,reason:'http',status});}
+      finally {response.resume();response.destroy();}
+    };
+    const closed=()=>finish({ok:false,reason:'closed'}),failed=()=>finish({ok:false,reason:'network'});
+    const timer=setTimeout(()=>finish({ok:false,reason:'timeout'}),12000);
+    remote.on('message',message);remote.on('unexpected-response',rejected);remote.on('close',closed);remote.on('error',failed);
+  });
+}
 export function bridgeRecognition(client:WebSocket,key:string,authorized:()=>boolean,remoteFactory:RecognitionRemoteFactory=(url,options)=>new WebSocket(url,options)):void {
-  const url=new URL('wss://api.deepgram.com/v2/listen');
-  url.searchParams.set('model','flux-general-en');
-  url.searchParams.set('encoding','linear16');url.searchParams.set('sample_rate','16000');
-  url.searchParams.set('eot_threshold','0.8');url.searchParams.set('eot_timeout_ms','5000');
-  const remote=remoteFactory(url,{headers:{Authorization:`Token ${key}`},maxPayload:1024*1024,perMessageDeflate:false,handshakeTimeout:10000});
+  const remote=remoteFactory(...recognitionConnection(key));
   let ready=false,ended=false,lastSequence=-1,bytes=0;
   const send=(event:AudioEvent)=>{if(client.readyState===WebSocket.OPEN)client.send(JSON.stringify(event));};
   const cleanup=()=>{clearTimeout(timer);clearTimeout(limitTimer);};

@@ -10,18 +10,27 @@ requested/reported playback from the user's audibility confirmation. Adding Fish
 Audio does not by itself close that physical acceptance gate.
 
 The owner subsequently confirmed Vosk recognition works after saving its provider
-selection. A separate VPS probe of the configured Deepgram Flux connection returned
-HTTP 401 before any audio was sent. This is an authentication/access rejection, not
-a Vosk failure; live Deepgram transcription remains unqualified.
+selection, but reported poor recognition accuracy in a quiet room. Vosk model
+research is paused at the owner's request while Deepgram is addressed. A separate
+VPS probe of the configured Deepgram Flux connection returned HTTP 401 with the
+allowlisted provider code `INVALID_AUTH` before any audio was sent. The official
+authentication test endpoint also returned 401. This identifies rejection of the
+stored credential; live Deepgram transcription remains unqualified until a
+working credential is securely saved and a real transcription succeeds. The same stored value also received `401 INVALID_AUTH` on a Nova-3 v1 handshake; a model switch alone does not resolve this rejection. Hermes source uses Nova-3 with the same Token header scheme, but its credential comes from the Hermes process environment rather than VC settings. Equality of the two live loaded credentials has not been established.
 
 ## Recorded implementation and deployment checks
+
+The local browser run observed one transient Android-layout history-fetch timeout:
+18 passed, seven skipped, one failed. The failed case then passed both alone and
+immediately after the new Deepgram case. The original trace is retained locally;
+no product behavior or test timeout was changed to make it pass.
 
 | Check | Evidence |
 | --- | --- |
 | Independent implementation | Fresh Git root and history; requirements provenance in DECISIONS.md. No historical application implementation imported. |
 | Build and dependencies | Strict TypeScript, production Vite/Node build, and npm vulnerability audit pass. Linux CI repeats them. Node and Caddy container bases are digest pinned. |
-| Backend, audio and orb regressions | 120 tests pass: authentication/origin/CSRF, exact login/global throttle thresholds and HTTP 429 responses, native targeting, duplicate delivery, terminal ordering, cancellation, question ownership, provider lifecycle, resampling, model boundaries, uncertainty, reduced motion, preference migration, continuous turn finalization races, Fish framing/cancellation, speech-output failure handling, recognition-only Deepgram routing with no upstream TTS call, and safe classification of Deepgram authentication, credit, permission, rate-limit and network failures. |
-| Desktop/mobile browser flows | 17 checks pass: private sign-in, same conversation after refresh, camera capture/upload and track cleanup, settings, keyboard dialogs, offline drafts, reconnect, local speech, voice-to-text handoff, delayed receipts, active-reply speech after history reconciliation, and speaker/Fish configuration checks. Switching Vosk to Deepgram and back retains the verified model without another download, conversation and output selection; automatic Vosk has no Finish button. Seven speech runtime/ownership checks run on desktop only and are explicitly skipped in the mobile layout project. Mobile is Chromium viewport emulation, not a phone. |
+| Backend, audio and orb regressions | 138 tests pass: authentication/origin/CSRF, exact login/global throttle thresholds and HTTP 429 responses, native targeting, duplicate delivery, terminal ordering, cancellation, question ownership, provider lifecycle, resampling, model boundaries, uncertainty, reduced motion, preference migration, continuous turn finalization races, Fish framing/cancellation, speech-output failure handling, recognition-only Deepgram routing with no upstream TTS call, safe classification of Deepgram authentication, credit, permission, rate-limit and network failures; no-audio credential verification before replacement; retained prior keys on failure; shared verification throttling; and session/concurrent-replacement guards. |
+| Desktop/mobile browser flows | 19 checks pass: private sign-in, same conversation after refresh, camera capture/upload and track cleanup, settings, keyboard dialogs, offline drafts, reconnect, local speech, voice-to-text handoff, delayed receipts, active-reply speech after history reconciliation, speaker/Fish configuration checks, and Deepgram saved-key testing plus verified replacement on both layouts. Provider rejection does not sign out VC, request microphone access, open browser audio channels, or submit agent turns. Switching Vosk to Deepgram and back retains the verified model without another download, conversation and output selection; automatic Vosk has no Finish button. Seven speech runtime/ownership checks run on desktop only and are explicitly skipped in the mobile layout project. Mobile is Chromium viewport emulation, not a phone. |
 | Input handoff | Focusing the composer, Edit as text, and direct typed Send stop capture and preserve typed plus unsent spoken words. Late recognition cannot submit stale speech. Delayed voice/text receipts cannot erase newer typing; a second completed voice turn during pending delivery pauses capture and remains in the composer. Composer initialization cannot overwrite fresh typing because input waits for conversation selection. |
 | Native OpenClaw | Actual 2026.9.6 Gateway with signed, approved application identity; read/write/approval/question scopes. NorthPointe name confirmed by live exchange. Existing OpenClaw deployment and persona preserved. |
 | Text and image continuity | Native follow-up recalled ORBIT 482; actual uploaded test image was read as VC2 739 with a red circle. Repeated turn identity produced one native user message. |

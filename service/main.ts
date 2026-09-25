@@ -15,14 +15,14 @@ import type { AppStatus, AppSettings, ServerEvent, Attachment } from '../contrac
 import { loadConfig, type ServiceConfig } from './config.js';
 import { Store, digest } from './store.js';
 import { Gateway, type GatewayPort } from './gateway.js';
-import { bridgeRecognition } from './audio.js';
+import { bridgeRecognition, deepgramVerificationMessage, verifyDeepgramKey, type DeepgramVerification } from './audio.js';
 import { bridgeFishAudio } from './fish.js';
 import { normalizeImage } from './images.js';
 
 const password=z.string().min(12).max(256);
 const id=z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 const nativeId=z.string().min(1).max(128).regex(/^[a-zA-Z0-9_.:-]+$/).refine(v=>v!=='.'&&v!=='..');
-export interface AppOptions {config?:Partial<ServiceConfig>;gatewayFactory?:(cfg:ServiceConfig,store:Store,publish:(e:ServerEvent)=>void)=>GatewayPort;}
+export interface AppOptions {config?:Partial<ServiceConfig>;gatewayFactory?:(cfg:ServiceConfig,store:Store,publish:(e:ServerEvent)=>void)=>GatewayPort;verifyDeepgramKey?:(key:string)=>Promise<DeepgramVerification>;}
 function equal(a:string,b:string):boolean {const aa=Buffer.from(digest(a)),bb=Buffer.from(digest(b));return timingSafeEqual(aa,bb);}
 function securityPath(req:FastifyRequest):string {
   // Router matching decodes unreserved escapes. Gate the matched API route itself,
@@ -52,7 +52,9 @@ export async function buildApp(options:AppOptions={}) {
   const session=(req:FastifyRequest)=>store.session(req.cookies.vc_session??'');
   const status=(req:FastifyRequest):AppStatus&{csrfToken?:string}=>({ownerConfigured:store.ownerConfigured(),authenticated:Boolean(session(req)),build:cfg.build,...session(req)?{csrfToken:session(req)!.csrf}:{}});
   const closeToken=(token:string)=>{for(const [socket,v] of sockets)if(v.token===token)socket.close(1008,'Session ended');};
-  const closeFish=()=>{for(const [socket,binding] of sockets)if(binding.provider==='fish'){socket.close(1008,'Speech credential changed');socket.terminate();}};
+  const closeProvider=(provider:'fish'|'deepgram')=>{for(const [socket,binding] of sockets)if(binding.provider===provider){socket.close(1008,'Speech credential changed');socket.terminate();}};
+  const checkDeepgram=async(key:string):Promise<DeepgramVerification>=>{try{return await (options.verifyDeepgramKey??verifyDeepgramKey)(key);}catch{return {ok:false,reason:'network'};}};
+  let deepgramRevision=0;
   app.addHook('onRequest',async(req,reply)=>{
     reply.header('X-Content-Type-Options','nosniff').header('Referrer-Policy','same-origin').header('Cross-Origin-Opener-Policy','same-origin').header('Cross-Origin-Embedder-Policy','require-corp');
     reply.header('Permissions-Policy','microphone=(self), camera=(self), geolocation=()');
@@ -112,10 +114,31 @@ export async function buildApp(options:AppOptions={}) {
   });
   app.post('/api/auth/logout',async(req,reply)=>{const token=req.cookies.vc_session??'';store.logout(token);closeToken(token);reply.clearCookie('vc_session',{path:'/'});return {ok:true};});
   app.get('/api/settings',async():Promise<AppSettings>=>({deepgramConfigured:Boolean(store.get('deepgram')),fishConfigured:Boolean(store.get('fish')),harness:gateway.capabilities()}));
-  app.put('/api/settings/deepgram',async req=>{const body=z.object({apiKey:z.string().min(16).max(512).regex(/^[A-Za-z0-9._-]+$/)}).strict().parse(req.body);store.set('deepgram',store.encrypt(body.apiKey));return {ok:true};});
-  app.delete('/api/settings/deepgram',async()=>{store.remove('deepgram');return {ok:true};});
-  app.put('/api/settings/fish',async req=>{const body=z.object({apiKey:z.string().trim().min(16).max(512).regex(/^[\x21-\x7e]+$/)}).strict().parse(req.body);store.set('fish',store.encrypt(body.apiKey));closeFish();return {ok:true};});
-  app.delete('/api/settings/fish',async()=>{store.remove('fish');closeFish();return {ok:true};});
+  // Reuse one limiter instance so saves and saved-key checks share six attempts.
+  // Auth/origin/CSRF run in onRequest before this preHandler can start a probe.
+  const deepgramRate=app.rateLimit({max:6,timeWindow:60000});
+  const deepgramRoute={config:{rateLimit:false as const},preHandler:deepgramRate};
+  app.put('/api/settings/deepgram',deepgramRoute,async(req,reply)=>{
+    const body=z.object({apiKey:z.string().trim().min(16).max(512).regex(/^[A-Za-z0-9._-]+$/)}).strict().parse(req.body);
+    const prior=store.get('deepgram'),revision=deepgramRevision,result=await checkDeepgram(body.apiKey);
+    if(!session(req))return reply.code(401).send({error:'Sign in to continue.'});
+    if(revision!==deepgramRevision||prior!==store.get('deepgram'))return reply.code(409).send({error:'The saved Deepgram credential changed during this check. Refresh Settings and try again.'});
+    if(!result.ok)return reply.code(422).send({error:deepgramVerificationMessage(result)});
+    store.set('deepgram',store.encrypt(body.apiKey));deepgramRevision++;closeProvider('deepgram');return {ok:true,verified:true};
+  });
+  app.post('/api/settings/deepgram/check',deepgramRoute,async(req,reply)=>{
+    z.object({}).strict().parse(req.body??{});
+    const prior=store.get('deepgram'),revision=deepgramRevision,key=store.deepgramKey();
+    if(!key)return reply.code(400).send({error:'Save a Deepgram API key in Settings before testing it.'});
+    const result=await checkDeepgram(key);
+    if(!session(req))return reply.code(401).send({error:'Sign in to continue.'});
+    if(revision!==deepgramRevision||prior!==store.get('deepgram'))return reply.code(409).send({error:'The saved Deepgram credential changed during this check. Refresh Settings and try again.'});
+    if(!result.ok)return reply.code(422).send({error:deepgramVerificationMessage(result)});
+    return {ok:true,verified:true};
+  });
+  app.delete('/api/settings/deepgram',async()=>{store.remove('deepgram');deepgramRevision++;closeProvider('deepgram');return {ok:true};});
+  app.put('/api/settings/fish',async req=>{const body=z.object({apiKey:z.string().trim().min(16).max(512).regex(/^[\x21-\x7e]+$/)}).strict().parse(req.body);store.set('fish',store.encrypt(body.apiKey));closeProvider('fish');return {ok:true};});
+  app.delete('/api/settings/fish',async()=>{store.remove('fish');closeProvider('fish');return {ok:true};});
   app.get('/api/conversations',async()=>store.conversations());
   app.post('/api/conversations',async(req,reply)=>{const body=z.object({title:z.string().trim().min(1).max(100).optional()}).strict().parse(req.body??{});if(!store.get('default-agent'))return reply.code(503).send({error:'OpenClaw is connecting. Please try again shortly.'});return store.createConversation(body.title);});
   app.get('/api/conversations/:id',async(req,reply)=>{const p=z.object({id}).parse(req.params);if(!store.conversation(p.id))return reply.code(404).send({error:'Conversation not found.'});return gateway.history(p.id);});
@@ -157,6 +180,7 @@ export async function buildApp(options:AppOptions={}) {
     if(q.data.kind!=='stt'){unavailable('Deepgram is used for recognition only. Choose Fish Audio or Device voices for speech output.');return;}
     if(q.data.voice){unavailable('Deepgram recognition does not use an output voice.');return;}
     const key=store.deepgramKey();if(!key){unavailable('Set a Deepgram key in Settings to use Premium recognition.');return;}
+    sockets.get(socket)!.provider='deepgram';
     bridgeRecognition(socket,key,()=>Boolean(session(req)));
   });
   if(existsSync(cfg.staticDir)){await app.register(serveStatic,{root:cfg.staticDir,prefix:'/',index:['index.html']});app.setNotFoundHandler((req,reply)=>securityPath(req).startsWith('/api/')?reply.code(404).send({error:'Not found.'}):reply.type('text/html').sendFile('index.html'));}

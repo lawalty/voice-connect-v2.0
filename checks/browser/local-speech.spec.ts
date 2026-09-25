@@ -83,6 +83,19 @@ test('production security headers allow isolated local recognition without permi
     navigator.mediaDevices.getUserMedia=async constraints=>{const stream=await capture(constraints);tracks.push(...stream.getAudioTracks());return stream;};
   });
   const errors:string[]=[],submissions:string[]=[],downloads:string[]=[];
+  let deepgramConfigured=false;
+  // Only provider verification is simulated. Model download, integrity checks,
+  // worker startup and recognition still use the production browser runtime.
+  await page.route('**/api/settings',async route=>{
+    const response=await route.fetch();
+    await route.fulfill({response,json:{...await response.json(),deepgramConfigured}});
+  });
+  await page.route('**/api/settings/deepgram',async route=>{
+    if(route.request().method()!=='PUT'){await route.fallback();return;}
+    expect(route.request().postDataJSON()).toEqual({apiKey:'synthetic-browser-fixture-key-not-a-secret'});
+    deepgramConfigured=true;
+    await route.fulfill({status:200,json:{ok:true,verified:true}});
+  });
   page.on('pageerror',e=>errors.push(e.message));
   page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/turns'))submissions.push(r.url());if(r.url().endsWith('/models/vosk-en-us-0.15.tar.gz.bin'))downloads.push(r.url());});
   const response=await enterPrivateSpace(page,context);
@@ -113,10 +126,10 @@ test('production security headers allow isolated local recognition without permi
   expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(conversation);
   await page.getByRole('button',{name:'Open settings'}).click();
   // Selecting a paid recognizer never removes the verified on-device model or
-  // changes speech output. This fixture saves a fake key but starts no provider.
+  // changes speech output. A mocked successful credential check starts no provider.
   await page.getByLabel('Deepgram API key',{exact:true}).fill('synthetic-browser-fixture-key-not-a-secret');
   await page.getByRole('button',{name:'Save key',exact:true}).click();
-  await expect(page.getByText('Deepgram credential saved on the server.',{exact:true})).toBeVisible();
+  await expect(page.getByText('Deepgram connection verified. Credential saved on the server.',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:/Deepgram/}).filter({hasText:'Premium'}).click();
   await page.getByRole('button',{name:'Save preferences',exact:true}).click();
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('vc2:speech')!))).toMatchObject({recognition:'deepgram',handsFree:true,output:'browser'});
