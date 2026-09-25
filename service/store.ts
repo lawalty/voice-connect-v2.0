@@ -44,6 +44,7 @@ export class Store {
     return Buffer.concat([decipher.update(bytes),decipher.final()]).toString('utf8');
   }
   deepgramKey():string { const v=this.get('deepgram'); return v?this.decrypt(v):''; }
+  fishKey():string { const v=this.get('fish'); return v?this.decrypt(v):''; }
   createConversation(title='New conversation'):Conversation {
     const id=randomUUID(),now=Date.now();
     const agentId=this.get('default-agent');if(!agentId)throw new Error('The OpenClaw agent has not been discovered');

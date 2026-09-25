@@ -76,6 +76,21 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it('ends a failed speech response without retrying fragments and allows the next response', async () => {
+    const run = setup(); await run.engine.start(preferences, 'one-conversation');
+    run.engine.speak('An initial complete sentence.');
+    const failed = fixture.outputs[0]!;
+    failed.events.error('Native speech never started.'); failed.end();
+    run.engine.speak('Do not retry this fragment.'); run.engine.responseDone();
+    expect(failed.words).toEqual(['An initial complete sentence.']);
+    expect(run.notices).toContain('Native speech never started.');
+    expect(run.phases.at(-1)).toBe('listening');
+    expect(run.engine.diagnostics().some(item => item.event === 'output-error')).toBe(true);
+    failed.events.started(); expect(run.phases.at(-1)).toBe('listening');
+    run.engine.speak('A new response can be tried.'); run.engine.responseDone();
+    expect(fixture.outputs).toHaveLength(2);
+    fixture.outputs[1]!.end(); expect(run.phases.at(-1)).toBe('listening');
+  });
   it('submits two complete VAD-ended turns and rearms after playback without a Finish action or recapture', async () => {
     const run = setup(); await run.engine.start(preferences, 'one-conversation');
     const recognition = fixture.recognizers[0]!;

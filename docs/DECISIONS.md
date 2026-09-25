@@ -38,6 +38,15 @@ Deepgram is opt-in premium recognition and synthesis. Provider changes never hap
 silently and do not create a new conversation. The UI discloses browser/vendor speech
 processing. OpenClaw connectivity remains necessary even when Vosk can recognize offline.
 
+Fish Audio is an additional, explicitly selected output provider. Its documented
+[WebSocket contract](https://docs.fish.audio/api-reference/endpoint/websocket/tts-live)
+accepts incremental text in MessagePack. The VPS uses `s2.1-pro`, the user's
+`reference_id`, and 24 kHz mono 16-bit PCM. Coherent sentence chunks are flushed
+as they arrive; response completion sends Fish's `stop` event to drain synthesis.
+Interruption closes the upstream socket instead: `stop` is not a cancellation
+command. The API key stays encrypted in server settings, separate from the
+per-device voice ID and STT selection. No provider is selected as a silent fallback.
+
 Automatic turn closure combines acoustic speech/silence evidence with recognition
 progress. It estimates an utterance boundary rather than inferring semantic intent:
 a person can pause before finishing a sentence. Interruption must stop local playback

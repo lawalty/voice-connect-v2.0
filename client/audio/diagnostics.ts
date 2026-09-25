@@ -3,14 +3,14 @@ import type { VoicePhase } from '../../contract/types';
 export type AudioDiagnosticEvent =
   | 'phase' | 'capture-settings' | 'provider-starting' | 'provider-ready'
   | 'endpoint-request' | 'endpoint-ready' | 'output-start' | 'output-end'
-  | 'output-interrupt' | 'capture-gap' | 'backpressure';
+  | 'output-interrupt' | 'output-request' | 'output-error' | 'capture-gap' | 'backpressure';
 
 export type AudioDiagnosticReason =
   | 'mic-ended' | 'mic-muted' | 'capture-gap' | 'vad-backlog' | 'capture-backlog'
   | 'suspended' | 'provider-error' | 'manual' | 'speech-onset';
 
 export interface AudioDiagnosticValues {
-  provider?: 'browser' | 'vosk' | 'deepgram';
+  provider?: 'browser' | 'vosk' | 'deepgram' | 'fish';
   phase?: VoicePhase;
   durationMs?: number;
   sampleRate?: number;
@@ -32,7 +32,7 @@ export interface AudioDiagnosticEntry {
 const EVENTS = new Set<AudioDiagnosticEvent>([
   'phase', 'capture-settings', 'provider-starting', 'provider-ready',
   'endpoint-request', 'endpoint-ready', 'output-start', 'output-end',
-  'output-interrupt', 'capture-gap', 'backpressure',
+  'output-interrupt', 'output-request', 'output-error', 'capture-gap', 'backpressure',
 ]);
 const PHASES = new Set<VoicePhase>([
   'off', 'starting', 'listening', 'hearing', 'finalizing', 'thinking',
@@ -60,7 +60,7 @@ function safeValues(values: AudioDiagnosticValues): AudioDiagnosticValues {
     return descriptor && 'value' in descriptor ? descriptor.value : undefined;
   };
   const provider = own('provider');
-  if (provider === 'browser' || provider === 'vosk' || provider === 'deepgram') safe.provider = provider;
+  if (provider === 'browser' || provider === 'vosk' || provider === 'deepgram' || provider === 'fish') safe.provider = provider;
   const phase = own('phase');
   if (typeof phase === 'string' && PHASES.has(phase as VoicePhase)) safe.phase = phase as VoicePhase;
   const reason = own('reason');

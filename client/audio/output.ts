@@ -1,11 +1,12 @@
 import type { AudioEvent, SpeechOutput, SpeechPreferences } from '../../contract/types';
 import { Generation } from './dsp';
 
-export function audioURL(kind: 'stt' | 'tts', conversationId: string, voice?: string) {
+export function audioURL(kind: 'stt' | 'tts', conversationId: string, voice?: string, provider: 'deepgram' | 'fish' = 'deepgram') {
   const url = new URL('/api/audio', location.href);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('kind', kind); url.searchParams.set('conversationId', conversationId);
   if (voice) url.searchParams.set('voice', voice);
+  if (kind === 'tts' && provider === 'fish') url.searchParams.set('provider', provider);
   return url.href;
 }
 export interface OutputEvents { started(): void; ended(): void; error(message: string): void; }
@@ -14,42 +15,108 @@ export class BrowserOutput implements SpeechOutput {
   private queue: string[] = [];
   private active = false;
   private complete = false;
+  private failed = false;
+  private ended = false;
   private generation = new Generation();
   private utterance?: SpeechSynthesisUtterance;
+  private watchdog?: ReturnType<typeof setTimeout>;
+  private stopVoiceWait?: () => void;
+  private waitedForVoices = false;
   constructor(private preferences: SpeechPreferences, private events: OutputEvents) {}
   enqueue(text: string) {
-    if (!('speechSynthesis' in window)) { this.events.error('This browser has no speech output. The reply is available as text.'); return; }
+    if (this.failed || !text.trim()) return;
     // Short utterances reduce platform-specific long-utterance hangs.
     const pieces = text.match(/.{1,220}(?:\s|$)|\S{1,220}/g) ?? [text];
-    this.queue.push(...pieces); this.complete = false; this.pump();
+    this.queue.push(...pieces); this.complete = false; this.ended = false; this.pump();
   }
   private pump() {
-    if (this.active) return;
-    const text = this.queue.shift();
-    if (!text) { if (this.complete) this.events.ended(); return; }
+    if (this.active || this.failed || this.stopVoiceWait) return;
+    if (!this.queue.length) { if (this.complete) this.reportEnded(); return; }
+    if (typeof window === 'undefined' || !window.speechSynthesis || typeof SpeechSynthesisUtterance !== 'function') {
+      this.fail('This browser has no speech output. The reply remains available as text.'); return;
+    }
+    const synthesis = window.speechSynthesis;
+    let voices: SpeechSynthesisVoice[];
+    try { voices = synthesis.getVoices(); }
+    catch { this.fail('The device voice service could not be read. Check device text-to-speech settings and try Test speaker.'); return; }
+    // Android initializes the platform voice service lazily. Give its asynchronous
+    // inventory a bounded chance, but never defer a direct user-gesture test.
+    if (!voices.length && !this.waitedForVoices && !globalThis.navigator?.userActivation?.isActive && typeof synthesis.addEventListener === 'function') {
+      this.waitedForVoices = true;
+      const id = this.generation.current;
+      const retry = () => {
+        if (!this.generation.is(id)) return;
+        this.stopVoiceWait?.(); this.pump();
+      };
+      const changed = () => {
+        try { if (synthesis.getVoices().length) retry(); }
+        catch { retry(); }
+      };
+      const timeout = setTimeout(retry, 1200);
+      this.stopVoiceWait = () => { clearTimeout(timeout); synthesis.removeEventListener('voiceschanged', changed); this.stopVoiceWait = undefined; };
+      synthesis.addEventListener('voiceschanged', changed);
+      changed(); return;
+    }
+    // An empty list alone does not prove speech is unavailable: some browsers
+    // can still use their OS default voice. Start/error watchdogs verify the attempt.
+    const text = this.queue.shift()!;
     const id = this.generation.current;
-    const utterance = this.utterance = new SpeechSynthesisUtterance(text.trim());
-    const voices = speechSynthesis.getVoices();
-    const saved = voices.find((voice) => voice.voiceURI === this.preferences.browserVoice || voice.name === this.preferences.browserVoice);
-    const localEnglish = (voice: SpeechSynthesisVoice) => voice.localService && /^en(?:[-_]|$)/i.test(voice.lang);
-    const preferred = saved ?? voices.find(voice => localEnglish(voice) && voice.default) ?? voices.find(localEnglish);
-    if (preferred) utterance.voice = preferred;
-    utterance.lang = preferred?.lang ?? 'en-US';
-    this.active = true;
-    utterance.onstart = () => { if (this.generation.is(id)) this.events.started(); };
-    utterance.onend = () => { if (!this.generation.is(id)) return; this.active = false; this.utterance = undefined; this.pump(); };
-    utterance.onerror = (event) => {
-      if (!this.generation.is(id)) return;
-      this.active = false; this.queue = [];
-      if (event.error !== 'canceled' && event.error !== 'interrupted') this.events.error('Browser speech stopped. The full reply remains available as text.');
-      this.events.ended();
-    };
-    speechSynthesis.speak(utterance);
+    try {
+      const utterance = this.utterance = new SpeechSynthesisUtterance(text.trim());
+      const saved = voices.find((voice) => voice.voiceURI === this.preferences.browserVoice || voice.name === this.preferences.browserVoice);
+      const localEnglish = (voice: SpeechSynthesisVoice) => voice.localService && /^en(?:[-_]|$)/i.test(voice.lang);
+      const preferred = saved ?? voices.find(voice => localEnglish(voice) && voice.default) ?? voices.find(localEnglish);
+      if (preferred) utterance.voice = preferred;
+      utterance.lang = preferred?.lang ?? 'en-US'; utterance.volume = 1;
+      this.active = true; let started = false;
+      const current = () => this.generation.is(id) && this.utterance === utterance;
+      this.watchdog = setTimeout(() => {
+        if (current()) this.fail('Browser speech did not report a start. Try Test speaker, then check device text-to-speech and sound settings. The reply remains as text.');
+      }, 8000);
+      utterance.onstart = () => {
+        if (!current() || started) return;
+        started = true; clearTimeout(this.watchdog);
+        this.watchdog = setTimeout(() => {
+          if (current()) this.fail('Browser speech stopped responding before it finished. Try Test speaker or choose another voice. The full reply remains as text.');
+        }, Math.min(60000, Math.max(15000, text.length * 180 + 5000)));
+        this.events.started();
+      };
+      utterance.onend = () => {
+        if (!current()) return;
+        if (!started) { this.fail('Browser speech ended without reporting a start. Try Test speaker to check this device. The reply remains as text.'); return; }
+        clearTimeout(this.watchdog); this.active = false; this.utterance = undefined; this.pump();
+      };
+      utterance.onerror = (event) => { if (current()) this.fail(this.failureMessage(event.error)); };
+      synthesis.speak(utterance);
+    } catch (error) {
+      this.fail(this.failureMessage(error instanceof Error && error.name === 'NotAllowedError' ? 'not-allowed' : 'synthesis-failed'));
+    }
   }
-  finish() { this.complete = true; this.pump(); }
+  private failureMessage(code: string) {
+    const messages: Record<string, string> = {
+      'not-allowed': 'The browser blocked speech playback (not-allowed). Tap Test speaker to make an explicit playback request and check site sound permissions.',
+      'audio-busy': 'The browser could not access audio output (audio-busy). Check other audio apps and the selected speaker or Bluetooth route.',
+      'audio-hardware': 'The browser could not find an audio output device (audio-hardware). Check the speaker or Bluetooth route.',
+      'synthesis-unavailable': 'No device speech engine is available (synthesis-unavailable). Check Android text-to-speech settings and installed voice data.',
+      'language-unavailable': 'The selected speech language is unavailable (language-unavailable). Choose an installed English voice in Settings.',
+      'voice-unavailable': 'The selected device voice is unavailable (voice-unavailable). Choose another browser voice in Settings.',
+      network: 'The device voice could not connect (network). Check connectivity or select an installed local voice.',
+      canceled: 'The browser canceled speech before it started (canceled). Try Test speaker to check this device.',
+      interrupted: 'The browser interrupted speech before it finished (interrupted). Check other audio apps or try Test speaker.',
+    };
+    return `${messages[code] ?? 'The device speech engine failed (synthesis-failed). Try Test speaker or choose another voice.'} The full reply remains as text.`;
+  }
+  private reportEnded() { if (!this.ended) { this.ended = true; this.events.ended(); } }
+  private fail(message: string) {
+    if (this.failed) return;
+    this.failed = true; this.cancel(); this.events.error(message); this.reportEnded();
+  }
+  finish() { this.complete = true; if (this.failed) this.reportEnded(); else this.pump(); }
   cancel() {
     this.generation.next(); this.queue = []; this.active = false; this.complete = false;
-    this.utterance = undefined; if ('speechSynthesis' in window) speechSynthesis.cancel();
+    clearTimeout(this.watchdog); this.stopVoiceWait?.();
+    this.utterance = undefined;
+    try { if (typeof window !== 'undefined') window.speechSynthesis?.cancel(); } catch { /* failure is reported by the initiating operation */ }
   }
   dispose() { this.cancel(); }
 }
@@ -66,12 +133,17 @@ export class PremiumOutput implements SpeechOutput {
   private done = false;
   private complete = false;
   private started = false;
+  private failed = false;
+  private ended = false;
   private timeout?: ReturnType<typeof setTimeout>;
-  constructor(private context: AudioContext, private conversationId: string, private voice: string, private events: OutputEvents) {}
+  private playbackTimeout?: ReturnType<typeof setTimeout>;
+  constructor(private context: AudioContext, private conversationId: string, private voice: string, private events: OutputEvents, private provider: 'deepgram' | 'fish' = 'deepgram') {}
   private connect() {
-    if (this.socket) return;
+    if (this.socket || this.failed) return;
     const id = this.generation.current;
-    const socket = this.socket = new WebSocket(audioURL('tts', this.conversationId, this.voice));
+    let socket: WebSocket;
+    try { socket = this.socket = new WebSocket(audioURL('tts', this.conversationId, this.voice, this.provider)); }
+    catch { this.fail('Premium voice connection could not start. The reply remains available as text.'); return; }
     socket.binaryType = 'arraybuffer';
     this.timeout = setTimeout(() => this.fail('Premium voice did not become ready. The reply remains available as text.'), 15000);
     socket.onmessage = (message) => {
@@ -79,48 +151,68 @@ export class PremiumOutput implements SpeechOutput {
       if (message.data instanceof ArrayBuffer) { this.play(message.data, id); return; }
       let event: AudioEvent; try { event = JSON.parse(String(message.data)); } catch { return; }
       if (event.type === 'ready') {
+        if (this.ready) return;
+        if (event.sampleRate !== 24000) { this.fail('Premium voice requested an unsupported audio rate. The reply remains available as text.'); return; }
         clearTimeout(this.timeout); this.ready = true; this.sampleRate = event.sampleRate;
         for (const command of this.commands) socket.send(JSON.stringify(command)); this.commands = [];
-      } else if (event.type === 'speech-done') { this.done = true; this.checkDone(); }
+        this.watchPlayback('Premium voice connected but returned no playable audio. Try Test speaker or check the selected voice.', 15000);
+      } else if (event.type === 'speech-done') {
+        if (!this.started) { this.fail('Premium voice returned no playable audio. Check the selected voice and try Test speaker.'); return; }
+        this.done = true; this.checkDone();
+      }
       else if (event.type === 'error') this.fail(event.message);
     };
     socket.onerror = () => { if (this.generation.is(id)) this.fail('Premium voice connection failed. Read the reply or retry.'); };
     socket.onclose = () => { if (this.generation.is(id) && !this.done) this.fail('Premium voice disconnected. The reply remains available as text.'); };
   }
   private send(command: Record<string, unknown>) {
+    if (this.failed) return;
     this.connect();
+    if (this.failed) return;
     if (this.ready && this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(command));
     else this.commands.push(command);
   }
   enqueue(text: string) {
+    if (this.failed || !text.trim()) return;
     this.done = false;
     for (let offset = 0; offset < text.length; offset += 3500) this.send({ type: 'speak', text: text.slice(offset, offset + 3500) });
   }
-  finish() { this.complete = true; if (this.socket) this.send({ type: 'flush' }); else this.events.ended(); }
+  finish() { this.complete = true; if (this.failed) this.reportEnded(); else if (this.socket) this.send({ type: 'flush' }); else this.reportEnded(); }
   private play(bytes: ArrayBuffer, id: number) {
-    if (bytes.byteLength % 2 || !this.generation.is(id)) return;
+    if (bytes.byteLength % 2 || !this.generation.is(id) || !this.ready || this.done || this.failed) return;
     const samples = bytes.byteLength / 2;
     if (!samples) return;
-    if (this.nextTime - this.context.currentTime > 60) { this.fail('The spoken reply is too long to buffer safely. Read the remaining text.'); return; }
-    const buffer = this.context.createBuffer(1, samples, this.sampleRate), channel = buffer.getChannelData(0), view = new DataView(bytes);
-    for (let i = 0; i < samples; i++) channel[i] = view.getInt16(i * 2, true) / 32768;
-    const source = this.context.createBufferSource(); source.buffer = buffer; source.connect(this.context.destination);
-    const start = Math.max(this.context.currentTime + 0.025, this.nextTime);
-    if (!this.started) { this.started = true; this.firstTime = start; this.events.started(); }
-    this.nextTime = start + buffer.duration; this.sources.add(source);
-    source.onended = () => { source.disconnect(); this.sources.delete(source); if (this.generation.is(id)) this.checkDone(); };
-    source.start(start);
+    if (this.context.state && this.context.state !== 'running') { this.fail('Browser audio output is suspended. Tap Test speaker to request playback. The reply remains as text.'); return; }
+    if (Math.max(0, this.nextTime - this.context.currentTime) + samples / this.sampleRate > 60) { this.fail('The spoken reply is too long to buffer safely. Read the remaining text.'); return; }
+    try {
+      const buffer = this.context.createBuffer(1, samples, this.sampleRate), channel = buffer.getChannelData(0), view = new DataView(bytes);
+      for (let i = 0; i < samples; i++) channel[i] = view.getInt16(i * 2, true) / 32768;
+      const source = this.context.createBufferSource(); source.buffer = buffer; source.connect(this.context.destination);
+      const start = Math.max(this.context.currentTime + 0.025, this.nextTime);
+      this.nextTime = start + buffer.duration; this.sources.add(source);
+      source.onended = () => { source.disconnect(); this.sources.delete(source); if (this.generation.is(id)) this.checkDone(); };
+      source.start(start);
+      if (!this.started) { this.started = true; this.firstTime = start; this.events.started(); }
+      this.watchPlayback('Premium speech stopped responding before playback completed. The full reply remains as text.', Math.max(15000, (this.nextTime - this.context.currentTime) * 1000 + 5000));
+    } catch { this.fail('Browser audio playback failed. Tap Test speaker to check output. The full reply remains as text.'); }
   }
+  private watchPlayback(message: string, delayMs: number) {
+    clearTimeout(this.playbackTimeout);
+    const id = this.generation.current;
+    this.playbackTimeout = setTimeout(() => { if (this.generation.is(id)) this.fail(message); }, delayMs);
+  }
+  private reportEnded() { if (!this.ended) { this.ended = true; this.events.ended(); } }
   private checkDone() {
     if (this.complete && this.done && this.sources.size === 0) {
+      clearTimeout(this.playbackTimeout);
       this.generation.next(); this.socket?.close(); this.socket = undefined; this.ready = false;
-      this.events.ended();
+      this.reportEnded();
     }
   }
-  private fail(message: string) { this.cancel(); this.events.error(message); this.events.ended(); }
+  private fail(message: string) { if (this.failed) return; this.failed = true; this.cancel(); this.events.error(message); this.reportEnded(); }
   cancel() {
     const offsetMs = this.started ? Math.max(0, (Math.min(this.context.currentTime, this.nextTime) - this.firstTime) * 1000) : 0;
-    this.generation.next(); clearTimeout(this.timeout);
+    this.generation.next(); clearTimeout(this.timeout); clearTimeout(this.playbackTimeout);
     // Silence first; provider acknowledgement must never delay a local interruption.
     for (const source of this.sources) { try { source.stop(); } catch { /* already ended */ } source.disconnect(); }
     this.sources.clear();

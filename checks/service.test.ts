@@ -122,6 +122,14 @@ describe('owner boundary',()=>{
     expect((await f.app.inject({method:'PUT',url:'/api/settings/deepgram',headers:f.headers,payload:{apiKey:key}})).statusCode).toBe(200);
     const settings=await f.app.inject({method:'GET',url:'/api/settings',headers:f.headers});expect(settings.json().deepgramConfigured).toBe(true);expect(settings.body).not.toContain(key);
     const store=(f.app as any).vc.store;expect(store.get('deepgram')).not.toContain(key);expect(store.deepgramKey()).toBe(key);
+    const fishKey='synthetic-fish-key-not-a-real-secret';
+    expect((await f.app.inject({method:'PUT',url:'/api/settings/fish',headers:{origin,cookie:f.cookie},payload:{apiKey:fishKey}})).statusCode).toBe(403);
+    expect((await f.app.inject({method:'PUT',url:'/api/settings/fish',headers:f.headers,payload:{apiKey:fishKey}})).statusCode).toBe(200);
+    const fishSettings=await f.app.inject({url:'/api/settings',headers:f.headers});
+    expect(fishSettings.json().fishConfigured).toBe(true);expect(fishSettings.body).not.toContain(fishKey);
+    expect(store.get('fish')).not.toContain(fishKey);expect(store.fishKey()).toBe(fishKey);
+    expect((await f.app.inject({method:'DELETE',url:'/api/settings/fish',headers:f.headers})).statusCode).toBe(200);
+    expect(store.fishKey()).toBe('');expect(store.deepgramKey()).toBe(key);
     const login=await f.app.inject({method:'POST',url:'/api/auth/login',headers:{origin},payload:{password:'a secure test password'}});
     const otherCookie=login.cookies[0].name+'='+login.cookies[0].value;
     expect((await f.app.inject({method:'POST',url:'/api/auth/password',headers:f.headers,payload:{currentPassword:'a secure test password',newPassword:'an updated secure password'}})).statusCode).toBe(200);
@@ -144,6 +152,17 @@ describe('owner boundary',()=>{
     const closed=new Promise<number>(resolve=>socket.once('close',code=>resolve(code)));
     expect((await f.app.inject({method:'POST',url:'/api/auth/logout',headers:f.headers})).statusCode).toBe(200);
     expect(await closed).toBe(1008);
+  });
+  it('rejects missing Fish credentials and rejects Fish recognition without opening a provider connection',async()=>{
+    const f=await fixture(),address=await f.app.listen({host:'127.0.0.1',port:0});
+    const attempt=(query:string)=>new Promise<string>((resolve,reject)=>{
+      const socket=new WebSocket(`${address.replace('http:','ws:')}/api/audio?conversationId=${f.conversation.id}&${query}`,{headers:{origin,cookie:f.cookie}});
+      socket.once('error',reject);socket.once('message',message=>{resolve(JSON.parse(message.toString()).message);socket.close();});
+    });
+    expect(await attempt('kind=tts&provider=fish&voice=my-voice')).toContain('Fish Audio API key');
+    expect(await attempt('kind=stt&provider=fish&voice=my-voice')).toContain('speech output only');
+    expect(await attempt('kind=tts&provider=fish')).toContain('voice ID');
+    expect(await attempt('kind=tts&provider=fish&voice=https%3A%2F%2Fother.example')).toContain('supported speech provider');
   });
   it('validates decoded image bytes, removes metadata, limits uploads, and protects previews',async()=>{
     const f=await fixture();

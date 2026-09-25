@@ -49,6 +49,7 @@ export class VoiceEngine {
   private deferredEndpoint = false;
   private playbackGeneration = 0;
   private outputActive = false;
+  private outputFailed = false;
   private responseOpen = false;
   private wakeLock?: { release(): Promise<void> };
   private gap = false;
@@ -301,7 +302,7 @@ export class VoiceEngine {
       if (draft) this.callbacks.onNotice('Only an unconfirmed draft was returned. Review it and send as text.');
       return;
     }
-    this.callbacks.onDraft(''); this.sentences.reset(); this.responseOpen = true;
+    this.callbacks.onDraft(''); this.sentences.reset(); this.outputFailed = false; this.responseOpen = true;
     this.setPhase('thinking'); this.callbacks.onTurn(text);
   }
   mute(muted: boolean) {
@@ -341,29 +342,32 @@ export class VoiceEngine {
   }
   speak(text: string, replace = false) {
     if (!this.preferences || !text || this.disposed) return;
-    if (!this.responseOpen) { this.sentences.reset(); this.responseOpen = true; }
+    if (!this.responseOpen) { this.sentences.reset(); this.outputFailed = false; this.responseOpen = true; }
     const pieces = this.sentences.append(text, replace);
     for (const piece of pieces) this.enqueue(piece);
   }
   private enqueue(text: string) {
+    if (this.outputFailed) return;
     if (!this.output) {
       const playbackGeneration = ++this.playbackGeneration;
       this.outputRequestedAt = performance.now();
       const events = {
         started: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = true; this.outputStartedAt = performance.now(); this.trace.record('output-start', { provider: this.preferences?.output, durationMs: this.outputStartedAt - this.outputRequestedAt }); this.setPhase('speaking'); },
         ended: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = false; this.trace.record('output-end', { provider: this.preferences?.output, durationMs: this.outputStartedAt ? performance.now() - this.outputStartedAt : 0 }); if (!this.responseOpen) { this.output?.dispose(); this.output = undefined; this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); } },
-        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) this.callbacks.onNotice(message); },
+        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); } },
       };
-      this.output = this.preferences!.output === 'deepgram'
-        ? new PremiumOutput(this.warmContext(), this.conversationId, this.preferences!.premiumVoice, events)
+      this.output = this.preferences!.output !== 'browser'
+        ? new PremiumOutput(this.warmContext(), this.conversationId, this.preferences!.output === 'fish' ? this.preferences!.fishVoice || '' : this.preferences!.premiumVoice, events, this.preferences!.output)
         : new BrowserOutput(this.preferences!, events);
     }
+    this.trace.record('output-request', { provider: this.preferences?.output });
     this.output.enqueue(text);
   }
   responseDone() {
     for (const piece of this.sentences.finish()) this.enqueue(piece);
     this.responseOpen = false;
-    if (this.output) this.output.finish();
+    if (this.outputFailed) { ++this.playbackGeneration; this.output?.dispose(); this.output = undefined; this.outputActive = false; this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
+    else if (this.output) this.output.finish();
     else this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off');
   }
   interrupt() {

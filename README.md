@@ -32,6 +32,11 @@ Recognition and speech output are independent, per-device preferences:
   and interruption vary with the browser and audio route.
 - **Deepgram Flux:** optional paid recognition and speech output through the
   authenticated server. Requires a credential in Settings. No silent fallback.
+- **Fish Audio:** optional streaming speech output using your Fish voice ID and
+  API key. Select Fish Audio under NorthPointe's voice, save the key in Settings,
+  enter your voice ID, and use Test speaker before saving preferences. Recognition
+  stays on your selected provider. The key is encrypted on the VPS and never
+  returned to the browser; testing sends a short fixed sentence to Fish.
 - **Browser speech:** default output, with local voices preferred when available.
 
 Local acoustic measurements move the orb; they do not establish emotions or enter
@@ -97,3 +102,9 @@ The product is a release candidate until the physical and credential-dependent
 gates in the acceptance document have been completed. Browser emulation and
 successful HTTP requests do not establish Android audio quality or interruption
 latency.
+
+If a reply appears but is silent, open Settings and use **Test speaker**. The test
+distinguishes a playback request, reported playback, provider/browser failure, and
+your confirmation that sound was heard. It does not use the microphone or invoke
+OpenClaw. Browser and premium failures remain visible rather than silently switching
+providers. Enter provider keys only in the authenticated Settings form, never Git.

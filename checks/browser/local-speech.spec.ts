@@ -28,6 +28,50 @@ async function useNativeSpeechFixture(page:Page){
   });
 }
 
+test('active reply remains speakable after a history reconciliation without replaying old history',async({page,context},info)=>{
+  test.skip(info.project.name!=='desktop','Stream ownership uses the same code in both layouts.');
+  await context.grantPermissions(['microphone']); await useNativeSpeechFixture(page);
+  await page.addInitScript(()=>{
+    const native=window.WebSocket;
+    const state={held:[] as unknown[],spoken:[] as string[],deliver:(_event:unknown)=>{}};
+    (window as unknown as {vcSpeechReconcile:typeof state}).vcSpeechReconcile=state;
+    class FilteredSocket extends native {
+      override set onmessage(handler:((this:WebSocket,event:MessageEvent)=>unknown)|null){
+        if(!this.url.includes('/api/events')){super.onmessage=handler;return;}
+        state.deliver=event=>handler?.call(this,new MessageEvent('message',{data:JSON.stringify(event)}));
+        super.onmessage=event=>{
+          const data=JSON.parse(String(event.data));
+          if(data.type==='assistant'||data.type==='complete'){state.held.push(data);return;}
+          handler?.call(this,event);
+        };
+      }
+    }
+    Object.defineProperty(window,'WebSocket',{value:FilteredSocket});
+    Object.defineProperty(window,'speechSynthesis',{configurable:true,value:{
+      getVoices:()=>[],cancel(){},addEventListener(){},removeEventListener(){},
+      speak(utterance:SpeechSynthesisUtterance){state.spoken.push(utterance.text);queueMicrotask(()=>{utterance.onstart?.(new Event('start') as SpeechSynthesisEvent);utterance.onend?.(new Event('end') as SpeechSynthesisEvent);});},
+    }});
+  });
+  await enterPrivateSpace(page,context);
+  await page.getByRole('button',{name:'NorthPointe',exact:true}).click();
+  await page.getByRole('button',{name:'Begin a new conversation',exact:true}).click();
+  await page.getByRole('button',{name:'Start talking',exact:true}).click();
+  await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
+  await page.evaluate(()=>(window as unknown as {vcTestSpeech:{emit(text:string):void}}).vcTestSpeech.emit('A spoken history reconciliation test.'));
+  await page.getByRole('button',{name:'Finish thought',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>(window as unknown as {vcSpeechReconcile:{held:{type:string}[]}}).vcSpeechReconcile.held.some(event=>event.type==='complete'))).toBe(true);
+  const historyRead=page.waitForResponse(response=>response.request().method()==='GET'&&/\/api\/conversations\/[^/]+$/.test(new URL(response.url()).pathname));
+  await page.evaluate(()=>{const state=(window as unknown as {vcSpeechReconcile:{deliver(event:unknown):void}}).vcSpeechReconcile;state.deliver({type:'reconcile',conversationId:localStorage.getItem('vc2:conversation')});});
+  await historyRead;
+  await expect(page.getByRole('log',{name:'Messages'}).getByText('Your conversation stays together. I’m here with you.',{exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>(window as unknown as {vcSpeechReconcile:{spoken:string[]}}).vcSpeechReconcile.spoken)).toEqual([]);
+  await page.evaluate(()=>{const state=(window as unknown as {vcSpeechReconcile:{held:{type:string}[];deliver(event:unknown):void}}).vcSpeechReconcile;state.deliver(state.held.find(event=>event.type==='complete'));});
+  await expect.poll(()=>page.evaluate(()=>(window as unknown as {vcSpeechReconcile:{spoken:string[]}}).vcSpeechReconcile.spoken.join(' '))).toBe('Your conversation stays together. I’m here with you.');
+  await page.getByRole('button',{name:'End voice session',exact:true}).click();
+  await page.reload(); await expect(page.getByRole('button',{name:'Start talking',exact:true})).toBeEnabled();
+  expect(await page.evaluate(()=>(window as unknown as {vcSpeechReconcile:{spoken:string[]}}).vcSpeechReconcile.spoken)).toEqual([]);
+});
+
 test('production security headers allow isolated local recognition without permitting page eval',async({page,context},info)=>{
   test.skip(info.project.name!=='desktop','One production runtime check; layout is covered separately.');
   test.setTimeout(150000);

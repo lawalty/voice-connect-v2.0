@@ -3,14 +3,20 @@
 Measured September 24, 2026. This is a working release candidate, not a physically
 qualified Android/car release. All agent checks used clearly labeled synthetic turns.
 
+Physical user report: an Android voice turn received an agent reply in the
+transcript but no audible speech. The exact device/browser/route cause has not
+been established. Speech diagnostics and an explicit speaker test now distinguish
+requested/reported playback from the user's audibility confirmation. Adding Fish
+Audio does not by itself close that physical acceptance gate.
+
 ## Recorded implementation and deployment checks
 
 | Check | Evidence |
 | --- | --- |
 | Independent implementation | Fresh Git root and history; requirements provenance in DECISIONS.md. No historical application implementation imported. |
 | Build and dependencies | Strict TypeScript, production Vite/Node build, and npm vulnerability audit pass. Linux CI repeats them. Node and Caddy container bases are digest pinned. |
-| Backend, audio and orb regressions | 73 tests pass: authentication/origin/CSRF, exact login/global throttle thresholds and HTTP 429 responses, native targeting, duplicate delivery, terminal ordering, cancellation, question ownership, provider lifecycle, resampling, model boundaries, uncertainty, reduced motion, preference migration, and continuous turn finalization races. |
-| Desktop/mobile browser flows | 14 checks pass: private sign-in, same conversation after refresh, camera capture/upload and track cleanup, settings, keyboard dialogs, offline drafts, reconnect, local speech, voice-to-text handoff and delayed receipts. Six speech runtime/ownership checks run on desktop only and are explicitly skipped in the mobile layout project. Mobile is Chromium viewport emulation, not a phone. |
+| Backend, audio and orb regressions | 102 tests pass: authentication/origin/CSRF, exact login/global throttle thresholds and HTTP 429 responses, native targeting, duplicate delivery, terminal ordering, cancellation, question ownership, provider lifecycle, resampling, model boundaries, uncertainty, reduced motion, preference migration, continuous turn finalization races, Fish framing/cancellation, and speech-output failure handling. |
+| Desktop/mobile browser flows | 17 checks pass: private sign-in, same conversation after refresh, camera capture/upload and track cleanup, settings, keyboard dialogs, offline drafts, reconnect, local speech, voice-to-text handoff, delayed receipts, active-reply speech after history reconciliation, and speaker/Fish configuration checks. Seven speech runtime/ownership checks run on desktop only and are explicitly skipped in the mobile layout project. Mobile is Chromium viewport emulation, not a phone. |
 | Input handoff | Focusing the composer, Edit as text, and direct typed Send stop capture and preserve typed plus unsent spoken words. Late recognition cannot submit stale speech. Delayed voice/text receipts cannot erase newer typing; a second completed voice turn during pending delivery pauses capture and remains in the composer. Composer initialization cannot overwrite fresh typing because input waits for conversation selection. |
 | Native OpenClaw | Actual 2026.9.6 Gateway with signed, approved application identity; read/write/approval/question scopes. NorthPointe name confirmed by live exchange. Existing OpenClaw deployment and persona preserved. |
 | Text and image continuity | Native follow-up recalled ORBIT 482; actual uploaded test image was read as VC2 739 with a red circle. Repeated turn identity produced one native user message. |
@@ -20,6 +26,7 @@ qualified Android/car release. All agent checks used clearly labeled synthetic t
 | Local speech | Real Chromium AudioWorklet, Silero and Vosk startup under production security headers; cached offline sample recognition; model removal. Actual HTTPS deployment also passed: 7,030 ms startup, 2.5 seconds synthetic silence, zero submissions and page errors, successful download/removal. This is a startup observation, not a turn-latency benchmark. |
 | Voice to native agent | A verified public number-recording WAV passed through the actual HTTPS browser microphone path, AudioWorklet, Silero and Vosk. Finish submitted exactly one full turn, and NorthPointe returned VOICE-TEST-ACK in the same conversation as the typed prelude. No interim submission, duplicate, premium connection or page error occurred. |
 | Automatic conversation | With hands-free enabled, two finite public phrases passed through real AudioWorklet/Silero/Vosk and the live native agent. One Start, one microphone stream, zero Finish presses, exactly two voice submissions and two AUTO-TEST-ACK replies; listening resumed after each reply. Playback callbacks were simulated, so this establishes automatic turn orchestration rather than physical audible behavior. |
+| Fish Audio | Official streaming contract implemented and exercised against an isolated provider fixture: MessagePack start/text/flush/stop, PCM boundaries, cancellation, expired sessions, timeouts and redacted errors. Credentials stay encrypted server-side. Actual Fish voice access, synthesis quality, latency, billing and audible output require the owner's API key and voice ID. |
 | Security boundaries | Encoded API route aliases require authentication, origin and CSRF checks. HTTP and WebSocket regression coverage plus actual HTTPS probes pass. Dynamic evaluation is allowed only on the exact Vosk broker Worker response; application documents remain strict. |
 | Rollback | Immutable release 1ccd824 was rolled back to d973af7 and restored. Authenticated history, the newest voice conversation, image bytes, native connectivity and each release's served asset digests survived both transitions. Evidence is in `.local/release-evidence/rollback-state.json`. |
 
@@ -99,6 +106,8 @@ These remain open until measured; do not mark them passed from simulated audio:
   intended headset/car Bluetooth routing and reconnection.
 - Live Deepgram STT/TTS with owner-supplied credentials; provider availability and
   paid-provider latency cannot be established using a mocked WebSocket.
+- Live Fish TTS with the owner's API key and voice ID, and a successful audible
+  speaker test on the intended Android output route.
 
 Record endpoint, inference, gateway, first-text, first-audio, audible-stop, and reconnect
 timings separately. No controlled historical baseline exists; do not claim a numeric

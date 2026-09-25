@@ -27,4 +27,9 @@ describe('device speech preference compatibility', () => {
     expect(restoreSpeechPreferences(JSON.stringify({ recognition: 'browser', handsFree: true }))).toMatchObject({ recognition: 'browser', handsFree: false });
     expect(selectRecognizer(restoreSpeechPreferences(null), 'browser').handsFree).toBe(false);
   });
+  it('preserves an explicitly selected Fish voice without changing recognition or opting other devices into Fish', () => {
+    expect(restoreSpeechPreferences(JSON.stringify({recognition:'vosk',output:'fish',fishVoice:'my-voice-id',handsFree:true})))
+      .toMatchObject({recognition:'vosk',output:'fish',fishVoice:'my-voice-id',handsFree:true});
+    expect(restoreSpeechPreferences(null).output).toBe('browser');
+  });
 });

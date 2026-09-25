@@ -25,12 +25,16 @@ try{
   assert.equal(noCsrf.status(),403,'Encoded route still requires CSRF');
   const wrongOrigin=await api.put('/%61pi/settings/deepgram',{headers:{Origin:'https://untrusted.example','X-CSRF-Token':status.csrfToken},data:{apiKey:'invalid'}});
   assert.equal(wrongOrigin.status(),403,'Encoded route still checks Origin');
+  assert.equal((await api.put('/api/settings/fish',{data:{apiKey:'invalid'}})).status(),403,'Fish credential route requires CSRF');
+  assert.equal((await api.delete('/api/settings/fish',{headers:{Origin:'https://untrusted.example','X-CSRF-Token':status.csrfToken}})).status(),403,'Fish credential route checks Origin');
   const history=await api.get(`/api/conversations/${evidence.conversationId}`);
   assert.equal(history.status(),200);const view=await history.json();
   assert.ok(view.messages.some(m=>m.role==='assistant'&&/482/.test(m.text)),'Native conversation survives release changes');
   assert.ok(view.messages.some(m=>m.role==='user'&&m.attachments?.length),'Captured image survives release changes');
   const settings=await (await api.get('/api/settings')).json();
   assert.equal(settings.harness.connected,true);assert.equal(settings.harness.images,true);
+  const fishCredentialBoundary=!recorded||recorded.fishCredentialBoundary===true;
+  if(fishCredentialBoundary)assert.equal(typeof settings.fishConfigured,'boolean','Fish reports only credential availability');
   const html=await api.get('/');
   assert.ok(!html.headers()['content-security-policy'].includes("'unsafe-eval'"));
   const assets=[...new Set((await html.text()).match(/\/assets\/[^"'\s>]+\.(?:js|css)/g))];
@@ -43,7 +47,7 @@ try{
     assert.equal(digest(await remote.body()),expectedDigest,`Served asset matches build: ${path}`);
     verified.push({path,sha256:expectedDigest});
   }
-  const result={time:new Date().toISOString(),build:expected,assetReference:recorded?'previously verified immutable build':'local production build',nativeConnected:true,persistedConversationId:evidence.conversationId,persistedImage:true,encodedRouteAuthentication:true,originAndCsrf:true,assets:verified};
+  const result={time:new Date().toISOString(),build:expected,assetReference:recorded?'previously verified immutable build':'local production build',nativeConnected:true,persistedConversationId:evidence.conversationId,persistedImage:true,encodedRouteAuthentication:true,originAndCsrf:true,fishCredentialBoundary,fishConfigured:settings.fishConfigured,assets:verified};
   await mkdir('.local/release-evidence',{recursive:true});
   await writeFile(`.local/release-evidence/release-${expected}.json`,JSON.stringify(result,null,2));
   console.log('PASS release identity, persisted native conversation/image, security boundaries, and served assets',JSON.stringify(result));
