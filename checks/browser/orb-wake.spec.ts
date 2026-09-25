@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { waitForFixtureBudget } from './fixture-budget';
+import { enterFixtureSession } from './fixture-session';
 
 test.beforeEach(waitForFixtureBudget);
 
@@ -30,9 +31,7 @@ async function enterWithControlledSpeech(page: Page, recognition: 'browser' | 'v
     }
     Object.defineProperty(window, 'SpeechRecognition', { configurable: true, value: ControlledSpeech });
   }, recognition);
-  await page.goto('/');
-  await page.getByLabel('Password', { exact: true }).fill('browser-fixture-password-2026');
-  await page.getByRole('button', { name: 'Enter your space', exact: true }).click();
+  await enterFixtureSession(page);
   await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled();
   await expect(page.locator('.orb-stage')).toHaveAttribute('data-presence', 'sleeping');
 }

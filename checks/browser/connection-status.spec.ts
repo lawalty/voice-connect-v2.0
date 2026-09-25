@@ -1,19 +1,14 @@
-import { test, expect, type Page, type WebSocketRoute } from '@playwright/test';
+import { test, expect, type WebSocketRoute } from '@playwright/test';
 import { waitForFixtureBudget } from './fixture-budget';
+import { enterFixtureSession } from './fixture-session';
 
 test.beforeEach(waitForFixtureBudget);
-
-async function signIn(page: Page) {
-  await page.goto('/');
-  await page.getByLabel('Password', { exact: true }).fill('browser-fixture-password-2026');
-  await page.getByRole('button', { name: 'Enter your space', exact: true }).click();
-}
 
 for (const endpoint of ['settings', 'conversations']) {
   test(`a failed initial ${endpoint} read recovers in the header without a stale notice`, async ({ page }) => {
     let failing = true;
     await page.route(`**/api/${endpoint}`, route => failing ? route.abort('failed') : route.continue());
-    await signIn(page);
+    await enterFixtureSession(page);
     const connection = page.locator('.site-header .connection-pill');
     await expect(connection).toHaveText('Reconnecting');
     await expect(page.locator('.notice')).toHaveCount(0);
@@ -39,7 +34,7 @@ test('history and gateway recovery clear only connection errors after the subscr
       else route.send(message);
     });
   });
-  await signIn(page);
+  await enterFixtureSession(page);
   const connection = page.locator('.site-header .connection-pill');
   await expect(connection).toHaveText('Reconnecting');
   await expect(page.locator('.notice')).toHaveCount(0);
