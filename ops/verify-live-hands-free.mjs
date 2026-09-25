@@ -72,7 +72,7 @@ try {
     } });
     document.addEventListener('click', event => {
       const button = event.target.closest?.('button');
-      if (button?.classList.contains('start-button')) state.starts++;
+      if (button?.classList.contains('orb-wake-button')) state.starts++;
       if (button?.textContent?.includes('Finish thought')) state.finishes++;
     });
   });
@@ -96,7 +96,7 @@ try {
   await page.goto(origin);
   await page.getByLabel('Password', { exact: true }).fill(access.password);
   await page.getByRole('button', { name: 'Enter your space' }).click();
-  await expect(page.getByRole('button', { name: 'Start talking', exact: true })).toBeEnabled({ timeout: 30000 });
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled({ timeout: 30000 });
   const created = await page.evaluate(async ({ expectedBuild }) => {
     const status = await (await fetch('/api/status')).json();
     if (!String(status.build).includes(expectedBuild)) throw Error('Unexpected deployed build.');
@@ -107,7 +107,7 @@ try {
   }, { expectedBuild });
   Object.assign(report, created);
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Start talking', exact: true })).toBeEnabled({ timeout: 30000 });
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled({ timeout: 30000 });
   await page.getByLabel('Message NorthPointe').fill('Synthetic Voice Connect automatic-turn test. The next two messages will contain only numbers from a public speech sample, not real user requests. Do not use tools, take external actions or save memory for this test. Reply READY now. For each of the following two number messages, reply only AUTO-TEST-ACK.');
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect.poll(() => receipts.length, { timeout: 30000 }).toBe(1);
@@ -121,7 +121,7 @@ try {
   await page.getByRole('checkbox', { name: /Hands-free turns|Automatic turns/ }).check();
   await page.getByRole('button', { name: 'Save preferences' }).click();
   const startedAt = Date.now();
-  await page.getByRole('button', { name: 'Start talking', exact: true }).click();
+  await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
   await expect(page.getByText('Listening to you', { exact: true })).toBeVisible({ timeout: 120000 });
   await expect(page.getByRole('button', { name: 'Finish thought', exact: true })).toHaveCount(0);
   report.startupMs = Date.now() - startedAt;

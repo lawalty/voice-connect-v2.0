@@ -83,7 +83,7 @@ try{
   const context=await browser.newContext({storageState:await api.storageState(),viewport:{width:1440,height:960}});
   const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin);await page.evaluate(id=>localStorage.setItem('vc2:conversation',id),conversation.id);await page.reload();
-  await expect(page.getByRole('button',{name:'Start talking',exact:true})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Wake NorthPointe',exact:true})).toBeEnabled();
   await page.getByRole('log',{name:'Messages'}).getByText(visual.text,{exact:true}).waitFor({timeout:20000});
   await mkdir('.local/release-evidence',{recursive:true});await page.screenshot({path:'.local/release-evidence/live-desktop.png',fullPage:true});
   await page.getByRole('button',{name:'Open settings'}).click();await page.screenshot({path:'.local/release-evidence/live-settings.png',fullPage:true});

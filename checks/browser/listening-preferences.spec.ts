@@ -17,7 +17,7 @@ test('interruption sensitivity and listening cues persist on this device without
   await page.goto('/');
   await page.getByLabel('Password', { exact: true }).fill('browser-fixture-password-2026');
   await page.getByRole('button', { name: 'Enter your space', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Start talking', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled();
   const conversation = await page.evaluate(() => localStorage.getItem('vc2:conversation'));
 
   await page.getByRole('button', { name: 'Open settings', exact: true }).click();
@@ -43,7 +43,7 @@ test('interruption sensitivity and listening cues persist on this device without
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Start talking', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Open settings', exact: true }).click();
   await expect(sensitivity).toHaveValue('25');
   await expect(cues).not.toBeChecked();
@@ -57,7 +57,7 @@ test('interruption sensitivity and listening cues persist on this device without
   await cues.check();
   await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Start talking', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Open settings', exact: true }).click();
   await expect(sensitivity).toHaveValue('25');
   await expect(cues).toBeChecked();

@@ -7,7 +7,7 @@ async function signIn(page:Page){
   await page.goto('/');
   await page.getByLabel('Password',{exact:true}).fill('browser-fixture-password-2026');
   await page.getByRole('button',{name:'Enter your space'}).click();
-  await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Wake NorthPointe'})).toBeEnabled();
 }
 test('private entry, continuous text conversation, and refresh preserve history',async({page},info)=>{
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
@@ -34,7 +34,7 @@ test('private entry, continuous text conversation, and refresh preserve history'
     await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
     await expect(page.getByRole('button',{name:'Attach a camera photo',exact:true})).toBeDisabled();
   }finally{releaseHistory();}
-  await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Wake NorthPointe'})).toBeEnabled();
   if(info.project.name==='android-layout')await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await expect(page.getByRole('log',{name:'Messages'}).getByText('A browser acceptance thought.',{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(before);
@@ -120,7 +120,7 @@ test('offline draft remains unsent and cancellation cannot resurrect old output'
   await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
   const recoveryStarted=Date.now();
   await context.setOffline(false);
-  await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled({timeout:5000});
+  await expect(page.getByRole('button',{name:'Wake NorthPointe'})).toBeEnabled({timeout:5000});
   await info.attach('reconnection-timing',{body:JSON.stringify({recoveredMs:Date.now()-recoveryStarted}),contentType:'application/json'});
   await expect(page.getByLabel('Message NorthPointe')).toHaveValue('Keep this offline thought.');
   await expect(page.getByText('Your conversation stays together. I’m here with you.',{exact:true})).toHaveCount(0);

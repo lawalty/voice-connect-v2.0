@@ -114,6 +114,53 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it('keeps a new recording alive when a cancelled browser microphone request rejects late', async () => {
+    vi.stubGlobal('SpeechRecognition', class {});
+    let rejectOld!: (reason: Error) => void;
+    microphone.mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject; }));
+    const run = setup();
+    const oldStart = run.engine.start({ ...preferences, recognition: 'browser', handsFree: false }, 'one-conversation');
+    run.engine.stop();
+    await run.engine.start(preferences, 'one-conversation');
+    const currentDetector = detector;
+    const terminate = vi.spyOn(currentDetector, 'terminate');
+    const currentStream = await microphone.mock.results[1]!.value;
+    rejectOld(new Error('Old microphone permission request was denied.'));
+    await oldStart;
+    expect(currentStream.getTracks()[0].stop).not.toHaveBeenCalled();
+    expect(terminate).not.toHaveBeenCalled();
+    expect(run.phases.at(-1)).toBe('listening');
+    expect(run.notices).not.toContain('Live microphone visualization is unavailable with browser speech on this device.');
+    await frame('start'); fixture.recognizers[0]!.finals.push('The new recording survives.'); await frame('end');
+    expect(run.turns).toEqual(['The new recording survives.']);
+    expect(run.callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it('keeps the new speech detector when a cancelled detector startup rejects late', async () => {
+    let created = 0;
+    vi.stubGlobal('Worker', class extends FakeWorker {
+      private readonly holdReady = created++ === 0;
+      override postMessage(message: Parameters<FakeWorker['postMessage']>[0]) {
+        if (message.type === 'init' && this.holdReady) return;
+        super.postMessage(message);
+      }
+    });
+    const run = setup();
+    const oldStart = run.engine.start(preferences, 'one-conversation');
+    await drain();
+    const oldDetector = detector;
+    run.engine.stop();
+    await run.engine.start(preferences, 'one-conversation');
+    const terminate = vi.spyOn(detector, 'terminate');
+    oldDetector.onerror?.();
+    await oldStart;
+    expect(terminate).not.toHaveBeenCalled();
+    expect(run.phases.at(-1)).toBe('listening');
+    await frame('start'); fixture.recognizers[1]!.finals.push('The new detector survives.'); await frame('end');
+    expect(run.turns).toEqual(['The new detector survives.']);
+    expect(run.callbacks.onError).not.toHaveBeenCalled();
+  });
+
   it('ends a failed speech response without retrying fragments and allows the next response', async () => {
     const run = setup(); await run.engine.start(preferences, 'one-conversation');
     run.engine.speak('An initial complete sentence.');

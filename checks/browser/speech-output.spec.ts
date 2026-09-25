@@ -40,7 +40,7 @@ test('speaker checks distinguish playback reports from audibility and keep paid 
   await page.goto('/');
   await page.getByLabel('Password', { exact: true }).fill('browser-fixture-password-2026');
   await page.getByRole('button', { name: 'Enter your space' }).click();
-  await expect(page.getByRole('button', { name: 'Start talking' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe' })).toBeEnabled();
   await page.getByRole('button', { name: 'Open settings' }).click();
   const speaker = page.getByRole('region', { name: 'Speaker check' });
   const testSpeaker = speaker.getByRole('button', { name: 'Test speaker', exact: true });

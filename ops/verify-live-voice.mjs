@@ -65,7 +65,7 @@ try {
   expect(response.headers()['content-security-policy']).not.toContain("'unsafe-eval'");
   await page.getByLabel('Password', { exact: true }).fill(access.password);
   await page.getByRole('button', { name: 'Enter your space' }).click();
-  await expect(page.getByRole('button', { name: 'Start talking' })).toBeEnabled({ timeout: 30000 });
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe' })).toBeEnabled({ timeout: 30000 });
   const created = await page.evaluate(async ({ expected, title }) => {
     const status = await (await fetch('/api/status')).json();
     if (!String(status.build).includes(expected)) throw new Error('Deployment changed before synthetic acceptance.');
@@ -76,7 +76,7 @@ try {
   }, { expected: EXPECTED_BUILD, title: `Synthetic voice acceptance ${new Date().toISOString()}` });
   syntheticConversationId = created.id; Object.assign(report, { conversationId: created.id, build: created.build, title: created.title });
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Start talking' })).toBeEnabled({ timeout: 30000 });
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe' })).toBeEnabled({ timeout: 30000 });
   const prelude = 'Synthetic Voice Connect acceptance test only. The next message will be a prerecorded public speech-recognition number test, not a real user request. Do not use tools, take external actions, or save any memory for either test message. Reply READY now. After the following number recording, reply VOICE-TEST-ACK and briefly repeat the recognized numbers; do nothing else.';
   await page.getByLabel('Message NorthPointe').fill(prelude);
   const preludeResponse = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/api/conversations/${created.id}/turns`));
@@ -95,7 +95,7 @@ try {
   await page.getByRole('checkbox', { name: /Hands-free turns/ }).uncheck();
   await page.getByRole('button', { name: 'Save preferences' }).click();
   const startedAt = Date.now();
-  await page.getByRole('button', { name: 'Start talking' }).click();
+  await page.getByRole('button', { name: 'Wake NorthPointe' }).click();
   await expect(page.getByText('Listening to you', { exact: true })).toBeVisible({ timeout: 120000 });
   report.captureStartupMs = Date.now() - startedAt;
   assert.ok(report.captureStartupMs < leadingSilenceMs - 2000, 'readiness occurred before the prerecorded utterance began');

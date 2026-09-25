@@ -119,7 +119,10 @@ export class VoiceEngine {
         this.callbacks.onNotice('Browser recognition may send microphone audio to your browser vendor. Availability and recording duration depend on your browser.');
         // Built-in recognition owns its capture. A separate meter is best effort only.
         try { if (this.browserMeterSupported) await this.openCapture(context, generation, false); }
-        catch { this.closeCapture(); this.callbacks.onNotice('Live microphone visualization is unavailable with browser speech on this device.'); }
+        catch {
+          if (generation !== this.generation) return;
+          this.closeCapture(); this.callbacks.onNotice('Live microphone visualization is unavailable with browser speech on this device.');
+        }
         if (generation !== this.generation) return;
       } else {
         await this.openCapture(context, generation, true);
@@ -170,6 +173,7 @@ export class VoiceEngine {
     this.source.connect(this.worklet); this.worklet.connect(context.destination);
     try { await this.startVad(generation); }
     catch (error) {
+      if (generation !== this.generation) return;
       this.vad?.terminate(); this.vad = undefined;
       if (requireVad) throw new Error(`Speech detection could not start: ${error instanceof Error ? error.message : String(error)}`);
     }

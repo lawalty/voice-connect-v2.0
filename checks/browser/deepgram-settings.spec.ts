@@ -51,7 +51,7 @@ test('Deepgram credential verification preserves sign-in and the saved key witho
   await page.goto('/');
   await page.getByLabel('Password', { exact: true }).fill('browser-fixture-password-2026');
   await page.getByRole('button', { name: 'Enter your space', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Start talking', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled();
   const conversation = await page.evaluate(() => localStorage.getItem('vc2:conversation'));
   await page.getByRole('button', { name: 'Open settings', exact: true }).click();
   const section = page.locator('.settings-section').filter({ has: page.getByRole('heading', { name: 'Deepgram · STT', exact: true }) });
@@ -97,7 +97,7 @@ test('Deepgram credential verification preserves sign-in and the saved key witho
   for (const key of [originalKey, candidateKey, acceptedKey]) expect(browserStorage).not.toContain(key);
   await page.screenshot({ path: info.outputPath('deepgram-verified.png'), fullPage: true });
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('button', { name: 'Start talking', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled();
   expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(conversation);
   expect(await page.evaluate(() => (window as unknown as { vcDeepgramProbe: { microphones: number } }).vcDeepgramProbe.microphones)).toBe(0);
   expect(audio).toEqual([]);
