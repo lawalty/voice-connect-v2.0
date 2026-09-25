@@ -1,5 +1,6 @@
 import type { AudioEvent, SpeechOutput, SpeechPreferences } from '../../contract/types';
 import { Generation } from './dsp';
+import { PLAYBACK_WINDOW_BYTES } from '../../contract/audio-flow';
 
 export function audioURL(kind: 'stt' | 'tts', conversationId: string, voice?: string) {
   const url = new URL('/api/audio', location.href);
@@ -143,6 +144,9 @@ export class PremiumOutput implements SpeechOutput {
   private ended = false;
   private timeout?: ReturnType<typeof setTimeout>;
   private playbackTimeout?: ReturnType<typeof setTimeout>;
+  private playbackWindow = 0;
+  private pendingBytes = 0;
+  private playedBytes = 0;
   constructor(private context: AudioContext, private conversationId: string, private voice: string, private events: OutputEvents) {}
   private connect() {
     if (this.socket || this.failed) return;
@@ -160,6 +164,11 @@ export class PremiumOutput implements SpeechOutput {
         if (this.ready) return;
         if (event.sampleRate !== 24000) { this.fail('Premium voice requested an unsupported audio rate. The reply remains available as text.'); return; }
         clearTimeout(this.timeout); this.ready = true; this.sampleRate = event.sampleRate;
+        if (event.playbackWindowBytes !== undefined) {
+          if (event.playbackWindowBytes !== PLAYBACK_WINDOW_BYTES) { this.fail('Voice playback protocol changed. Refresh Voice Connect and try again.'); return; }
+          this.playbackWindow = event.playbackWindowBytes;
+          socket.send(JSON.stringify({ type: 'playback', playedBytes: 0 }));
+        }
         for (const command of this.commands) socket.send(JSON.stringify(command)); this.commands = [];
         this.watchPlayback('Premium voice connected but returned no playable audio. Try Test speaker or check the selected voice.', 15000);
       } else if (event.type === 'speech-done') {
@@ -182,21 +191,44 @@ export class PremiumOutput implements SpeechOutput {
     if (this.failed || !text.trim()) return;
     this.done = false;
     for (let offset = 0; offset < text.length; offset += 3500) this.send({ type: 'speak', text: text.slice(offset, offset + 3500) });
+    if (this.ready) this.watchPlayback('Premium voice returned no audio for the next part of the reply. Please reconnect voice.', Math.max(15000, (this.nextTime - this.context.currentTime) * 1000 + 15000));
   }
-  finish() { this.complete = true; if (this.failed) this.reportEnded(); else if (this.socket) this.send({ type: 'flush' }); else this.reportEnded(); }
+  finish() {
+    this.complete = true;
+    if (this.failed) this.reportEnded();
+    else if (this.socket) {
+      this.send({ type: 'flush' });
+      this.watchPlayback('Premium voice did not finish the reply. Please reconnect voice.', Math.max(15000, (this.nextTime - this.context.currentTime) * 1000 + 15000));
+    } else this.reportEnded();
+  }
   private play(bytes: ArrayBuffer, id: number) {
     if (bytes.byteLength % 2 || !this.generation.is(id) || !this.ready || this.done || this.failed) return;
     const samples = bytes.byteLength / 2;
     if (!samples) return;
     if (this.context.state && this.context.state !== 'running') { this.fail('Browser audio output is suspended. Tap Test speaker to request playback. The reply remains as text.'); return; }
-    if (Math.max(0, this.nextTime - this.context.currentTime) + samples / this.sampleRate > 60) { this.fail('The spoken reply is too long to buffer safely. Read the remaining text.'); return; }
+    // Credit returns only when audio has actually finished, not when it arrives.
+    // Long replies therefore use the same small amount of scheduled PCM as short ones.
+    if (this.playbackWindow && this.pendingBytes + bytes.byteLength > this.playbackWindow) { this.fail('Voice playback pacing was lost. Please reconnect voice.'); return; }
+    if (!this.playbackWindow && this.pendingBytes + bytes.byteLength > this.sampleRate * 2 * 60) { this.fail('Refresh Voice Connect to enable paced voice streaming.'); return; }
     try {
       const buffer = this.context.createBuffer(1, samples, this.sampleRate), channel = buffer.getChannelData(0), view = new DataView(bytes);
       for (let i = 0; i < samples; i++) channel[i] = view.getInt16(i * 2, true) / 32768;
       const source = this.context.createBufferSource(); source.buffer = buffer; source.connect(this.context.destination);
       const start = Math.max(this.context.currentTime + 0.025, this.nextTime);
       this.nextTime = start + buffer.duration; this.sources.add(source);
-      source.onended = () => { source.disconnect(); this.sources.delete(source); if (this.generation.is(id)) this.checkDone(); };
+      this.pendingBytes += bytes.byteLength;
+      source.onended = () => {
+        source.disconnect();
+        if (!this.sources.delete(source) || !this.generation.is(id)) return;
+        this.pendingBytes -= bytes.byteLength; this.playedBytes += bytes.byteLength;
+        if (this.playbackWindow && !this.done && this.socket?.readyState === WebSocket.OPEN) {
+          this.socket.send(JSON.stringify({ type: 'playback', playedBytes: this.playedBytes }));
+        }
+        // A tool may take time between spoken passages. An empty playback queue
+        // is not a failed synthesis request while the agent is still working.
+        if (!this.sources.size && !this.complete) clearTimeout(this.playbackTimeout);
+        this.checkDone();
+      };
       source.start(start);
       this.events.reference?.({ samples: channel, sampleRate: this.sampleRate, startTime: start });
       if (!this.started) { this.started = true; this.firstTime = start; this.events.started(); }
@@ -227,6 +259,7 @@ export class PremiumOutput implements SpeechOutput {
     if (this.ready && this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'interrupt', offsetMs }));
     this.socket?.close(); this.socket = undefined; this.commands = []; this.ready = false;
     this.nextTime = 0; this.firstTime = 0; this.started = false; this.complete = false; this.done = false;
+    this.pendingBytes = 0; this.playedBytes = 0; this.playbackWindow = 0;
   }
   dispose() { this.cancel(); }
 }

@@ -42,7 +42,7 @@ export type ServerEvent =
   | { type: 'reconcile'; conversationId: string }
   | { type: 'error'; message: string };
 export type AudioEvent =
-  | { type: 'ready'; sampleRate: number }
+  | { type: 'ready'; sampleRate: number; playbackWindowBytes?: number }
   | { type: 'stt'; text: string; final: boolean; turnComplete: boolean; started?: boolean }
   | { type: 'speech-done' }
   | { type: 'interrupted' }

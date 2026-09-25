@@ -71,6 +71,21 @@ describe('coherent turn and speech output boundaries', () => {
     stream.append('A short'); stream.append(' response');
     expect(stream.finish()).toEqual(['A short response']); expect(stream.finish()).toEqual([]);
   });
+  it('streams coherent sentences while preserving split decimals, abbreviations, and closing quotes', () => {
+    const stream = new SentenceStream();
+    expect(stream.append('Dr. Smith measured 3.')).toEqual([]);
+    expect(stream.append('14 particles. She said, “Here is the result.” More')).toEqual(['Dr. Smith measured 3.14 particles.', 'She said, “Here is the result.”']);
+    expect(stream.append(' detail follows.')).toEqual(['More detail follows.']);
+    expect(stream.finish()).toEqual([]);
+  });
+  it('starts long unpunctuated passages before completion and preserves all words', () => {
+    const stream = new SentenceStream();
+    const words = Array.from({ length: 150 }, (_, i) => `word${i}`).join(' ');
+    const first = stream.append(words);
+    expect(first.length).toBeGreaterThan(0); expect(first.every(piece => piece.length <= 280)).toBe(true);
+    expect([...first, ...stream.finish()].join(' ')).toBe(words);
+    expect(stream.finish()).toEqual([]);
+  });
   it('invalidates late playback and transport callbacks after interruption', () => {
     const generation = new Generation(), before = generation.current;
     const after = generation.next();

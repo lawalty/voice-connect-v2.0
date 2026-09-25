@@ -122,20 +122,50 @@ export class SentenceStream {
       if (value.slice(0, this.emitted) !== this.text.slice(0, this.emitted)) return [];
       this.text = value;
     } else this.text += value;
-    const pending = this.text.slice(this.emitted);
-    const output: string[] = [];
-    const matches = pending.matchAll(/[^.!?\n]+[.!?](?=\s|$)|[^\n]+\n/g);
-    let consumed = 0;
-    for (const match of matches) {
-      const end = (match.index ?? 0) + match[0].length;
-      output.push(pending.slice(consumed, end).trim()); consumed = end;
-    }
-    this.emitted += consumed;
-    return output.filter(Boolean);
+    return this.drain(false);
   }
   finish(): string[] {
-    const rest = this.text.slice(this.emitted).trim(); this.emitted = this.text.length;
-    return rest ? [rest] : [];
+    return this.drain(true);
+  }
+  private drain(final: boolean): string[] {
+    const output: string[] = [];
+    while (this.emitted < this.text.length) {
+      const pending = this.text.slice(this.emitted);
+      let boundary = 0;
+      for (let i = 0; i < pending.length; i++) {
+        const character = pending[i]!;
+        if (character === '\n') { boundary = i + 1; break; }
+        if (!/[.!?]/.test(character)) continue;
+        let end = i + 1;
+        while (end < pending.length && /[.!?"'”’)}\]]/.test(pending[end]!)) end++;
+        if (end < pending.length && !/\s/.test(pending[end]!)) continue;
+        if (character === '.') {
+          const token = pending.slice(0, i + 1).match(/[^\s]+$/)?.[0] ?? '';
+          // A streamed decimal, initial, abbreviation, or URL is not a sentence.
+          if (/^(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e)\.$/i.test(token) || /^(?:[A-Za-z]\.)+$/.test(token)) continue;
+          if (/\d\.$/.test(token) && end === pending.length && !final) continue;
+          if (/^(?:https?:\/\/|www\.)/i.test(token) && end === pending.length && !final) continue;
+        }
+        boundary = end; break;
+      }
+      // Long sentences may start speaking at a natural clause boundary. Keep
+      // provider requests short without waiting for the full agent response.
+      if (!boundary || boundary > 280) {
+        const window = pending.slice(0, 280);
+        const clauses = [...window.matchAll(/[,;:—](?=\s)/g)].filter(match => match.index >= 80);
+        const clause = clauses[0];
+        if (clause && pending.length >= 180) boundary = clause.index + 1;
+        else if (pending.length > 280) {
+          const space = window.lastIndexOf(' ');
+          boundary = space >= 80 ? space : 280;
+        }
+      }
+      if (!boundary) { if (!final) break; boundary = pending.length; }
+      const piece = pending.slice(0, boundary).trim();
+      this.emitted += boundary;
+      if (piece) output.push(piece);
+    }
+    return output;
   }
   reset() { this.text = ''; this.emitted = 0; }
 }

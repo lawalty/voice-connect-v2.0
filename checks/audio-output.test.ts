@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { audioURL, BrowserOutput, PremiumOutput } from '../client/audio/output';
+import { PLAYBACK_WINDOW_BYTES, PLAYBACK_FRAME_BYTES } from '../contract/audio-flow';
 
 const BROWSER_PREFERENCES = { browserVoice: '' };
 
@@ -193,6 +194,45 @@ function pcmFixture() {
 }
 
 describe('Fish PCM output lifecycle', () => {
+  it('streams a multi-minute reply through a four-second window and acknowledges only finished playback', () => {
+    const run = pcmFixture(); run.output.enqueue('The beginning of a long reply.');
+    const socket = run.sockets[0]!;
+    socket.event({ type: 'ready', sampleRate: 24000, playbackWindowBytes: PLAYBACK_WINDOW_BYTES });
+    expect(JSON.parse(socket.send.mock.calls[0]![0])).toEqual({ type: 'playback', playedBytes: 0 });
+    socket.pcm(PLAYBACK_FRAME_BYTES);
+    expect(run.events.started).toHaveBeenCalledOnce(); expect(run.events.ended).not.toHaveBeenCalled();
+    expect(socket.send.mock.calls.filter(([value]) => JSON.parse(value).type === 'playback')).toHaveLength(1);
+    run.output.enqueue('The ending of the long reply.'); run.output.finish();
+    let consumed = 0;
+    for (let n = 0; n < 900; n++) {
+      if (n) socket.pcm(PLAYBACK_FRAME_BYTES);
+      run.context.currentTime += 0.2; run.sources[n]!.onended?.(); consumed += PLAYBACK_FRAME_BYTES;
+      expect(JSON.parse(socket.send.mock.calls.at(-1)![0])).toEqual({ type: 'playback', playedBytes: consumed });
+    }
+    socket.event({ type: 'speech-done' });
+    expect(run.events.error).not.toHaveBeenCalled(); expect(run.events.ended).toHaveBeenCalledOnce();
+  });
+
+  it('does not time out in a tool gap or return playback credit after cancellation', async () => {
+    vi.useFakeTimers(); const run = pcmFixture(); run.output.enqueue('Let me check.');
+    const socket = run.sockets[0]!;
+    socket.event({ type: 'ready', sampleRate: 24000, playbackWindowBytes: PLAYBACK_WINDOW_BYTES });
+    socket.pcm(); run.sources[0]!.onended?.();
+    await vi.advanceTimersByTimeAsync(60000); expect(run.events.error).not.toHaveBeenCalled();
+    run.output.enqueue('I found the answer.'); socket.pcm(); run.output.cancel();
+    const sends = socket.send.mock.calls.length; run.sources[1]!.onended?.();
+    expect(socket.send.mock.calls.length).toBe(sends); expect(run.events.ended).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('rejects audio beyond the negotiated window instead of allowing unbounded allocation', () => {
+    const run = pcmFixture(); run.output.enqueue('A reply.');
+    const socket = run.sockets[0]!;
+    socket.event({ type: 'ready', sampleRate: 24000, playbackWindowBytes: PLAYBACK_WINDOW_BYTES });
+    socket.pcm(PLAYBACK_WINDOW_BYTES); socket.pcm(2);
+    expect(run.events.error).toHaveBeenCalledWith(expect.stringContaining('pacing was lost'));
+    expect(run.sources).toHaveLength(1); expect(run.sources[0]!.stop).toHaveBeenCalledOnce();
+  });
   it('routes every TTS request to Fish while preserving the existing Deepgram recognition route', () => {
     vi.stubGlobal('location', { href: 'https://voice.test/', protocol: 'https:' });
     const tts = new URL(audioURL('tts', 'conversation-id', 'fish-reference-id'));
