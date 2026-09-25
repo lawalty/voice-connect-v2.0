@@ -74,7 +74,7 @@ describe('recognition-only Deepgram Flux transport',()=>{
       headers:{get:readPrivate},body:{get:readPrivate},statusMessage:{get:readPrivate},
     });
     f.remote.emit('unexpected-response',request,response);
-    expect(f.client.frames()).toEqual([{type:'error',message:'Deepgram rejected authentication (HTTP 401). Re-enter the intended API key in Settings and choose Save key. If the key is correct, check its project permissions. If the key is already correct, check its project permissions.'}]);
+    expect(f.client.frames()).toEqual([{type:'error',message:'Deepgram rejected authentication (HTTP 401). Re-enter the intended API key in Settings and choose Save key. If the key is correct, check its project permissions.'}]);
     expect(readPrivate).not.toHaveBeenCalled();expect(response.resume).toHaveBeenCalledOnce();expect(response.destroy).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
     f.remote.emit('error',new Error('Authorization: synthetic-recognition-secret malicious-provider-response'));

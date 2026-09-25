@@ -5,7 +5,7 @@ type RecognitionRemoteFactory=(url:URL,options:WebSocket.ClientOptions)=>WebSock
 function handshakeFailure(status:number|undefined):string {
   const messages:Record<number,string>={
     400:'Deepgram rejected the recognition request configuration (HTTP 400). Refresh Voice Connect and try again.',
-    401:'Deepgram rejected authentication (HTTP 401). Re-enter the intended API key in Settings and choose Save key. If the key is correct, check its project permissions. If the key is already correct, check its project permissions.',
+    401:'Deepgram rejected authentication (HTTP 401). Re-enter the intended API key in Settings and choose Save key. If the key is correct, check its project permissions.',
     402:'Deepgram requires account credits (HTTP 402). Check the project billing balance before retrying recognition.',
     403:'Deepgram denied access to Flux recognition (HTTP 403). Check the saved key\'s project permissions and model access.',
     429:'Deepgram recognition is rate limited (HTTP 429). Wait a moment and retry, or choose on-device recognition.',
