@@ -1,4 +1,7 @@
 import {test,expect,type Page,type BrowserContext} from '@playwright/test';
+import { waitForFixtureBudget } from './fixture-budget';
+
+test.beforeEach(waitForFixtureBudget);
 
 let ownerCookies:Parameters<BrowserContext['addCookies']>[0]=[];
 async function enterPrivateSpace(page:Page,context:BrowserContext){

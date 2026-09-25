@@ -9,21 +9,35 @@ been established. Speech diagnostics and an explicit speaker test now distinguis
 requested/reported playback from the user's audibility confirmation. Adding Fish
 Audio does not by itself close that physical acceptance gate.
 
-The owner subsequently confirmed Vosk recognition works after saving its provider
-selection, but reported poor recognition accuracy in a quiet room. Vosk model
-research is paused at the owner's request while Deepgram is addressed. A separate
-VPS probe of the configured Deepgram Flux connection returned HTTP 401 with the
-allowlisted provider code `INVALID_AUTH` before any audio was sent. The official
-authentication test endpoint also returned 401. This identifies rejection of the
-stored credential; live Deepgram transcription remains unqualified until a
-working credential is securely saved and a real transcription succeeds. The same stored value also received `401 INVALID_AUTH` on a Nova-3 v1 handshake; a model switch alone does not resolve this rejection. Hermes source uses Nova-3 with the same Token header scheme, but its credential comes from the Hermes process environment rather than VC settings. Equality of the two live loaded credentials has not been established.
+The owner confirmed Vosk recognition works after saving its provider selection,
+but reported poor recognition accuracy in a quiet room. Vosk model research was
+paused to address Deepgram first.
+
+The previously stored Deepgram credential returned `401 INVALID_AUTH` on both
+Flux v2 and Nova-3 v1; the official authentication endpoint also returned 401.
+The owner then re-entered the key used successfully in Hermes, saved the key and
+preferences, and reported Deepgram working. A fresh authenticated VC connection
+check now passes. This resolves the authentication blocker; the exact reason the
+previous saved value differed in behavior was not established.
+
+On deployed release `8a1ce24503336366c0bd411043cca83d3c57125d`, an actual Deepgram
+Flux test streamed the public 8.308-second PCM fixture through the authenticated
+VC audio channel. Readiness took 311.7 ms; one automatic completed transcript
+arrived 10,080.1 ms after connection began. No ForceEndTurn was sent. The test
+used prerecorded public speech, not a microphone, and submitted no agent turn or
+TTS request. It proves live provider access/transcription/automatic endpointing,
+not Android acoustic quality, a latency percentile, or audible playback.
 
 ## Recorded implementation and deployment checks
 
 The local browser run observed one transient Android-layout history-fetch timeout:
 18 passed, seven skipped, one failed. The failed case then passed both alone and
 immediately after the new Deepgram case. The original trace is retained locally;
-no product behavior or test timeout was changed to make it pass.
+no product behavior or assertion timeout was changed to make it pass. A separate
+CI failure was traced to the shared test server exhausting its actual 240/minute
+limit: the event WebSocket and history retries received 429. Browser tests now
+respect the advertised request-budget reset before starting another scenario;
+production limits are unchanged.
 
 | Check | Evidence |
 | --- | --- |
@@ -118,8 +132,8 @@ These remain open until measured; do not mark them passed from simulated audio:
 - p95 audible interruption within 250 ms on the actual Android audio route.
 - Fresh Android Chrome/PWA setup, ten consecutive turns, 30-minute session, and
   intended headset/car Bluetooth routing and reconnection.
-- Live Deepgram STT with owner-supplied credentials; provider availability and
-  paid-provider latency cannot be established using a mocked WebSocket.
+- Deepgram speech quality and latency percentiles on the intended Android route.
+  Live provider access and one public-fixture automatic turn are now verified.
 - Live Fish TTS with the owner's API key and voice ID, and a successful audible
   speaker test on the intended Android output route.
 
@@ -138,9 +152,9 @@ improvement over old implementations without matched evidence.
   microphone requires an explicit Start talking.
 - Vosk's older browser binding remains a compatibility risk. Functional sample
   recognition is not a language/accent/noise accuracy evaluation.
-- A Deepgram credential is configured, but its live Flux handshake returned HTTP
-  401. Provider access must be resolved before speech quality and latency can be
-  qualified. Vosk does not use this credential or upstream connection.
+- Deepgram now passes live authentication and public-fixture transcription after
+  the owner re-saved the intended key. Real-device quality and latency still need
+  qualification. Vosk does not use this credential or upstream connection.
 - The transcript currently loads the latest 200 native messages. OpenClaw retains its
   canonical history. Image storage is bounded to 250 MiB; there is no image-library
   management/deletion interface in this release.

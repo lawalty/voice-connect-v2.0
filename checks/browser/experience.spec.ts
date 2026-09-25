@@ -1,4 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
+import { waitForFixtureBudget } from './fixture-budget';
+
+test.beforeEach(waitForFixtureBudget);
 
 async function signIn(page:Page){
   await page.goto('/');

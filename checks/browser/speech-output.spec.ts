@@ -1,4 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { waitForFixtureBudget } from './fixture-budget';
+
+test.beforeEach(waitForFixtureBudget);
 
 test('speaker checks distinguish playback reports from audibility and keep paid tests explicit', async ({ page }, info) => {
   await page.addInitScript(() => {

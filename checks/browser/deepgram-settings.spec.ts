@@ -1,4 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { waitForFixtureBudget } from './fixture-budget';
+
+test.beforeEach(waitForFixtureBudget);
 
 test('Deepgram credential verification preserves sign-in and the saved key without opening audio', async ({ page }, info) => {
   const rejected = 'Deepgram rejected the API key (401). Check the key and try again.';
