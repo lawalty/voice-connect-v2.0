@@ -59,26 +59,44 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
       if (current.asleep) wakeAt = -Infinity;
       wasAsleep = current.asleep;
       sleepBlend = motion.matches ? Number(current.asleep) : sleepBlend + (Number(current.asleep) - sleepBlend) * (1 - Math.exp(-elapsed / 360));
-      const wakeProgress = (time - wakeAt) / 900;
-      const wakeBloom = !motion.matches && wakeProgress >= 0 && wakeProgress < 1 ? Math.sin(wakeProgress * Math.PI) ** 2 : 0;
+      const wakeProgress = (time - wakeAt) / 1350;
+      const wakeActive = !motion.matches && wakeProgress >= 0 && wakeProgress < 1;
+      // A quick, unmistakable inhale followed by a longer, smooth settle.
+      const wakeBloom = !wakeActive ? 0 : wakeProgress < .22
+        ? Math.sin(wakeProgress / .22 * Math.PI / 2)
+        : (1 + Math.cos((wakeProgress - .22) / .78 * Math.PI)) / 2;
       if (current.signal !== lastSignal) { lastSignal = current.signal; acoustics.observe(lastSignal, time); }
       const shape = orbMotionShape(acoustics.sample(time), motion.matches);
-      flow += elapsed * shape.flowRate * (1 - sleepBlend * .58 + wakeBloom * 1.75);
+      flow += elapsed * shape.flowRate * (1 - sleepBlend * .58 + wakeBloom * 3.4);
       const t = motion.matches ? 0 : flow;
       const paintState = `${current.phase}:${current.asleep}:${current.waking}`;
       if (motion.matches && reducedPaintState === paintState) return;
       reducedPaintState = motion.matches ? paintState : undefined;
       const target = palette[current.phase];
       for (let i = 0; i < 3; i++) color[i] = motion.matches ? target[i] : color[i] + (target[i] - color[i]) * .035;
-      const rgb = color.map(Math.round).join(',');
-      const light = 1 - sleepBlend * .3 + wakeBloom * .6;
+      const rgb = color.map(value => Math.round(value + (255 - value) * wakeBloom * .3)).join(',');
+      const light = 1 - sleepBlend * .3 + wakeBloom * 1.7;
       const alpha = (opacity: number) => `rgba(${rgb},${Math.min(1, opacity * light)})`;
-      const r = radius * (1 - (motion.matches ? 0 : sleepBlend * .025) + Math.sin(t * 1.2) * (.019 - sleepBlend * .007) + shape.expansion * (1 - sleepBlend) + wakeBloom * .055);
+      const r = radius * (1 - (motion.matches ? 0 : sleepBlend * .025) + Math.sin(t * 1.2) * (.019 - sleepBlend * .007) + shape.expansion * (1 - sleepBlend) + wakeBloom * .18);
       ctx.clearRect(0, 0, size, size);
       ctx.save(); ctx.translate(size / 2, size / 2);
-      const halo = ctx.createRadialGradient(0, 0, r * .65, 0, 0, r * 1.62);
-      halo.addColorStop(0, alpha(0)); halo.addColorStop(.35, alpha(.065 + wakeBloom * .035)); halo.addColorStop(1, alpha(0));
+      const halo = ctx.createRadialGradient(0, 0, r * .65, 0, 0, Math.min(size * .49, r * 1.62));
+      halo.addColorStop(0, alpha(0)); halo.addColorStop(.35, alpha(.065 + wakeBloom * .10)); halo.addColorStop(1, alpha(0));
       ctx.fillStyle = halo; ctx.fillRect(-size / 2, -size / 2, size, size);
+      if (wakeActive) {
+        // Two outward ripples stay inside the canvas and fade instead of flashing.
+        for (const delay of [0, 180]) {
+          const progress = (time - wakeAt - delay) / 1100;
+          if (progress <= 0 || progress >= 1) continue;
+          const spread = 1 - (1 - progress) ** 3;
+          const opacity = Math.sin(progress * Math.PI) * (1 - progress) * .8;
+          ctx.strokeStyle = `rgba(${rgb},${opacity})`;
+          ctx.lineWidth = 2.2 - progress * 1.5;
+          ctx.shadowColor = `rgba(${rgb},${opacity})`; ctx.shadowBlur = 10;
+          ctx.beginPath(); ctx.arc(0, 0, radius * (.97 + spread * .55), 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+      }
       const body = ctx.createRadialGradient(-r * .28, -r * .35, 0, 0, 0, r);
       body.addColorStop(0, alpha(.19)); body.addColorStop(.54, alpha(.085)); body.addColorStop(.89, alpha(.14)); body.addColorStop(1, alpha(.025));
       ctx.fillStyle = body; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
@@ -91,7 +109,7 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
         for (let step = 0; step <= 120; step++) {
           const angle = step / 120 * Math.PI * 2;
           const front = Math.sin(angle);
-          const wave = Math.sin(angle * 3 + t * 2.1 + latitude * 5 + Math.sin(t) * shape.pitchCurl * .12) * (3.4 + shape.pitchCurl) + Math.cos(angle * 5 - t + latitude * 3) * (2.2 + shape.rhythm);
+          const wave = Math.sin(angle * 3 + t * 2.1 + latitude * 5 + Math.sin(t) * shape.pitchCurl * .12) * (3.4 + shape.pitchCurl + wakeBloom * 2.8) + Math.cos(angle * 5 - t + latitude * 3) * (2.2 + shape.rhythm);
           const x = Math.cos(angle) * (width + wave * Math.cos(latitude));
           const py = y + front * width * .28 + wave * .75;
           if (step === 0) ctx.moveTo(x, py); else ctx.lineTo(x, py);
@@ -105,12 +123,12 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
         if (z < -.15) continue;
         const x = Math.cos(angle) * latitudeRadius * r;
         ctx.fillStyle = alpha(.15 + Math.max(0, z) * .55);
-        ctx.beginPath(); ctx.arc(x, y * r, .7 + Math.max(0, z) * .55, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y * r, (.7 + Math.max(0, z) * .55) * (1 + wakeBloom * .4), 0, Math.PI * 2); ctx.fill();
       }
       ctx.globalCompositeOperation = 'source-over';
       const edge = ctx.createLinearGradient(-r, -r, r, r);
       edge.addColorStop(0, alpha(.42)); edge.addColorStop(.48, alpha(.015)); edge.addColorStop(1, alpha(.2));
-      ctx.strokeStyle = edge; ctx.lineWidth = .8; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = edge; ctx.lineWidth = .8 + wakeBloom * .9; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
       ctx.restore();
       if (!motion.matches) schedule();
     };
