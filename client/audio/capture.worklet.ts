@@ -1,6 +1,7 @@
 import { Resampler } from './dsp';
 
 declare const sampleRate: number;
+declare const currentTime: number;
 declare class AudioWorkletProcessor { readonly port: MessagePort; }
 declare function registerProcessor(name: string, processor: typeof AudioWorkletProcessor): void;
 
@@ -25,7 +26,9 @@ class VoiceCapture extends AudioWorkletProcessor {
       this.block.set(samples.subarray(offset, offset + count), this.used); this.used += count; offset += count;
       if (this.used === this.block.length) {
         if (this.pending < 8) {
-          this.port.postMessage({ samples: this.block, sampleRate: 16000, sequence: this.sequence, dropped: this.dropped }, [this.block.buffer]);
+          // Timestamp the end of this block on the SAME clock as scheduled TTS.
+          const endTime = currentTime + input.length / sampleRate - (samples.length - offset) / 16000;
+          this.port.postMessage({ samples: this.block, sampleRate: 16000, sequence: this.sequence, dropped: this.dropped, endTime }, [this.block.buffer]);
           this.pending++; this.dropped = 0;
         } else this.dropped += this.block.length;
         this.sequence++; this.block = new Float32Array(512); this.used = 0;

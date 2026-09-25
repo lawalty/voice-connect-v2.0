@@ -4,7 +4,7 @@ import { restoreSpeechPreferences, selectRecognizer } from '../client/speech-pre
 describe('device speech preference compatibility', () => {
   it('starts new or malformed devices with local automatic turns and browser output', () => {
     for (const value of [null, '{broken', 'null', '[]']) {
-      expect(restoreSpeechPreferences(value)).toMatchObject({ recognition: 'vosk', handsFree: true, turnMode: 'automatic', output: 'browser' });
+      expect(restoreSpeechPreferences(value)).toMatchObject({ recognition: 'vosk', handsFree: true, turnMode: 'automatic', output: 'browser', interruptionSensitivity: 50, audioCues: true });
     }
   });
   it('keeps legacy browser selection but enables automatic turns when the user selects local speech', () => {
@@ -39,5 +39,20 @@ describe('device speech preference compatibility', () => {
     const premium=selectRecognizer(original,'deepgram');
     expect(premium).toMatchObject({recognition:'deepgram',output:'fish',fishVoice:'owner-voice',handsFree:true});
     expect(selectRecognizer(premium,'vosk')).toEqual(original);
+  });
+  it('restores interruption and cue choices independently of speech providers', () => {
+    const saved = restoreSpeechPreferences(JSON.stringify({ recognition: 'deepgram', output: 'fish', interruptionSensitivity: 28, audioCues: false }));
+    expect(saved).toMatchObject({ recognition: 'deepgram', output: 'fish', interruptionSensitivity: 28, audioCues: false });
+    expect(selectRecognizer(selectRecognizer(saved, 'vosk'), 'deepgram')).toEqual(saved);
+    expect(restoreSpeechPreferences(JSON.stringify({ recognition: 'vosk' }))).toMatchObject({ interruptionSensitivity: 50, audioCues: true });
+  });
+  it('clamps finite sensitivity values and rejects malformed device settings', () => {
+    for (const [value, expected] of [[-20, 0], [0, 0], [63.5, 63.5], [100, 100], [180, 100]]) {
+      expect(restoreSpeechPreferences(JSON.stringify({ interruptionSensitivity: value })).interruptionSensitivity).toBe(expected);
+    }
+    for (const value of [null, '75', true, {}, []]) {
+      expect(restoreSpeechPreferences(JSON.stringify({ interruptionSensitivity: value, audioCues: value }))).toMatchObject({ interruptionSensitivity: 50, audioCues: true });
+    }
+    expect(restoreSpeechPreferences('{"interruptionSensitivity":1e400,"audioCues":"false"}')).toMatchObject({ interruptionSensitivity: 50, audioCues: true });
   });
 });

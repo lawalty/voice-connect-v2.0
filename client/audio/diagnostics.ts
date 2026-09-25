@@ -3,11 +3,11 @@ import type { VoicePhase } from '../../contract/types';
 export type AudioDiagnosticEvent =
   | 'phase' | 'capture-settings' | 'provider-starting' | 'provider-ready'
   | 'endpoint-request' | 'endpoint-ready' | 'output-start' | 'output-end'
-  | 'output-interrupt' | 'output-request' | 'output-error' | 'capture-gap' | 'backpressure';
+  | 'output-interrupt' | 'output-request' | 'output-error' | 'capture-gap' | 'backpressure' | 'barge-in' | 'barge-in-blocked';
 
 export type AudioDiagnosticReason =
   | 'mic-ended' | 'mic-muted' | 'capture-gap' | 'vad-backlog' | 'capture-backlog'
-  | 'suspended' | 'provider-error' | 'manual' | 'speech-onset';
+  | 'suspended' | 'provider-error' | 'manual' | 'speech-onset' | 'playback-echo' | 'background' | 'low-confidence';
 
 export interface AudioDiagnosticValues {
   provider?: 'browser' | 'vosk' | 'deepgram' | 'fish';
@@ -32,7 +32,7 @@ export interface AudioDiagnosticEntry {
 const EVENTS = new Set<AudioDiagnosticEvent>([
   'phase', 'capture-settings', 'provider-starting', 'provider-ready',
   'endpoint-request', 'endpoint-ready', 'output-start', 'output-end',
-  'output-interrupt', 'output-request', 'output-error', 'capture-gap', 'backpressure',
+  'output-interrupt', 'output-request', 'output-error', 'capture-gap', 'backpressure', 'barge-in', 'barge-in-blocked',
 ]);
 const PHASES = new Set<VoicePhase>([
   'off', 'starting', 'listening', 'hearing', 'finalizing', 'thinking',
@@ -40,7 +40,7 @@ const PHASES = new Set<VoicePhase>([
 ]);
 const REASONS = new Set<AudioDiagnosticReason>([
   'mic-ended', 'mic-muted', 'capture-gap', 'vad-backlog', 'capture-backlog',
-  'suspended', 'provider-error', 'manual', 'speech-onset',
+  'suspended', 'provider-error', 'manual', 'speech-onset', 'playback-echo', 'background', 'low-confidence',
 ]);
 const NUMERIC_LIMITS = {
   durationMs: 86_400_000,

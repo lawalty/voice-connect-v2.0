@@ -125,6 +125,25 @@ accuracy or physical playback qualification.
 
 ## Physical and credential-dependent gates
 
+### Interruption sensitivity and cues
+
+The interruption/cue release passes 178 unit and integration tests, 21 browser
+checks (seven intentional mobile-layout skips), production build, and the real
+Vosk/Silero two-turn check. The added real Chromium/Silero interruption fixture
+passes five scenarios totaling 53.5 seconds of prerecorded/synthetic input:
+assistant echo, synthetic playback alone, and changing fan noise cause zero
+interruptions; independent speech and speech over playback each cause one.
+No foreground fixture frame above the test's 0.003 RMS threshold was erased.
+The default gate requires 128 ms of qualifying model evidence. Desktop worker
+processing p95 ranged 2.1–5.2 ms during that accelerated run, including Silero;
+neither number measures microphone-to-audible-stop latency.
+
+Settings persistence is verified in desktop and Android layouts. Cue scheduling,
+exactly-once transitions, cancellation, and quiet ramped waveform bounds are
+tested; physical cue audibility is still unverified. Detailed behavior and limits
+are in [interruption and cues](INTERRUPTION-AND-CUES.md). Retest Fish through the
+owner's phone speaker with the actual fan before closing speaker-echo acceptance.
+
 These remain open until measured; do not mark them passed from simulated audio:
 
 - 100 annotated noisy-car turns with at least 98 avoiding premature split, plus ten

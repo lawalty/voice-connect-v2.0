@@ -113,3 +113,10 @@ camera support when changing models; a model name alone is not proof of vision.
 Text/history reconnect automatically. Microphone capture requires another explicit
 Start talking after connectivity loss; old assistant speech is never replayed.
 Uncertain submissions reconcile against native history and are never blindly resent.
+
+Interruption sensitivity and Subtle Audio Cues are device preferences under
+Settings → Conversation rhythm. Save preferences and restart voice to apply them.
+See [interruption and cue behavior](INTERRUPTION-AND-CUES.md) for thresholds,
+playback-reference handling, and physical acceptance limits. Local diagnostics now
+separate manual interruption, qualified speech onset, and blocked candidate reasons;
+they are bounded in-memory events, not recordings or proof of speaker identity.

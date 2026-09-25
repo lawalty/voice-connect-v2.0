@@ -20,6 +20,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - run: node checks/audio-browser.mjs
+      - run: node checks/audio-barge-browser.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

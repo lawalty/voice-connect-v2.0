@@ -39,19 +39,25 @@ describe('playback cancellation', () => {
         sources.push(source); return source;
       },
     } as unknown as AudioContext;
-    const events = { started: vi.fn(), ended: vi.fn(), error: vi.fn() };
+    const events = { started: vi.fn(), ended: vi.fn(), error: vi.fn(), reference: vi.fn(), cancelled: vi.fn() };
     const output = new PremiumOutput(context, 'conversation', 'fish-reference-id', events);
     output.enqueue('A reply.'); output.finish();
     const socket = sockets[0]!;
     socket.onmessage!({ data: JSON.stringify({ type: 'ready', sampleRate: 24000 }) });
     expect(operations).toEqual(['speak', 'flush']);
-    socket.onmessage!({ data: new ArrayBuffer(4800) });
+    const pcm = new ArrayBuffer(4800); new DataView(pcm).setInt16(0, 16384, true);
+    socket.onmessage!({ data: pcm });
     expect(sources).toHaveLength(1);
+    expect(events.reference).toHaveBeenCalledOnce();
+    expect(events.reference.mock.calls[0]![0]).toMatchObject({ sampleRate: 24000, startTime: 2.025 });
+    expect(events.reference.mock.calls[0]![0].samples[0]).toBe(0.5);
     output.cancel();
+    expect(events.cancelled).toHaveBeenCalledWith(2);
     expect(operations.indexOf('stop')).toBeLessThan(operations.indexOf('interrupt'));
     socket.onmessage!({ data: new ArrayBuffer(4800) });
     socket.onmessage!({ data: JSON.stringify({ type: 'speech-done' }) });
     expect(sources).toHaveLength(1); expect(sources[0]!.stop).toHaveBeenCalledOnce();
+    expect(events.reference).toHaveBeenCalledOnce();
     expect(events.ended).not.toHaveBeenCalled();
   });
 });

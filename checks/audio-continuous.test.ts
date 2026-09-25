@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcousticSignal, RecognizerCapabilities, RecognizerEvents, SpeechPreferences, VoicePhase } from '../contract/types';
 
-const fixture = vi.hoisted(() => ({ recognizers: [] as FakeRecognizer[], outputs: [] as FakeOutput[] }));
+const fixture = vi.hoisted(() => ({ recognizers: [] as FakeRecognizer[], outputs: [] as FakeOutput[], cues: [] as ('on' | 'off')[] }));
 class FakeRecognizer {
   readonly capabilities: RecognizerCapabilities = { provider: 'vosk', available: true, input: 'pcm16k', processing: 'local', handsFree: true, endpointing: 'local-vad' };
   running = false; frames: Float32Array[] = []; finals: string[] = []; barrier?: Promise<void>;
@@ -19,7 +19,10 @@ class FakeRecognizer {
 interface OutputEvents { started(): void; ended(): void; error(message: string): void }
 class FakeOutput {
   words: string[] = []; finished = false;
-  constructor(_preferences: SpeechPreferences, readonly events: OutputEvents) { fixture.outputs.push(this); }
+  readonly events: OutputEvents;
+  constructor(_preferences: SpeechPreferences | AudioContext, eventsOrConversation: OutputEvents | string, _voice?: string, premiumEvents?: OutputEvents) {
+    this.events = typeof eventsOrConversation === 'string' ? premiumEvents! : eventsOrConversation; fixture.outputs.push(this);
+  }
   enqueue(text: string) { this.words.push(text); this.events.started(); }
   finish() { this.finished = true; }
   cancel = vi.fn(); dispose = vi.fn();
@@ -27,6 +30,13 @@ class FakeOutput {
 }
 vi.doMock('../client/audio/vosk', () => ({ LocalRecognizer: FakeRecognizer }));
 vi.doMock('../client/audio/output', () => ({ BrowserOutput: FakeOutput, PremiumOutput: FakeOutput, audioURL: () => 'wss://voice.test/audio' }));
+vi.doMock('../client/audio/cues', async () => ({
+  ...await vi.importActual<typeof import('../client/audio/cues')>('../client/audio/cues'),
+  ListeningCues: class {
+    play(kind: 'on' | 'off') { fixture.cues.push(kind); }
+    dispose() {}
+  },
+}));
 const { VoiceEngine } = await import('../client/audio/engine');
 
 const signal: AcousticSignal = { energy: 0.4, speechProbability: 0.95, noiseFloor: 0.005, pitch: null, confidence: 0.7 };
@@ -34,16 +44,27 @@ const preferences: SpeechPreferences = { recognition: 'vosk', output: 'browser',
 let detector: FakeWorker, capture: FakeWorklet, engine: InstanceType<typeof VoiceEngine> | undefined;
 let microphone: ReturnType<typeof vi.fn>;
 class FakeWorker {
-  onmessage?: (event: { data: object }) => void; onerror?: () => void; sequence = 0; holdSignals = false;
+  onmessage?: (event: { data: object }) => void; onerror?: () => void; holdSignals = false;
+  nextTransition: 'start' | 'end' | null = null; nextInterruption = false;
+  pending: { samples: Float32Array; sequence: number; epoch: number; transition: 'start' | 'end' | null; interruption: boolean }[] = [];
   constructor() { detector = this; }
-  postMessage(message: { type: string; sequence?: number }) {
+  postMessage(message: { type: string; sequence?: number; samples?: Float32Array; epoch?: number }) {
     if (message.type === 'init') queueMicrotask(() => this.onmessage?.({ data: { type: 'ready' } }));
     if (message.type === 'frame') {
-      this.sequence = message.sequence!;
-      if (!this.holdSignals) queueMicrotask(() => this.transition(null));
+      const frame = { samples: message.samples!, sequence: message.sequence!, epoch: message.epoch!, transition: this.nextTransition, interruption: this.nextInterruption };
+      this.pending.push(frame); this.nextTransition = null; this.nextInterruption = false;
+      if (!this.holdSignals) queueMicrotask(() => { if (this.pending.includes(frame)) this.deliver(frame); });
     }
   }
-  transition(transition: 'start' | 'end' | null) { this.onmessage?.({ data: { type: 'signal', sequence: this.sequence, signal, transition } }); }
+  private deliver(frame: FakeWorker['pending'][number]) {
+    this.pending.splice(this.pending.indexOf(frame), 1);
+    this.onmessage?.({ data: { type: 'signal', signal, ...frame } });
+  }
+  transition(transition: 'start' | 'end' | null, interruption = false) {
+    const frame = this.pending[0];
+    if (!frame) throw new Error('A VAD transition must acknowledge an actual captured frame');
+    frame.transition = transition; frame.interruption = interruption; this.deliver(frame);
+  }
   terminate() {}
 }
 class FakeWorklet {
@@ -53,6 +74,23 @@ class FakeWorklet {
   frame(value = 0.25) { this.port.onmessage?.({ data: { samples: new Float32Array(512).fill(value), dropped: 0 } }); }
 }
 async function drain() { for (let i = 0; i < 8; i++) await Promise.resolve(); }
+async function frame(transition: 'start' | 'end' | null = null, value = transition === 'end' ? 0 : 0.25, interruption = false) {
+  detector.nextTransition = transition; detector.nextInterruption = interruption;
+  capture.frame(value); await drain();
+}
+function installFluxSocket() {
+  const sockets: Socket[] = [];
+  class Socket {
+    static OPEN = 1; readyState = 1; bufferedAmount = 0;
+    onmessage?: (event: { data: string }) => void; onclose?: () => void;
+    send = vi.fn(); close = vi.fn();
+    constructor() { sockets.push(this); queueMicrotask(() => this.event({ type: 'ready', sampleRate: 16000 })); }
+    event(value: object) { this.onmessage?.({ data: JSON.stringify(value) }); }
+    pcm() { return this.send.mock.calls.flatMap(([payload]) => typeof payload === 'string' ? [] : Array.from(new Int16Array(payload))); }
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  return sockets;
+}
 function setup() {
   const phases: VoicePhase[] = [], turns: string[] = [], drafts: string[] = [], notices: string[] = [];
   const callbacks = { onPhase: (value: VoicePhase) => phases.push(value), onTurn: (value: string) => turns.push(value), onDraft: (value: string) => drafts.push(value), onSignal: vi.fn(), onError: vi.fn(), onInterrupt: vi.fn(), onNotice: (value: string) => notices.push(value) };
@@ -60,7 +98,7 @@ function setup() {
   return { engine, phases, turns, drafts, notices, callbacks };
 }
 beforeEach(() => {
-  fixture.recognizers.length = 0; fixture.outputs.length = 0;
+  fixture.recognizers.length = 0; fixture.outputs.length = 0; fixture.cues.length = 0;
   const track = { enabled: true, stop: vi.fn(), getSettings: () => ({ sampleRate: 48000, channelCount: 1 }), onended: null, onmute: null };
   microphone = vi.fn(async () => ({ getTracks: () => [track], getAudioTracks: () => [track] }));
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: microphone } });
@@ -95,16 +133,16 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     const run = setup(); await run.engine.start(preferences, 'one-conversation');
     const recognition = fixture.recognizers[0]!;
     for (const words of ['The first complete thought.', 'The second complete thought.']) {
-      capture.frame(); await drain(); detector.transition('start');
+      await frame('start');
       recognition.partial(words.slice(0, 12)); recognition.finals.push(words);
-      detector.transition('end'); await drain();
+      await frame('end');
       expect(run.turns.at(-1)).toBe(words);
       expect(run.phases.at(-1)).toBe('thinking');
       run.engine.speak('A streamed '); run.engine.speak('reply.'); run.engine.responseDone();
       expect(run.phases.at(-1)).toBe('speaking');
       fixture.outputs.at(-1)!.end();
       expect(run.phases.at(-1)).toBe('listening');
-      detector.transition('end'); await drain();
+      await frame('end');
     }
     expect(run.turns).toEqual(['The first complete thought.', 'The second complete thought.']);
     expect(recognition.finish).toHaveBeenCalledTimes(2);
@@ -115,14 +153,14 @@ describe('automatic continuous VoiceEngine orchestration', () => {
   it('keeps interrupting user words and ignores late playback callbacks while the next turn is heard', async () => {
     const run = setup(); await run.engine.start(preferences, 'one-conversation');
     const recognition = fixture.recognizers[0]!;
-    capture.frame(); await drain(); detector.transition('start'); recognition.finals.push('First request.');
-    detector.transition('end'); await drain(); run.engine.speak('An unfinished assistant response.');
+    await frame('start'); recognition.finals.push('First request.');
+    await frame('end'); run.engine.speak('An unfinished assistant response.');
     const staleOutput = fixture.outputs[0]!;
-    capture.frame(0.4); await drain(); detector.transition('start'); recognition.partial('Actually change');
+    await frame('start', 0.4, true); recognition.partial('Actually change');
     expect(staleOutput.cancel).toHaveBeenCalledTimes(1); expect(run.callbacks.onInterrupt).toHaveBeenCalledTimes(1);
     staleOutput.events.started(); staleOutput.end();
     expect(run.phases.at(-1)).toBe('hearing'); expect(run.drafts.at(-1)).toBe('Actually change');
-    recognition.finals.push('Actually change the destination.'); detector.transition('end'); await drain();
+    recognition.finals.push('Actually change the destination.'); await frame('end');
     expect(run.turns).toEqual(['First request.', 'Actually change the destination.']);
     expect(run.callbacks.onInterrupt).toHaveBeenCalledTimes(1);
   });
@@ -131,15 +169,15 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     const run = setup(); await run.engine.start(preferences, 'one-conversation');
     const recognition = fixture.recognizers[0]!;
     let release!: () => void; recognition.barrier = new Promise<void>((resolve) => { release = resolve; });
-    capture.frame(0.1); await drain(); detector.transition('start'); recognition.partial('Please take'); recognition.finals.push('Please take');
-    detector.transition('end'); await drain(); expect(run.phases.at(-1)).toBe('finalizing');
+    await frame('start', 0.1); recognition.partial('Please take'); recognition.finals.push('Please take');
+    await frame('end'); expect(run.phases.at(-1)).toBe('finalizing');
     const before = recognition.frames.length;
-    capture.frame(0.6); await drain(); detector.transition('start'); capture.frame(0.7); await drain();
+    await frame('start', 0.6); await frame(null, 0.7);
     expect(recognition.frames).toHaveLength(before); expect(run.turns).toEqual([]);
     recognition.barrier = undefined; release(); await drain();
     expect(run.turns).toEqual([]); expect(run.phases.at(-1)).toBe('hearing');
     expect(recognition.frames.slice(before).map((frame) => Number(frame[0]!.toFixed(1)))).toEqual([0.6, 0.7]);
-    recognition.partial('the next exit'); recognition.finals.push('the next exit.'); detector.transition('end'); await drain();
+    recognition.partial('the next exit'); recognition.finals.push('the next exit.'); await frame('end');
     expect(run.turns).toEqual(['Please take the next exit.']);
     expect(recognition.finish).toHaveBeenCalledTimes(2);
   });
@@ -148,8 +186,8 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     const run = setup(); await run.engine.start(preferences, 'one-conversation');
     const recognition = fixture.recognizers[0]!;
     let release!: () => void; recognition.barrier = new Promise<void>((resolve) => { release = resolve; });
-    capture.frame(); await drain(); detector.transition('start'); recognition.finals.push('Do not submit.');
-    detector.transition('end'); run.engine.stop(); release(); await drain();
+    await frame('start'); recognition.finals.push('Do not submit.');
+    await frame('end'); run.engine.stop(); release(); await drain();
     expect(run.turns).toEqual([]); expect(run.phases.at(-1)).toBe('off');
   });
 
@@ -157,9 +195,9 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     const run = setup(); await run.engine.start(preferences, 'one-conversation');
     const recognition = fixture.recognizers[0]!;
     let release!: () => void; recognition.barrier = new Promise<void>((resolve) => { release = resolve; });
-    capture.frame(); await drain(); detector.transition('start'); recognition.finals.push('Keep the');
-    detector.transition('end'); capture.frame(0.6); await drain(); detector.transition('start');
-    capture.frame(0.7); await drain(); detector.transition('end'); recognition.finals.push('whole thought.');
+    await frame('start'); recognition.finals.push('Keep the');
+    await frame('end'); await frame('start', 0.6);
+    await frame('end', 0.7); recognition.finals.push('whole thought.');
     recognition.barrier = undefined; release(); await drain();
     expect(run.turns).toEqual(['Keep the whole thought.']); expect(recognition.finish).toHaveBeenCalledTimes(2);
     expect(run.phases.at(-1)).toBe('thinking');
@@ -169,14 +207,14 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     const run = setup(); await run.engine.start(preferences, 'one-conversation');
     const recognition = fixture.recognizers[0]!;
     let release!: () => void; recognition.barrier = new Promise<void>((resolve) => { release = resolve; });
-    capture.frame(); await drain(); detector.transition('start'); recognition.finals.push('Please keep');
-    detector.transition('end'); detector.holdSignals = true; capture.frame(0.6); await drain();
+    await frame('start'); recognition.finals.push('Please keep');
+    await frame('end'); detector.holdSignals = true; capture.frame(0.6); await drain();
     recognition.barrier = undefined; release(); await drain();
     expect(run.turns).toEqual([]); expect(run.phases.at(-1)).toBe('finalizing');
     detector.holdSignals = false; detector.transition('start'); await drain();
     expect(run.turns).toEqual([]); expect(run.phases.at(-1)).toBe('hearing');
     expect(recognition.frames.at(-1)![0]).toBeCloseTo(0.6);
-    recognition.finals.push('these words together.'); detector.transition('end'); await drain();
+    recognition.finals.push('these words together.'); await frame('end');
     expect(run.turns).toEqual(['Please keep these words together.']);
   });
 
@@ -185,8 +223,8 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     const run = setup(); await run.engine.start(preferences, 'one-conversation');
     const recognition = fixture.recognizers[0]!;
     let release!: () => void; recognition.barrier = new Promise<void>((resolve) => { release = resolve; });
-    capture.frame(); await drain(); detector.transition('start'); recognition.finals.push('Keep this draft.');
-    detector.transition('end'); detector.holdSignals = true; capture.frame();
+    await frame('start'); recognition.finals.push('Keep this draft.');
+    await frame('end'); detector.holdSignals = true; capture.frame();
     recognition.barrier = undefined; release(); await drain();
     await vi.advanceTimersByTimeAsync(601);
     expect(run.turns).toEqual([]); expect(run.phases.at(-1)).toBe('paused');
@@ -198,8 +236,8 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     const run = setup(); await run.engine.start(preferences, 'one-conversation');
     const recognition = fixture.recognizers[0]!;
     let release!: () => void; recognition.barrier = new Promise<void>((resolve) => { release = resolve; });
-    capture.frame(); await drain(); detector.transition('start'); recognition.finals.push('Draft stays here.');
-    detector.transition('end'); run.engine.mute(true); release(); await drain();
+    await frame('start'); recognition.finals.push('Draft stays here.');
+    await frame('end'); run.engine.mute(true); release(); await drain();
     expect(run.turns).toEqual([]); expect(run.phases.at(-1)).toBe('paused');
     run.engine.speak('Closing output.'); const stale = fixture.outputs[0]!; run.engine.dispose();
     const previous = [...run.phases]; stale.events.started(); stale.end();
@@ -207,22 +245,14 @@ describe('automatic continuous VoiceEngine orchestration', () => {
   });
 
   it('uses two complete Flux provider endpoints on one socket and never submits local-VAD partials', async () => {
-    const sockets: Socket[] = [];
-    class Socket {
-      static OPEN = 1; readyState = 1; bufferedAmount = 0;
-      onmessage?: (event: { data: string }) => void; onclose?: () => void;
-      send = vi.fn(); close = vi.fn();
-      constructor() { sockets.push(this); queueMicrotask(() => this.event({ type: 'ready', sampleRate: 16000 })); }
-      event(value: object) { this.onmessage?.({ data: JSON.stringify(value) }); }
-    }
-    vi.stubGlobal('WebSocket', Socket);
+    const sockets = installFluxSocket();
     const run = setup(); await run.engine.start({ ...preferences, recognition: 'deepgram' }, 'one-conversation');
     const socket = sockets[0]!;
     for (const text of ['One coherent premium turn.', 'Another coherent premium turn.']) {
-      capture.frame(); await drain(); detector.transition('start');
+      await frame('start');
       socket.event({ type: 'stt', text: '', final: false, turnComplete: false, started: true });
       socket.event({ type: 'stt', text: text.slice(0, 8), final: false, turnComplete: false });
-      const before = run.turns.length; detector.transition('end'); await drain();
+      const before = run.turns.length; await frame('end');
       expect(run.turns).toHaveLength(before);
       socket.event({ type: 'stt', text, final: true, turnComplete: true });
       socket.event({ type: 'stt', text, final: true, turnComplete: true });
@@ -233,5 +263,149 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     expect(run.turns).toEqual(['One coherent premium turn.', 'Another coherent premium turn.']);
     expect(microphone).toHaveBeenCalledTimes(1); expect(sockets).toHaveLength(1);
     expect(socket.send.mock.calls.some(([message]) => typeof message === 'string')).toBe(false);
+  });
+
+  it('holds local microphone candidates during Fish playback and releases the approved prefix exactly once', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, output: 'fish', fishVoice: 'fixture-voice' }, 'one-conversation');
+    const recognition = fixture.recognizers[0]!;
+    run.engine.speak('The agent is still speaking this sentence.');
+    const output = fixture.outputs[0]!;
+    await frame('start', 0.1); await frame(null, 0.2); await frame(null, 0.3);
+    recognition.partial('Echo must not become a user draft.');
+    expect(recognition.frames).toEqual([]);
+    expect(run.turns).toEqual([]); expect(run.drafts.at(-1)).toBe('');
+    expect(output.cancel).not.toHaveBeenCalled(); expect(run.phases.at(-1)).toBe('speaking');
+
+    await frame('start', 0.4, true);
+    expect(output.cancel).toHaveBeenCalledTimes(1); expect(run.callbacks.onInterrupt).toHaveBeenCalledTimes(1);
+    expect(recognition.frames.map(samples => Number(samples[0]!.toFixed(1)))).toEqual([0.1, 0.2, 0.3, 0.4]);
+    expect(recognition.frames.every(samples => samples.length === 512)).toBe(true);
+    recognition.partial('Actually please wait');
+    output.events.started(); output.end();
+    expect(run.phases.at(-1)).toBe('hearing'); expect(run.drafts.at(-1)).toBe('Actually please wait');
+    await frame(null, 0.5);
+    expect(recognition.frames.map(samples => Number(samples[0]!.toFixed(1)))).toEqual([0.1, 0.2, 0.3, 0.4, 0.5]);
+    recognition.finals.push('Actually please wait for me.'); await frame('end');
+    expect(run.turns).toEqual(['Actually please wait for me.']);
+  });
+
+  it('rejects raw Deepgram onset, update, and endpoint during playback until local approval preserves the microphone prefix', async () => {
+    const sockets = installFluxSocket();
+    const run = setup(); await run.engine.start({ ...preferences, recognition: 'deepgram', output: 'fish', fishVoice: 'fixture-voice' }, 'one-conversation');
+    const socket = sockets[0]!;
+    run.engine.speak('An assistant reply should finish unless the user interrupts.');
+    const output = fixture.outputs[0]!;
+    await frame('start', 0.1); await frame(null, 0.2); await frame(null, 0.3);
+    socket.event({ type: 'stt', text: '', final: false, turnComplete: false, started: true });
+    socket.event({ type: 'stt', text: 'An assistant reply', final: false, turnComplete: false });
+    socket.event({ type: 'stt', text: 'An assistant reply.', final: true, turnComplete: true });
+    expect(socket.pcm()).toHaveLength(1280);
+    expect(socket.pcm().every(sample => sample === 0)).toBe(true);
+    expect(output.cancel).not.toHaveBeenCalled(); expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
+    expect(run.turns).toEqual([]); expect(run.drafts.at(-1)).toBe(''); expect(run.phases.at(-1)).toBe('speaking');
+
+    await frame('start', 0.4, true); await frame(null, 0.5); await frame(null, 0.6);
+    const samples = socket.pcm();
+    expect(samples.slice(0, 1536).every(sample => sample === 0)).toBe(true);
+    for (const [index, value] of [0.1, 0.2, 0.3, 0.4].entries()) {
+      const prefix = samples.slice(1536 + index * 512, 1536 + (index + 1) * 512);
+      expect(prefix).toHaveLength(512);
+      expect(prefix.every(sample => Math.abs(sample / 32767 - value) < 0.0001)).toBe(true);
+      expect(samples.filter(sample => Math.abs(sample / 32767 - value) < 0.0001)).toHaveLength(512);
+    }
+    expect(output.cancel).toHaveBeenCalledTimes(1); expect(run.callbacks.onInterrupt).toHaveBeenCalledTimes(1);
+    socket.event({ type: 'stt', text: '', final: false, turnComplete: false, started: true });
+    socket.event({ type: 'stt', text: 'Actually please', final: false, turnComplete: false });
+    output.events.started(); output.end();
+    expect(run.phases.at(-1)).toBe('hearing'); expect(run.drafts.at(-1)).toBe('Actually please');
+    socket.event({ type: 'stt', text: 'Actually please keep those first words.', final: true, turnComplete: true });
+    socket.event({ type: 'stt', text: 'Actually please keep those first words.', final: true, turnComplete: true });
+    expect(run.turns).toEqual(['Actually please keep those first words.']);
+    expect(run.callbacks.onInterrupt).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores detector decisions captured before the reply protection epoch changes', async () => {
+    const run = setup(); await run.engine.start(preferences, 'one-conversation');
+    detector.holdSignals = true; capture.frame(0.6); await drain();
+    run.engine.speak('This reply started after the frame was captured.');
+    detector.transition('start', true);
+    expect(fixture.outputs[0]!.cancel).not.toHaveBeenCalled();
+    expect(fixture.recognizers[0]!.frames).toEqual([]);
+    expect(run.phases.at(-1)).toBe('speaking'); expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
+  });
+
+  it.each(['vosk', 'deepgram'] as const)('preserves queued %s frames from the interrupted reply epoch exactly once', async recognitionProvider => {
+    const sockets = recognitionProvider === 'deepgram' ? installFluxSocket() : [];
+    const run = setup(); await run.engine.start({ ...preferences, recognition: recognitionProvider, output: 'fish', fishVoice: 'fixture-voice' }, 'one-conversation');
+    run.engine.speak('A reply with several microphone frames already awaiting analysis.');
+    const output = fixture.outputs[0]!;
+    await frame(null, 0.1);
+    detector.holdSignals = true;
+    capture.frame(0.2); capture.frame(0.3); capture.frame(0.4); await drain();
+    expect(detector.pending).toHaveLength(3);
+    expect(new Set(detector.pending.map(pending => pending.epoch)).size).toBe(1);
+    detector.transition('start', true); await drain();
+    expect(output.cancel).toHaveBeenCalledTimes(1);
+    // These decisions were computed while reply protection was active. They
+    // belong to the accepted utterance even though cancellation advanced epoch.
+    detector.transition(null, true); detector.transition(null, true); await drain();
+    detector.holdSignals = false; await frame(null, 0.5);
+    expect(run.callbacks.onInterrupt).toHaveBeenCalledTimes(1); expect(output.cancel).toHaveBeenCalledTimes(1);
+    expect(run.phases.at(-1)).toBe('hearing'); expect(detector.pending).toEqual([]);
+    if (recognitionProvider === 'vosk') {
+      expect(fixture.recognizers[0]!.frames.map(samples => Number(samples[0]!.toFixed(1)))).toEqual([0.1, 0.2, 0.3, 0.4, 0.5]);
+      expect(fixture.recognizers[0]!.frames.every(samples => samples.length === 512)).toBe(true);
+    } else {
+      // Drain the adapter's real 1280-sample framing with silent continuation.
+      await frame(null, 0); await frame(null, 0);
+      const samples = sockets[0]!.pcm();
+      expect(samples.slice(0, 512).every(sample => sample === 0)).toBe(true);
+      for (const [index, value] of [0.1, 0.2, 0.3, 0.4, 0.5].entries()) {
+        expect(samples.slice(512 + index * 512, 512 + (index + 1) * 512)
+          .every(sample => Math.abs(sample / 32767 - value) < 0.0001)).toBe(true);
+        expect(samples.filter(sample => Math.abs(sample / 32767 - value) < 0.0001)).toHaveLength(512);
+      }
+    }
+  });
+
+  it('does not invite a new turn when unmuting during playback or ending the voice session', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, output: 'fish', fishVoice: 'fixture-voice', audioCues: true }, 'one-conversation');
+    run.engine.speak('The reply is speaking while the microphone is muted and unmuted.');
+    const output = fixture.outputs[0]!;
+    expect(fixture.cues).toEqual(['on', 'off']); expect(run.phases.at(-1)).toBe('speaking');
+    run.engine.mute(true); run.engine.mute(false);
+    expect(run.phases.at(-1)).toBe('speaking'); expect(fixture.cues).toEqual(['on', 'off']);
+    expect(output.cancel).not.toHaveBeenCalled();
+    run.engine.interrupt('manual', false); run.engine.stop();
+    expect(run.phases.at(-1)).toBe('off'); expect(fixture.cues).toEqual(['on', 'off']);
+    expect(output.cancel).toHaveBeenCalledTimes(1);
+    output.events.started(); output.end();
+    expect(run.phases.at(-1)).toBe('off'); expect(fixture.cues).toEqual(['on', 'off']);
+  });
+
+  it('cues readiness once per turn, submission, playback completion, mute, unmute, and end', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, audioCues: true }, 'one-conversation');
+    expect(fixture.cues).toEqual(['on']);
+    await frame('start'); fixture.recognizers[0]!.partial('One thought');
+    expect(fixture.cues).toEqual(['on']);
+    fixture.recognizers[0]!.finals.push('One thought.'); await frame('end');
+    expect(fixture.cues).toEqual(['on', 'off']);
+    run.engine.speak('Here is a reply.'); run.engine.responseDone();
+    expect(fixture.cues).toEqual(['on', 'off']);
+    fixture.outputs[0]!.end(); expect(fixture.cues).toEqual(['on', 'off', 'on']);
+    run.engine.mute(true); expect(fixture.cues).toEqual(['on', 'off', 'on', 'off']);
+    run.engine.mute(false); expect(fixture.cues).toEqual(['on', 'off', 'on', 'off', 'on']);
+    run.engine.stop(); run.engine.stop();
+    expect(fixture.cues).toEqual(['on', 'off', 'on', 'off', 'on', 'off']);
+  });
+
+  it('emits no readiness sounds after cues are disabled for the next voice session', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, audioCues: true }, 'one-conversation');
+    run.engine.stop(); expect(fixture.cues).toEqual(['on', 'off']); fixture.cues.length = 0;
+    await run.engine.start({ ...preferences, audioCues: false }, 'one-conversation');
+    await frame('start'); fixture.recognizers.at(-1)!.finals.push('A silent cue setting.'); await frame('end');
+    run.engine.speak('The reply still uses speech.'); run.engine.responseDone(); fixture.outputs[0]!.end();
+    run.engine.mute(true); run.engine.mute(false); run.engine.stop();
+    expect(fixture.cues).toEqual([]);
   });
 });

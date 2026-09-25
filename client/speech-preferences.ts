@@ -17,6 +17,9 @@ export function restoreSpeechPreferences(raw: string | null): SpeechPreferences 
       browserVoice: typeof saved.browserVoice === 'string' ? saved.browserVoice : DEFAULT_SPEECH.browserVoice,
       fishVoice: typeof saved.fishVoice === 'string' ? saved.fishVoice : '',
       keepAwake: typeof saved.keepAwake === 'boolean' ? saved.keepAwake : DEFAULT_SPEECH.keepAwake,
+      interruptionSensitivity: typeof saved.interruptionSensitivity === 'number' && Number.isFinite(saved.interruptionSensitivity)
+        ? Math.min(100, Math.max(0, saved.interruptionSensitivity)) : DEFAULT_SPEECH.interruptionSensitivity,
+      audioCues: typeof saved.audioCues === 'boolean' ? saved.audioCues : DEFAULT_SPEECH.audioCues,
       handsFree: recognition !== 'browser' && (typeof saved.handsFree === 'boolean' ? saved.handsFree : turnMode !== 'manual'),
       turnMode,
     };

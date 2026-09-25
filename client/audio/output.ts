@@ -9,7 +9,13 @@ export function audioURL(kind: 'stt' | 'tts', conversationId: string, voice?: st
   if (kind === 'tts') url.searchParams.set('provider', 'fish');
   return url.href;
 }
-export interface OutputEvents { started(): void; ended(): void; error(message: string): void; }
+export interface PlaybackSamples { samples: Float32Array; sampleRate: number; startTime: number; }
+export interface OutputEvents {
+  started(): void; ended(): void; error(message: string): void;
+  /** Scheduled PCM on the shared AudioContext clock, never provider arrival time. */
+  reference?(audio: PlaybackSamples): void;
+  cancelled?(atTime: number): void;
+}
 
 export class BrowserOutput implements SpeechOutput {
   private queue: string[] = [];
@@ -192,6 +198,7 @@ export class PremiumOutput implements SpeechOutput {
       this.nextTime = start + buffer.duration; this.sources.add(source);
       source.onended = () => { source.disconnect(); this.sources.delete(source); if (this.generation.is(id)) this.checkDone(); };
       source.start(start);
+      this.events.reference?.({ samples: channel, sampleRate: this.sampleRate, startTime: start });
       if (!this.started) { this.started = true; this.firstTime = start; this.events.started(); }
       this.watchPlayback('Premium speech stopped responding before playback completed. The full reply remains as text.', Math.max(15000, (this.nextTime - this.context.currentTime) * 1000 + 5000));
     } catch { this.fail('Browser audio playback failed. Tap Test speaker to check output. The full reply remains as text.'); }
@@ -216,6 +223,7 @@ export class PremiumOutput implements SpeechOutput {
     // Silence first; provider acknowledgement must never delay a local interruption.
     for (const source of this.sources) { try { source.stop(); } catch { /* already ended */ } source.disconnect(); }
     this.sources.clear();
+    this.events.cancelled?.(this.context.currentTime);
     if (this.ready && this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'interrupt', offsetMs }));
     this.socket?.close(); this.socket = undefined; this.commands = []; this.ready = false;
     this.nextTime = 0; this.firstTime = 0; this.started = false; this.complete = false; this.done = false;

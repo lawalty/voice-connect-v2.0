@@ -294,7 +294,7 @@ export default function App() {
     try { await engine.current.start(nextPreferences, conversationId); }
     catch (reason) { voiceRef.current = false; setVoiceActive(false); setPhase('error'); setNotice(messageFor(reason)); }
   }
-  function endVoice() { voiceRef.current = false; engine.current?.interrupt(); engine.current?.stop(); setVoiceActive(false); setMuted(false); setPhase('off'); updateHeard(''); setSignal(null); }
+  function endVoice() { voiceRef.current = false; engine.current?.interrupt('manual', false); engine.current?.stop(); setVoiceActive(false); setMuted(false); setPhase('off'); updateHeard(''); setSignal(null); }
   function interrupt() { if (activeTurnRef.current) cancelled.current.add(activeTurnRef.current.turnId); engine.current?.interrupt(); void abortRef.current(); }
   async function newConversation() {
     if (creatingConversation) return;

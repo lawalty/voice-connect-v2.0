@@ -1,0 +1,39 @@
+.interruption-setting {
+  margin: 22px 0;
+  padding: 16px;
+  border: 1px solid #47635755;
+  border-radius: 9px;
+  background: #18302744;
+}
+.interruption-setting label {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  color: #becbd1;
+  font-size: 12px;
+}
+.interruption-setting output {
+  color: #b4d6c5;
+  font-variant-numeric: tabular-nums;
+}
+.interruption-setting input[type="range"] {
+  display: block;
+  width: 100%;
+  height: 36px;
+  padding: 0;
+  margin: 8px 0 0;
+  border: 0;
+  background: transparent;
+  accent-color: #a8d4bf;
+  cursor: pointer;
+}
+.interruption-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #8da69b;
+  font-size: 10px;
+}
+.interruption-setting .setting-detail { margin-top: 11px; }

@@ -1,6 +1,7 @@
 import type { AcousticSignal, RecognizerCapabilities, RecognizerEvents, SpeechOutput, SpeechPreferences, SpeechRecognizer, VoicePhase } from '../../contract/types';
 import { acousticSignal, SentenceStream, Transcript } from './dsp';
-import { BrowserOutput, PremiumOutput } from './output';
+import { BrowserOutput, PremiumOutput, type PlaybackSamples } from './output';
+import { CueTransitions, ListeningCues } from './cues';
 import { LocalRecognizer } from './vosk';
 import { BrowserRecognizer } from './browser-recognizer';
 import { FluxRecognizer } from './flux-recognizer';
@@ -57,13 +58,36 @@ export class VoiceEngine {
   private browserMeterSupported = true;
   private lastCaptureAt = 0;
   private maxTurnTimer?: ReturnType<typeof setTimeout>;
+  private protectingReply = false;
+  private protectionEpoch = 0;
+  private cues?: ListeningCues;
+  private cueTransitions = new CueTransitions();
+  private lastBlockedReason = '';
   constructor(private callbacks: VoiceCallbacks) {
     document.addEventListener('visibilitychange', this.visibility);
     window.addEventListener('offline', this.offline);
   }
   diagnostics(): AudioDiagnosticEntry[] { return this.trace.snapshot(); }
   capabilities(): RecognizerCapabilities | undefined { return this.lastCapabilities ? { ...this.lastCapabilities } : undefined; }
-  private setPhase(phase: VoicePhase) { if (this.phase !== phase) { this.phase = phase; this.trace.record('phase', { phase }); this.callbacks.onPhase(phase); } }
+  private setPhase(phase: VoicePhase) {
+    if (this.phase !== phase) { this.phase = phase; this.trace.record('phase', { phase }); this.callbacks.onPhase(phase); }
+    // Listening/hearing are one continuous user turn. Barge-in availability during
+    // a reply does not pretend the agent has finished and invited the next turn.
+    const listening = this.active && this.ready && !this.muted && !this.gap && (phase === 'listening' || phase === 'hearing');
+    const cue = this.cueTransitions.update(listening, this.preferences?.audioCues !== false);
+    if (cue) this.cues?.play(cue);
+  }
+  private protectReply(protecting: boolean) {
+    if (this.protectingReply === protecting) return;
+    this.protectingReply = protecting; ++this.protectionEpoch;
+    this.lastBlockedReason = '';
+    this.prebuffer = []; this.prebufferSamples = 0;
+  }
+  private playbackReference = (audio: PlaybackSamples) => {
+    if (!this.vad) return;
+    const samples = audio.samples.slice();
+    this.vad.postMessage({ type: 'reference', ...audio, samples }, [samples.buffer]);
+  };
   private warmContext(): AudioContext {
     if (!this.context || this.context.state === 'closed') {
       this.context = new AudioContext({ latencyHint: 'interactive' });
@@ -84,6 +108,7 @@ export class VoiceEngine {
     this.active = true; this.muted = false; this.gap = false; this.transcript.clear();
     this.callbacks.onDraft(''); this.setPhase('starting');
     const context = this.warmContext();
+    this.cues?.dispose(); this.cues = new ListeningCues(context, this.playbackReference);
     try {
       if (!window.isSecureContext) throw new Error('Voice requires HTTPS or localhost.');
       const recognizer = this.recognizer = this.createRecognizer(generation);
@@ -140,7 +165,7 @@ export class VoiceEngine {
       const now = performance.now();
       if (this.lastCaptureAt && now - this.lastCaptureAt > 500) { this.trace.record('capture-gap', { reason: 'capture-gap', durationMs: now - this.lastCaptureAt }); this.captureFailure('Microphone audio had an unexpected gap. Review your draft before sending.'); return; }
       this.lastCaptureAt = now;
-      this.process(event.data.samples as Float32Array);
+      this.process(event.data.samples as Float32Array, event.data.endTime ?? context.currentTime);
     };
     this.source.connect(this.worklet); this.worklet.connect(context.destination);
     try { await this.startVad(generation); }
@@ -168,18 +193,22 @@ export class VoiceEngine {
             clearTimeout(this.vadFence.timeout); this.vadFence.resolve(); this.vadFence = undefined;
           }
           if (this.muted || !this.ready || event.data.sequence < this.vadIgnoreBefore) return;
+          // Accepted interruption changes policy immediately, but already captured
+          // frames still contain the rest of the user's words. Drain that exact
+          // previous epoch; never let older input cross into a new protected reply.
+          if (event.data.epoch !== this.protectionEpoch && !(!this.protectingReply && event.data.epoch === this.protectionEpoch - 1)) return;
           this.callbacks.onSignal(event.data.signal as AcousticSignal);
-          if (event.data.transition === 'start') {
-            if (this.finishing) { this.deferredOnset = true; this.deferredEndpoint = false; }
-            else this.speechStarted();
-          } else if (event.data.transition === 'end' && this.recognizer?.capabilities.endpointing === 'local-vad' && this.preferences?.handsFree) {
-            if (this.finishing && this.deferredOnset) this.deferredEndpoint = true;
-            else if (this.turnAudio) void this.finish('automatic');
+          const reason = event.data.echoRejected ? 'playback-echo' : event.data.gate?.reason;
+          if (this.protectingReply && reason !== this.lastBlockedReason) {
+            this.lastBlockedReason = reason;
+            if (reason === 'playback-echo' || reason === 'background' || reason === 'low-confidence') this.trace.record('barge-in-blocked', { reason });
           }
+          if (event.data.interruption && this.protectingReply && this.acceptsInput()) this.trace.record('barge-in', { provider: this.preferences?.recognition, reason: 'speech-onset', durationMs: event.data.gate?.accumulatedMs });
+          this.consumeFrame(event.data.samples as Float32Array, event.data.transition, event.data.interruption === true);
         }
       };
       worker.onerror = () => { clearTimeout(timeout); if (!ready) reject(new Error('Speech detector could not load.')); else this.captureFailure('Speech detector stopped.'); };
-      worker.postMessage({ type: 'init' });
+      worker.postMessage({ type: 'init', sensitivity: this.preferences?.interruptionSensitivity ?? 50 });
     });
   }
   private waitForVad(): Promise<void> {
@@ -194,7 +223,7 @@ export class VoiceEngine {
     });
   }
   private acceptsInput() { return this.active && !this.gap && !this.muted && !this.finishing && (this.phase === 'listening' || this.phase === 'hearing' || Boolean(this.preferences?.handsFree && this.recognizer?.capabilities.handsFree)); }
-  private process(samples: Float32Array) {
+  private process(samples: Float32Array, endTime: number) {
     if (!samples.length) return;
     if (!this.vad) this.callbacks.onSignal(acousticSignal(samples, 0, 0.008));
     else {
@@ -202,25 +231,49 @@ export class VoiceEngine {
       while (this.analysisBuffer.length >= 512) {
         const frame = Float32Array.from(this.analysisBuffer.splice(0, 512));
         if (this.vadPending >= 12) { this.trace.record('backpressure', { reason: 'vad-backlog', pendingFrames: this.vadPending }); this.captureFailure('This device could not keep up with speech detection. Nothing incomplete was sent.'); return; }
-        this.vadPending++; this.vad!.postMessage({ type: 'frame', samples: frame, sequence: this.vadSequence++ }, [frame.buffer]);
+        const frameEnd = endTime - this.analysisBuffer.length / 16000;
+        this.vadPending++; this.vad!.postMessage({ type: 'frame', samples: frame, sequence: this.vadSequence++, endTime: frameEnd,
+          protecting: this.protectingReply, epoch: this.protectionEpoch, turnActive: this.turnAudio }, [frame.buffer]);
       }
     }
+  }
+  private consumeFrame(samples: Float32Array, transition: 'start' | 'end' | null, interruption: boolean) {
+    if (!samples?.length) return;
     if (this.finishing && !this.gap && this.preferences?.handsFree && this.recognizer?.capabilities.input === 'pcm16k') {
       if (this.deferredSamples + samples.length > 64000) { this.captureFailure('Speech finalization fell behind. Your complete draft is preserved; review it before restarting.'); return; }
       this.deferredAudio.push(samples.slice()); this.deferredSamples += samples.length;
+      if (transition === 'start') { this.deferredOnset = true; this.deferredEndpoint = false; }
+      else if (transition === 'end' && this.deferredOnset) this.deferredEndpoint = true;
       return;
     }
     if (!this.acceptsInput()) return;
     this.prebuffer.push(samples.slice()); this.prebufferSamples += samples.length;
     while (this.prebufferSamples > 8000 && this.prebuffer.length > 1) this.prebufferSamples -= this.prebuffer.shift()!.length;
-    if (this.recognizer?.capabilities.input === 'pcm16k' && (this.recognizer.capabilities.endpointing !== 'local-vad' || this.turnAudio)) this.recognizer.push(samples);
+    const hadTurn = this.turnAudio;
+    if (this.protectingReply) {
+      if (!interruption) {
+        // Keep the premium stream alive without feeding assistant echo or fan
+        // candidates into its next turn. The bounded prefix remains local.
+        if (this.recognizer?.capabilities.endpointing === 'provider-turn') this.recognizer.push(new Float32Array(samples.length));
+        return;
+      }
+      const buffered = this.prebuffer;
+      this.speechStarted(true);
+      if (this.recognizer?.capabilities.endpointing === 'provider-turn') for (const frame of buffered) this.recognizer.push(frame);
+      return;
+    }
+    if (transition === 'start') this.speechStarted();
+    if (this.recognizer?.capabilities.input === 'pcm16k' && (this.recognizer.capabilities.endpointing !== 'local-vad' || hadTurn)) this.recognizer.push(samples);
+    if (transition === 'end' && this.recognizer?.capabilities.endpointing === 'local-vad' && this.preferences?.handsFree && this.turnAudio) void this.finish('automatic');
   }
-  private speechStarted() {
+  private speechStarted(approvedInterruption = false) {
     if (!this.acceptsInput() || this.recognizer?.capabilities.input === 'browser-managed') return;
-    if (this.outputActive || this.responseOpen) this.interrupt();
+    if (this.protectingReply && !approvedInterruption) return;
+    const buffered = this.prebuffer;
+    if (this.outputActive || this.responseOpen) this.interrupt('speech-onset');
     if (!this.turnAudio) {
       this.turnAudio = true;
-      if (this.recognizer?.capabilities.endpointing === 'local-vad') for (const frame of this.prebuffer) this.recognizer.push(frame);
+      if (this.recognizer?.capabilities.endpointing === 'local-vad') for (const frame of buffered) this.recognizer.push(frame);
       this.prebuffer = []; this.prebufferSamples = 0;
       clearTimeout(this.maxTurnTimer);
       this.maxTurnTimer = setTimeout(() => { this.callbacks.onNotice('This turn reached two minutes. Review and send your draft.'); this.captureFailure('Long recording paused to keep the turn complete.'); }, 120000);
@@ -231,6 +284,8 @@ export class VoiceEngine {
     const events: RecognizerEvents = {
       result: (result) => {
         if (generation !== this.generation || !this.active || this.gap || this.muted) return;
+        // A remote onset/result cannot bypass the local playback-aware decision.
+        if (this.protectingReply) return;
         if (result.started && this.preferences?.handsFree) this.speechStarted();
         this.callbacks.onDraft(this.transcript.update(result.text, result.final));
         if (result.text && !this.finishing) this.setPhase('hearing');
@@ -303,6 +358,7 @@ export class VoiceEngine {
       return;
     }
     this.callbacks.onDraft(''); this.sentences.reset(); this.outputFailed = false; this.responseOpen = true;
+    this.protectReply(true);
     this.setPhase('thinking'); this.callbacks.onTurn(text);
   }
   mute(muted: boolean) {
@@ -317,7 +373,7 @@ export class VoiceEngine {
       if (this.turnAudio || this.transcript.text) { this.gap = true; this.callbacks.onNotice('Recording paused. Review the unsent draft before continuing.'); }
       this.setPhase('paused');
     } else if (this.recognizer?.capabilities.input === 'browser-managed' || this.gap) this.callbacks.onNotice('Tap the microphone to start a new recording. Your draft is preserved.');
-    else if (this.active && this.ready) { this.vad?.postMessage({ type: 'reset' }); this.setPhase('listening'); }
+    else if (this.active && this.ready) { this.vad?.postMessage({ type: 'reset' }); this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : 'listening'); }
   }
   private captureFailure(message: string) {
     if (!this.active || this.gap) return;
@@ -329,9 +385,10 @@ export class VoiceEngine {
     this.closeCapture();
     this.prebuffer = []; this.prebufferSamples = 0; this.analysisBuffer = []; this.turnAudio = false;
     this.deferredAudio = []; this.deferredSamples = 0; this.deferredOnset = false; this.deferredEndpoint = false;
+    this.protectReply(false);
     void this.wakeLock?.release().catch(() => {}); this.wakeLock = undefined;
     this.callbacks.onSignal({ energy: 0, speechProbability: 0, noiseFloor: 0, pitch: null, confidence: 0 });
-    if (!this.outputActive && !this.responseOpen) this.setPhase('off');
+    this.setPhase(!this.outputActive && !this.responseOpen ? 'off' : this.phase);
   }
   private closeCapture() {
     this.lastCaptureAt = 0;
@@ -342,7 +399,7 @@ export class VoiceEngine {
   }
   speak(text: string, replace = false) {
     if (!this.preferences || !text || this.disposed) return;
-    if (!this.responseOpen) { this.sentences.reset(); this.outputFailed = false; this.responseOpen = true; }
+    if (!this.responseOpen) { this.sentences.reset(); this.outputFailed = false; this.responseOpen = true; this.protectReply(true); }
     const pieces = this.sentences.append(text, replace);
     for (const piece of pieces) this.enqueue(piece);
   }
@@ -353,7 +410,9 @@ export class VoiceEngine {
       this.outputRequestedAt = performance.now();
       const events = {
         started: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = true; this.outputStartedAt = performance.now(); this.trace.record('output-start', { provider: this.preferences?.output, durationMs: this.outputStartedAt - this.outputRequestedAt }); this.setPhase('speaking'); },
-        ended: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = false; this.trace.record('output-end', { provider: this.preferences?.output, durationMs: this.outputStartedAt ? performance.now() - this.outputStartedAt : 0 }); if (!this.responseOpen) { this.output?.dispose(); this.output = undefined; this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); } },
+        ended: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = false; this.trace.record('output-end', { provider: this.preferences?.output, durationMs: this.outputStartedAt ? performance.now() - this.outputStartedAt : 0 }); if (!this.responseOpen) { this.output?.dispose(); this.output = undefined; this.protectReply(false); this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); } },
+        reference: this.playbackReference,
+        cancelled: (atTime: number) => this.vad?.postMessage({ type: 'cancel-reference', atTime }),
         error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); } },
       };
       this.output = this.preferences!.output !== 'browser'
@@ -366,19 +425,20 @@ export class VoiceEngine {
   responseDone() {
     for (const piece of this.sentences.finish()) this.enqueue(piece);
     this.responseOpen = false;
-    if (this.outputFailed) { ++this.playbackGeneration; this.output?.dispose(); this.output = undefined; this.outputActive = false; this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
+    if (this.outputFailed) { ++this.playbackGeneration; this.output?.dispose(); this.output = undefined; this.outputActive = false; this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
     else if (this.output) this.output.finish();
-    else this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off');
+    else { this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
   }
-  interrupt() {
+  interrupt(reason: 'manual' | 'speech-onset' = 'manual', resumeListening = true) {
     ++this.playbackGeneration;
     const pending = this.outputActive || this.responseOpen || Boolean(this.output);
     const requestedAt = performance.now();
     this.output?.cancel(); this.output?.dispose(); this.output = undefined;
     this.outputActive = false; this.responseOpen = false; this.sentences.reset();
-    if (pending) this.trace.record('output-interrupt', { provider: this.preferences?.output, durationMs: performance.now() - requestedAt });
+    this.protectReply(false);
+    if (pending) this.trace.record('output-interrupt', { provider: this.preferences?.output, durationMs: performance.now() - requestedAt, reason });
     if (pending) this.callbacks.onInterrupt();
-    if (this.active) this.setPhase(this.ready && this.recognizer?.running ? 'listening' : 'paused');
+    if (this.active && resumeListening) this.setPhase(this.ready && this.recognizer?.running ? 'listening' : 'paused');
   }
   private async requestWakeLock(generation: number) {
     try {
@@ -396,7 +456,7 @@ export class VoiceEngine {
     if (this.active && this.recognizer?.capabilities.processing !== 'local') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.');
   };
   dispose() {
-    this.disposed = true; ++this.playbackGeneration; this.stop(); this.output?.dispose(); this.output = undefined;
+    this.disposed = true; ++this.playbackGeneration; this.stop(); this.output?.dispose(); this.output = undefined; this.cues?.dispose(); this.cues = undefined;
     void this.context?.close().catch(() => {}); this.context = undefined;
     document.removeEventListener('visibilitychange', this.visibility); window.removeEventListener('offline', this.offline);
   }
