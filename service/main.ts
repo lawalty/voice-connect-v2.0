@@ -15,7 +15,7 @@ import type { AppStatus, AppSettings, ServerEvent, Attachment } from '../contrac
 import { loadConfig, type ServiceConfig } from './config.js';
 import { Store, digest } from './store.js';
 import { Gateway, type GatewayPort } from './gateway.js';
-import { bridgeAudio, PREMIUM_VOICES } from './audio.js';
+import { bridgeRecognition } from './audio.js';
 import { bridgeFishAudio } from './fish.js';
 import { normalizeImage } from './images.js';
 
@@ -111,7 +111,7 @@ export async function buildApp(options:AppOptions={}) {
     for(const [s,b] of sockets)if(!store.session(b.token))s.close(1008,'Sign in again');return status(req);
   });
   app.post('/api/auth/logout',async(req,reply)=>{const token=req.cookies.vc_session??'';store.logout(token);closeToken(token);reply.clearCookie('vc_session',{path:'/'});return {ok:true};});
-  app.get('/api/settings',async():Promise<AppSettings>=>({deepgramConfigured:Boolean(store.get('deepgram')),fishConfigured:Boolean(store.get('fish')),premiumVoices:PREMIUM_VOICES,harness:gateway.capabilities()}));
+  app.get('/api/settings',async():Promise<AppSettings>=>({deepgramConfigured:Boolean(store.get('deepgram')),fishConfigured:Boolean(store.get('fish')),harness:gateway.capabilities()}));
   app.put('/api/settings/deepgram',async req=>{const body=z.object({apiKey:z.string().min(16).max(512).regex(/^[A-Za-z0-9._-]+$/)}).strict().parse(req.body);store.set('deepgram',store.encrypt(body.apiKey));return {ok:true};});
   app.delete('/api/settings/deepgram',async()=>{store.remove('deepgram');return {ok:true};});
   app.put('/api/settings/fish',async req=>{const body=z.object({apiKey:z.string().trim().min(16).max(512).regex(/^[\x21-\x7e]+$/)}).strict().parse(req.body);store.set('fish',store.encrypt(body.apiKey));closeFish();return {ok:true};});
@@ -154,9 +154,10 @@ export async function buildApp(options:AppOptions={}) {
       sockets.get(socket)!.provider='fish';
       bridgeFishAudio(socket,key,q.data.voice,()=>Boolean(session(req)));return;
     }
-    if(q.data.voice&&q.data.voice!=='flux-haley-en'){unavailable('Choose an available Deepgram voice in Settings.');return;}
-    const key=store.deepgramKey();if(!key){unavailable('Set a Deepgram key in Settings to use Premium speech.');return;}
-    bridgeAudio(socket,q.data.kind,key,q.data.voice||'flux-haley-en',()=>Boolean(session(req)));
+    if(q.data.kind!=='stt'){unavailable('Deepgram is used for recognition only. Choose Fish Audio or Device voices for speech output.');return;}
+    if(q.data.voice){unavailable('Deepgram recognition does not use an output voice.');return;}
+    const key=store.deepgramKey();if(!key){unavailable('Set a Deepgram key in Settings to use Premium recognition.');return;}
+    bridgeRecognition(socket,key,()=>Boolean(session(req)));
   });
   if(existsSync(cfg.staticDir)){await app.register(serveStatic,{root:cfg.staticDir,prefix:'/',index:['index.html']});app.setNotFoundHandler((req,reply)=>securityPath(req).startsWith('/api/')?reply.code(404).send({error:'Not found.'}):reply.type('text/html').sendFile('index.html'));}
   app.addHook('onClose',async()=>{clearInterval(heartbeat);for(const socket of sockets.keys())socket.close(1001,'Service restarting');gateway.close();store.close();});

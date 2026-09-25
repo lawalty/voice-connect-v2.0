@@ -88,7 +88,7 @@ try {
   console.log('PASS synthetic text prelude completed in the new native conversation');
 
   await page.getByRole('button', { name: 'Open settings' }).click();
-  await page.getByRole('button', { name: /On this device/ }).click();
+  await page.getByRole('button', { name: /^Vosk/ }).click();
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible({ timeout: 120000 });
   await page.getByRole('combobox').filter({ has: page.locator('option[value="browser"]') }).selectOption('browser');

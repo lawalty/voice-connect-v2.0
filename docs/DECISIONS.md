@@ -29,13 +29,16 @@ parallel LLM context.
 Vosk with hands-free mode is the default for fresh devices. Its approximately 40 MB
 local recognition download requires an explicit one-time setup action. The primary
 interaction is one Start, followed by speaking and pausing to send a turn, hearing
-the assistant, and speaking again when listening resumes. Finish remains an optional
-override. Browser recognition remains a manual fallback; it is not the default
+the assistant, and speaking again when listening resumes. Automatic mode hides
+Finish; it is shown only in manual mode. Browser recognition remains a manual
+fallback; it is not the default
 conversation design. Existing saved browser or manual preferences are preserved,
 with a visible local setup action for switching to the continuous flow.
 
-Deepgram is opt-in premium recognition and synthesis. Provider changes never happen
-silently and do not create a new conversation. The UI discloses browser/vendor speech
+Deepgram is opt-in premium recognition only. Voice output offers device voices and
+Fish Audio. Retired Deepgram output preferences become device voices with a visible
+notice; migration never enables paid Fish processing. Recognition switches preserve
+the cached Vosk model, selected output and existing conversation. The UI discloses browser/vendor speech
 processing. OpenClaw connectivity remains necessary even when Vosk can recognize offline.
 
 Fish Audio is an additional, explicitly selected output provider. Its documented

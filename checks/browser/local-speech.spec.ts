@@ -103,6 +103,7 @@ test('production security headers allow isolated local recognition without permi
   await page.screenshot({path:info.outputPath('voice-setup.png'),fullPage:true});
   await setup.getByRole('button',{name:'Start talking',exact:true}).click();
   await expect(page.getByText('Listening to you',{exact:true})).toBeVisible({timeout:90000});
+  await expect(page.getByRole('button',{name:'Finish thought',exact:true})).toHaveCount(0);
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('vc2:speech')!))).toMatchObject({recognition:'vosk',handsFree:true,turnMode:'automatic'});
   expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.some(track=>track.readyState==='live'))).toBe(true);
   await composer.focus();
@@ -110,6 +111,22 @@ test('production security headers allow isolated local recognition without permi
   await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
   expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.every(track=>track.readyState==='ended'))).toBe(true);
   expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(conversation);
+  await page.getByRole('button',{name:'Open settings'}).click();
+  // Selecting a paid recognizer never removes the verified on-device model or
+  // changes speech output. This fixture saves a fake key but starts no provider.
+  await page.getByLabel('Deepgram API key',{exact:true}).fill('synthetic-browser-fixture-key-not-a-secret');
+  await page.getByRole('button',{name:'Save key',exact:true}).click();
+  await expect(page.getByText('Deepgram credential saved on the server.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:/Deepgram/}).filter({hasText:'Premium'}).click();
+  await page.getByRole('button',{name:'Save preferences',exact:true}).click();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('vc2:speech')!))).toMatchObject({recognition:'deepgram',handsFree:true,output:'browser'});
+  await page.getByRole('button',{name:'Open settings'}).click();
+  await page.getByRole('button',{name:/Vosk/}).click();
+  await expect(page.getByText('English model ready',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Save preferences',exact:true}).click();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('vc2:speech')!))).toMatchObject({recognition:'vosk',handsFree:true,output:'browser'});
+  expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(conversation);
+  expect(downloads).toHaveLength(1);
   await page.getByRole('button',{name:'Open settings'}).click();
   await page.getByRole('checkbox',{name:/Hands-free turns/}).uncheck();
   await page.getByRole('button',{name:'Save preferences',exact:true}).click();

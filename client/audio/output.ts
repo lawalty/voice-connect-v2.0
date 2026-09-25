@@ -1,12 +1,12 @@
 import type { AudioEvent, SpeechOutput, SpeechPreferences } from '../../contract/types';
 import { Generation } from './dsp';
 
-export function audioURL(kind: 'stt' | 'tts', conversationId: string, voice?: string, provider: 'deepgram' | 'fish' = 'deepgram') {
+export function audioURL(kind: 'stt' | 'tts', conversationId: string, voice?: string) {
   const url = new URL('/api/audio', location.href);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('kind', kind); url.searchParams.set('conversationId', conversationId);
   if (voice) url.searchParams.set('voice', voice);
-  if (kind === 'tts' && provider === 'fish') url.searchParams.set('provider', provider);
+  if (kind === 'tts') url.searchParams.set('provider', 'fish');
   return url.href;
 }
 export interface OutputEvents { started(): void; ended(): void; error(message: string): void; }
@@ -22,7 +22,7 @@ export class BrowserOutput implements SpeechOutput {
   private watchdog?: ReturnType<typeof setTimeout>;
   private stopVoiceWait?: () => void;
   private waitedForVoices = false;
-  constructor(private preferences: SpeechPreferences, private events: OutputEvents) {}
+  constructor(private preferences: Pick<SpeechPreferences, 'browserVoice'>, private events: OutputEvents) {}
   enqueue(text: string) {
     if (this.failed || !text.trim()) return;
     // Short utterances reduce platform-specific long-utterance hangs.
@@ -137,12 +137,12 @@ export class PremiumOutput implements SpeechOutput {
   private ended = false;
   private timeout?: ReturnType<typeof setTimeout>;
   private playbackTimeout?: ReturnType<typeof setTimeout>;
-  constructor(private context: AudioContext, private conversationId: string, private voice: string, private events: OutputEvents, private provider: 'deepgram' | 'fish' = 'deepgram') {}
+  constructor(private context: AudioContext, private conversationId: string, private voice: string, private events: OutputEvents) {}
   private connect() {
     if (this.socket || this.failed) return;
     const id = this.generation.current;
     let socket: WebSocket;
-    try { socket = this.socket = new WebSocket(audioURL('tts', this.conversationId, this.voice, this.provider)); }
+    try { socket = this.socket = new WebSocket(audioURL('tts', this.conversationId, this.voice)); }
     catch { this.fail('Premium voice connection could not start. The reply remains available as text.'); return; }
     socket.binaryType = 'arraybuffer';
     this.timeout = setTimeout(() => this.fail('Premium voice did not become ready. The reply remains available as text.'), 15000);

@@ -19,8 +19,10 @@ describe('device speech preference compatibility', () => {
       expect(selectRecognizer(selectRecognizer(saved, 'browser'), 'deepgram')).toMatchObject({ handsFree: false, turnMode: 'manual' });
     }
   });
-  it('retains explicit premium selections without opting fresh devices into paid services', () => {
-    expect(restoreSpeechPreferences(JSON.stringify({ recognition: 'deepgram', output: 'deepgram', handsFree: true, premiumVoice: 'saved-premium', keepAwake: false }))).toMatchObject({ recognition: 'deepgram', output: 'deepgram', handsFree: true, premiumVoice: 'saved-premium', keepAwake: false });
+  it('retains Deepgram recognition but retires its old output without opting into Fish', () => {
+    const restored = restoreSpeechPreferences(JSON.stringify({ recognition: 'deepgram', output: 'deepgram', handsFree: true, premiumVoice: 'saved-premium', keepAwake: false }));
+    expect(restored).toMatchObject({ recognition: 'deepgram', output: 'browser', handsFree: true, keepAwake: false });
+    expect(restored).not.toHaveProperty('premiumVoice');
     expect(restoreSpeechPreferences(null)).toMatchObject({ recognition: 'vosk', output: 'browser' });
   });
   it('never advertises browser fallback as automatic even with an old true setting', () => {
@@ -31,5 +33,11 @@ describe('device speech preference compatibility', () => {
     expect(restoreSpeechPreferences(JSON.stringify({recognition:'vosk',output:'fish',fishVoice:'my-voice-id',handsFree:true})))
       .toMatchObject({recognition:'vosk',output:'fish',fishVoice:'my-voice-id',handsFree:true});
     expect(restoreSpeechPreferences(null).output).toBe('browser');
+  });
+  it('switches Vosk and Deepgram without changing Fish output or automatic turns', () => {
+    const original=restoreSpeechPreferences(JSON.stringify({recognition:'vosk',output:'fish',fishVoice:'owner-voice',handsFree:true}));
+    const premium=selectRecognizer(original,'deepgram');
+    expect(premium).toMatchObject({recognition:'deepgram',output:'fish',fishVoice:'owner-voice',handsFree:true});
+    expect(selectRecognizer(premium,'vosk')).toEqual(original);
   });
 });

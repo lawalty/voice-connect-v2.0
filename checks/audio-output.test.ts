@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SPEECH } from '../contract/types';
-import { BrowserOutput, PremiumOutput } from '../client/audio/output';
+import { audioURL, BrowserOutput, PremiumOutput } from '../client/audio/output';
+
+const BROWSER_PREFERENCES = { browserVoice: '' };
 
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('playback cancellation', () => {
@@ -10,7 +11,7 @@ describe('playback cancellation', () => {
     vi.stubGlobal('window', { speechSynthesis: synthesis }); vi.stubGlobal('speechSynthesis', synthesis);
     vi.stubGlobal('SpeechSynthesisUtterance', class { constructor(readonly text: string) {} });
     const events = { started: vi.fn(), ended: vi.fn(), error: vi.fn() };
-    const output = new BrowserOutput(DEFAULT_SPEECH, events);
+    const output = new BrowserOutput(BROWSER_PREFERENCES, events);
     output.enqueue('First sentence.'); output.enqueue('Queued second sentence.'); output.finish();
     const stale = utterances[0]!;
     output.cancel(); stale.onstart?.(); stale.onend?.();
@@ -39,7 +40,7 @@ describe('playback cancellation', () => {
       },
     } as unknown as AudioContext;
     const events = { started: vi.fn(), ended: vi.fn(), error: vi.fn() };
-    const output = new PremiumOutput(context, 'conversation', 'flux-haley-en', events);
+    const output = new PremiumOutput(context, 'conversation', 'fish-reference-id', events);
     output.enqueue('A reply.'); output.finish();
     const socket = sockets[0]!;
     socket.onmessage!({ data: JSON.stringify({ type: 'ready', sampleRate: 24000 }) });
@@ -71,7 +72,7 @@ function browserFixture(activeGesture = false) {
   vi.stubGlobal('window', { speechSynthesis: synthesis }); vi.stubGlobal('speechSynthesis', synthesis);
   vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance); vi.stubGlobal('navigator', { userActivation: { isActive: activeGesture } });
   const events = { started: vi.fn(), ended: vi.fn(), error: vi.fn() };
-  const output = new BrowserOutput(DEFAULT_SPEECH, events);
+  const output = new BrowserOutput(BROWSER_PREFERENCES, events);
   return { output, events, utterances, synthesis, listeners, setVoices: (value: SpeechSynthesisVoice[]) => { voices = value; }, voicesChanged: () => { for (const listener of [...listeners]) listener(); } };
 }
 
@@ -159,7 +160,7 @@ describe('browser speech readiness and failure visibility', () => {
   });
 });
 
-function pcmFixture(provider: 'fish' | 'deepgram' = 'fish') {
+function pcmFixture() {
   const sockets: Socket[] = [], sources: Source[] = [], operations: string[] = [];
   class Socket {
     static OPEN = 1; readyState = 1; binaryType = '';
@@ -181,11 +182,20 @@ function pcmFixture(provider: 'fish' | 'deepgram' = 'fish') {
     createBufferSource: () => { const source = new Source(); sources.push(source); return source; },
   };
   const events = { started: vi.fn(), ended: vi.fn(), error: vi.fn() };
-  const output = new PremiumOutput(context as unknown as AudioContext, 'conversation-id', 'voice-reference', events, provider);
+  const output = new PremiumOutput(context as unknown as AudioContext, 'conversation-id', 'voice-reference', events);
   return { output, sockets, sources, context, events, operations };
 }
 
-describe('Fish and Deepgram PCM output lifecycle', () => {
+describe('Fish PCM output lifecycle', () => {
+  it('routes every TTS request to Fish while preserving the existing Deepgram recognition route', () => {
+    vi.stubGlobal('location', { href: 'https://voice.test/', protocol: 'https:' });
+    const tts = new URL(audioURL('tts', 'conversation-id', 'fish-reference-id'));
+    expect(tts.protocol).toBe('wss:'); expect(tts.searchParams.get('kind')).toBe('tts');
+    expect(tts.searchParams.get('provider')).toBe('fish'); expect(tts.searchParams.get('voice')).toBe('fish-reference-id');
+    const stt = new URL(audioURL('stt', 'conversation-id'));
+    expect(stt.searchParams.get('kind')).toBe('stt'); expect(stt.searchParams.has('provider')).toBe(false);
+    expect(stt.searchParams.has('voice')).toBe(false);
+  });
   it('routes Fish explicitly and streams text through the same flush and local cancellation protocol', () => {
     const run = pcmFixture(); run.output.enqueue('One sentence.'); run.output.enqueue('Another sentence.'); run.output.finish();
     const socket = run.sockets[0]!, url = new URL(socket.url);
@@ -200,9 +210,9 @@ describe('Fish and Deepgram PCM output lifecycle', () => {
     expect(run.sources).toHaveLength(1); expect(run.events.ended).not.toHaveBeenCalled();
   });
 
-  it('preserves the existing Deepgram URL and ends only after all received audio finishes', () => {
-    const run = pcmFixture('deepgram'); run.output.enqueue('An answer.'); run.output.finish();
-    const socket = run.sockets[0]!; expect(new URL(socket.url).searchParams.has('provider')).toBe(false);
+  it('ends only after all received Fish audio finishes', () => {
+    const run = pcmFixture(); run.output.enqueue('An answer.'); run.output.finish();
+    const socket = run.sockets[0]!;
     socket.event({ type: 'ready', sampleRate: 24000 }); socket.pcm(); socket.event({ type: 'speech-done' });
     expect(run.events.ended).not.toHaveBeenCalled(); run.sources[0]!.onended?.();
     expect(run.events.ended).toHaveBeenCalledOnce(); expect(run.events.error).not.toHaveBeenCalled();

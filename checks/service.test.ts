@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +11,7 @@ import { Store } from '../service/store.js';
 import { signGatewayChallenge } from '../service/identity.js';
 import sharp from 'sharp';
 import { loadConfig } from '../service/config.js';
+import * as recognition from '../service/audio.js';
 
 const cleanup:(()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const fn of cleanup.reverse())await fn();cleanup.length=0;});
@@ -163,6 +164,23 @@ describe('owner boundary',()=>{
     expect(await attempt('kind=stt&provider=fish&voice=my-voice')).toContain('speech output only');
     expect(await attempt('kind=tts&provider=fish')).toContain('voice ID');
     expect(await attempt('kind=tts&provider=fish&voice=https%3A%2F%2Fother.example')).toContain('supported speech provider');
+  });
+  it('rejects legacy Deepgram output before the upstream bridge while keeping recognition available',async()=>{
+    const f=await fixture(),address=await f.app.listen({host:'127.0.0.1',port:0});
+    await f.app.inject({method:'PUT',url:'/api/settings/deepgram',headers:f.headers,payload:{apiKey:'synthetic-recognition-key-not-a-secret'}});
+    const bridge=vi.spyOn(recognition,'bridgeRecognition').mockImplementation(socket=>{socket.send(JSON.stringify({type:'ready',sampleRate:16000}));socket.close();});
+    const attempt=(query:string)=>new Promise<{type:string;message?:string;sampleRate?:number}>((resolve,reject)=>{
+      const socket=new WebSocket(`${address.replace('http:','ws:')}/api/audio?conversationId=${f.conversation.id}&${query}`,{headers:{origin,cookie:f.cookie}});
+      socket.once('error',reject);socket.once('message',message=>{resolve(JSON.parse(message.toString()));socket.close();});
+    });
+    try {
+      for(const query of ['kind=tts&provider=deepgram&voice=flux-haley-en','kind=tts&provider=deepgram','kind=tts&voice=flux-haley-en','kind=tts']){
+        expect(await attempt(query)).toEqual({type:'error',message:'Deepgram is used for recognition only. Choose Fish Audio or Device voices for speech output.'});
+      }
+      expect(bridge).not.toHaveBeenCalled();
+      expect(await attempt('kind=stt')).toEqual({type:'ready',sampleRate:16000});expect(bridge).toHaveBeenCalledOnce();
+      expect((await f.app.inject({url:'/api/settings',headers:f.headers})).json()).not.toHaveProperty('premiumVoices');
+    } finally {bridge.mockRestore();}
   });
   it('validates decoded image bytes, removes metadata, limits uploads, and protects previews',async()=>{
     const f=await fixture();

@@ -16,7 +16,7 @@ try{
   await page.getByRole('button',{name:'Enter your space'}).click();
   await expect(page.getByRole('button',{name:'Start talking'})).toBeEnabled();
   await page.getByRole('button',{name:'Open settings'}).click();
-  await page.getByRole('button',{name:/On this device/}).click();
+  await page.getByRole('button',{name:/^Vosk/}).click();
   await page.getByRole('button',{name:'Download',exact:true}).click();
   await expect(page.getByRole('button',{name:'Remove',exact:true})).toBeVisible({timeout:120000});
   console.log('PASS production model download and SHA-256 verification');

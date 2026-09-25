@@ -115,7 +115,7 @@ try {
   assert.ok(!terminal.get(receipts[0].turnId).failed && !terminal.get(receipts[0].turnId).cancelled);
   console.log('PASS synthetic prelude in the native conversation');
   await page.getByRole('button', { name: 'Open settings' }).click();
-  await page.getByRole('button', { name: /On this device/ }).click();
+  await page.getByRole('button', { name: /^Vosk/ }).click();
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible({ timeout: 120000 });
   await page.getByRole('checkbox', { name: /Hands-free turns|Automatic turns/ }).check();
@@ -123,6 +123,7 @@ try {
   const startedAt = Date.now();
   await page.getByRole('button', { name: 'Start talking', exact: true }).click();
   await expect(page.getByText('Listening to you', { exact: true })).toBeVisible({ timeout: 120000 });
+  await expect(page.getByRole('button', { name: 'Finish thought', exact: true })).toHaveCount(0);
   report.startupMs = Date.now() - startedAt;
   await page.waitForTimeout(2000);
   assert.equal(posts.length, 1, 'silence did not submit');
@@ -137,6 +138,7 @@ try {
     await expect.poll(() => terminal.has(receipts[turn].turnId), { timeout: 120000 }).toBe(true);
     assert.ok(!terminal.get(receipts[turn].turnId).cancelled && !terminal.get(receipts[turn].turnId).failed);
     await expect(page.getByText('Listening to you', { exact: true })).toBeVisible({ timeout: 20000 });
+    await expect(page.getByRole('button', { name: 'Finish thought', exact: true })).toHaveCount(0);
     await page.waitForTimeout(1500);
     assert.equal(posts.length, turn + 1, 'no repeated submission during reply or following silence');
     report.turns.push({ text: posts[turn].text, submissionAfterSampleStartMs: posts[turn].at - inputStartedAt, returnedToListening: true });

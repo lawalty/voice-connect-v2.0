@@ -1,11 +1,10 @@
 export type RecognizerKind = 'browser' | 'vosk' | 'deepgram';
-export type OutputKind = 'browser' | 'deepgram' | 'fish';
+export type OutputKind = 'browser' | 'fish';
 export type VoicePhase = 'off' | 'starting' | 'listening' | 'hearing' | 'finalizing' | 'thinking' | 'speaking' | 'reconnecting' | 'paused' | 'error';
 export interface SpeechPreferences {
   recognition: RecognizerKind;
   output: OutputKind;
   browserVoice: string;
-  premiumVoice: string;
   fishVoice?: string;
   handsFree: boolean;
   /** Remember an explicit manual-turn choice when switching recognizers. */
@@ -13,12 +12,12 @@ export interface SpeechPreferences {
   keepAwake: boolean;
 }
 export const DEFAULT_SPEECH: SpeechPreferences = {
-  recognition: 'vosk', output: 'browser', browserVoice: '', premiumVoice: 'flux-haley-en', fishVoice: '', handsFree: true, turnMode: 'automatic', keepAwake: true,
+  recognition: 'vosk', output: 'browser', browserVoice: '', fishVoice: '', handsFree: true, turnMode: 'automatic', keepAwake: true,
 };
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }
 export interface HarnessCapabilities { connected: boolean; images: boolean; cancellation: boolean; approvals: boolean; version: string; reason?: string; }
 export interface AppStatus { ownerConfigured: boolean; authenticated: boolean; build: string; csrfToken?: string; }
-export interface AppSettings { deepgramConfigured: boolean; fishConfigured: boolean; premiumVoices: { id: string; name: string }[]; harness: HarnessCapabilities; }
+export interface AppSettings { deepgramConfigured: boolean; fishConfigured: boolean; harness: HarnessCapabilities; }
 export interface Conversation { id: string; title: string; createdAt: number; updatedAt: number; }
 export interface Attachment { id: string; mimeType: string; name: string; width: number; height: number; previewUrl?: string; }
 export type Delivery = 'pending' | 'accepted' | 'complete' | 'cancelled' | 'uncertain' | 'failed';

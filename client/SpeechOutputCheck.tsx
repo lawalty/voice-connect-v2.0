@@ -23,20 +23,20 @@ function initialResult(provider: string, voice: string): SpeakerCheckResult {
   return { phase: 'idle', started: false, ended: false, heard: 'unconfirmed', provider, voice };
 }
 
-export default function SpeechOutputCheck({ preferences, voices, conversationId, deepgramConfigured, fishConfigured, onResult }: {
+export default function SpeechOutputCheck({ preferences, voices, conversationId, fishConfigured, onResult }: {
   preferences: SpeechPreferences; voices: SpeechSynthesisVoice[]; conversationId: string;
-  deepgramConfigured: boolean; fishConfigured: boolean; onResult: (result: SpeakerCheckResult) => void;
+  fishConfigured: boolean; onResult: (result: SpeakerCheckResult) => void;
 }) {
-  const provider = preferences.output === 'browser' ? 'Device voices' : preferences.output === 'fish' ? 'Fish Audio' : 'Deepgram';
+  const provider = preferences.output === 'browser' ? 'Browser voices' : 'Fish Audio';
   const fishVoice = (preferences.fishVoice || '').trim();
   const savedVoice = voices.find(voice => voice.voiceURI === preferences.browserVoice || voice.name === preferences.browserVoice);
   const voice = preferences.output === 'browser' ? (preferences.browserVoice ? savedVoice ? `${savedVoice.name} · ${savedVoice.lang}` : 'Saved voice is not yet listed' : 'Automatic · local English preferred')
-    : preferences.output === 'fish' ? fishVoice || 'No voice ID entered' : preferences.premiumVoice;
+    : fishVoice || 'No voice ID entered';
   const [result, setResult] = useState(() => initialResult(provider, voice));
   const snapshot = useRef(result), generation = useRef(0), output = useRef<SpeechOutput | null>(null), context = useRef<AudioContext | null>(null);
   const premium = preferences.output !== 'browser';
   const available = premium ? typeof window.AudioContext === 'function' : typeof window.speechSynthesis === 'object' && typeof window.SpeechSynthesisUtterance === 'function';
-  const configured = preferences.output === 'browser' || (preferences.output === 'fish' ? fishConfigured : deepgramConfigured);
+  const configured = preferences.output === 'browser' || fishConfigured;
   const validVoice = preferences.output !== 'fish' || /^[a-zA-Z0-9_-]{1,128}$/.test(fishVoice);
   const busy = result.phase === 'requested' || result.phase === 'playing';
   const update = useCallback((change: (previous: SpeakerCheckResult) => SpeakerCheckResult) => {
@@ -53,7 +53,7 @@ export default function SpeechOutputCheck({ preferences, voices, conversationId,
     return release;
     // Inventory updates must not erase a listening confirmation for the completed test.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preferences.output, preferences.browserVoice, preferences.premiumVoice, preferences.fishVoice, release, update]);
+  }, [preferences.output, preferences.browserVoice, preferences.fishVoice, release, update]);
 
   function stop() { release(); update(previous => ({ ...previous, phase: previous.phase === 'error' ? 'error' : 'stopped' })); }
   function start() {
@@ -71,7 +71,7 @@ export default function SpeechOutputCheck({ preferences, voices, conversationId,
       else {
         const audio = context.current = new AudioContext({ latencyHint: 'interactive' });
         void audio.resume().catch(() => events.error('The browser could not activate speaker output. Tap Test speaker to retry.'));
-        output.current = new PremiumOutput(audio, conversationId, preferences.output === 'fish' ? fishVoice : preferences.premiumVoice, events, preferences.output);
+        output.current = new PremiumOutput(audio, conversationId, fishVoice, events);
       }
       // Stay in the original tap event so Android can grant playback activation.
       output.current.enqueue(SAMPLE); output.current.finish();

@@ -12,9 +12,9 @@ export function restoreSpeechPreferences(raw: string | null): SpeechPreferences 
     return {
       ...DEFAULT_SPEECH,
       recognition,
-      output: ['browser', 'deepgram', 'fish'].includes(saved.output) ? saved.output : DEFAULT_SPEECH.output,
+      // A retired Deepgram voice never opts the owner into paid Fish processing.
+      output: ['browser', 'fish'].includes(saved.output) ? saved.output : DEFAULT_SPEECH.output,
       browserVoice: typeof saved.browserVoice === 'string' ? saved.browserVoice : DEFAULT_SPEECH.browserVoice,
-      premiumVoice: typeof saved.premiumVoice === 'string' ? saved.premiumVoice : DEFAULT_SPEECH.premiumVoice,
       fishVoice: typeof saved.fishVoice === 'string' ? saved.fishVoice : '',
       keepAwake: typeof saved.keepAwake === 'boolean' ? saved.keepAwake : DEFAULT_SPEECH.keepAwake,
       handsFree: recognition !== 'browser' && (typeof saved.handsFree === 'boolean' ? saved.handsFree : turnMode !== 'manual'),

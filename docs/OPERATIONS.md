@@ -35,7 +35,7 @@ SQLite using the separate master key. Removing the key disables premium speech;
 it does not silently select another paid service. Back up the master key with
 restricted access separately from source and ordinary diagnostics.
 
-For Fish Audio, save the API key under **Fish Audio connection**, select **Fish
+For Fish Audio, save the API key under **Fish Audio · TTS**, select **Fish
 Audio** as the voice service, enter the voice ID, and use **Test speaker** before
 saving preferences. The voice ID is a per-device setting; the API key never
 returns from the server. Replacing or removing it closes active Fish sessions.

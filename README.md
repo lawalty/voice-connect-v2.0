@@ -13,8 +13,8 @@ requirements and failure lessons only. See [architecture decisions](docs/DECISIO
 The primary flow is continuous conversation: complete the one-time local recognition
 setup, press **Start** once, speak, and pause. Voice activity detection closes the
 utterance automatically, the assistant replies, and listening resumes for your next
-turn. **Finish** is an optional way to deliberately end a turn, not a required step
-after every utterance.
+turn. Automatic mode has no **Finish** button. Finish appears only for explicitly
+selected manual turns or browser tap-to-talk fallback.
 
 Fresh devices default to Vosk with hands-free conversation enabled. The approximately
 40 MB recognition download requires an explicit setup action. Previously saved
@@ -30,8 +30,9 @@ Recognition and speech output are independent, per-device preferences:
 - **Browser recognition:** a manual fallback where supported, with explicit Finish
   available. The browser may use an online speech service; continuous recognition
   and interruption vary with the browser and audio route.
-- **Deepgram Flux:** optional paid recognition and speech output through the
-  authenticated server. Requires a credential in Settings. No silent fallback.
+- **Deepgram Flux:** optional paid speech recognition through the authenticated
+  server. Switch between Deepgram and Vosk in Settings; the Vosk download remains
+  cached until explicitly removed. Requires a credential. No silent paid fallback.
 - **Fish Audio:** optional streaming speech output using your Fish voice ID and
   API key. Select Fish Audio under NorthPointe's voice, save the key in Settings,
   enter your voice ID, and use Test speaker before saving preferences. Recognition

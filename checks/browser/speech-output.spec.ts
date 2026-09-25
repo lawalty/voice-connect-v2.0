@@ -72,7 +72,7 @@ test('speaker checks distinguish playback reports from audibility and keep paid 
   await page.getByRole('combobox', { name: 'Voice service', exact: true }).selectOption('fish');
   expect(await page.evaluate(() => (window as unknown as { vcSpeakerProbe: { cancellations: number } }).vcSpeakerProbe.cancellations)).toBeGreaterThan(cancelledBeforeProviderChange);
   await expect(testSpeaker).toBeDisabled();
-  await expect(page.getByRole('button', { name: /On this device/ })).toHaveClass(/selected/);
+  await expect(page.getByRole('button', { name: /^Vosk/ })).toHaveClass(/selected/);
   await page.getByLabel('Fish Audio voice ID', { exact: true }).fill('speaker_fixture_voice');
   await expect(testSpeaker).toBeDisabled();
   await page.getByLabel('Fish Audio API key', { exact: true }).fill('fixture-fish-api-key-for-ui-check');

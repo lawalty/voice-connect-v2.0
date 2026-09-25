@@ -70,7 +70,7 @@ try {
     const { VoiceEngine } = await import('/audio/engine.ts');
     const phases = [], errors = [], turns = []; let signals = 0;
     const engine = new VoiceEngine({ onPhase: (phase) => { phases.push(phase); console.log('AUDIO-CHECK phase', phase); }, onDraft() {}, onTurn: (text) => turns.push(text), onSignal: () => signals++, onError: (message) => errors.push(message), onInterrupt() {}, onNotice: (message) => console.log('AUDIO-CHECK', message) });
-    await engine.start({ recognition: 'vosk', output: 'browser', browserVoice: '', premiumVoice: 'flux-haley-en', handsFree: false, keepAwake: false }, 'local-runtime-check');
+    await engine.start({ recognition: 'vosk', output: 'browser', browserVoice: '', handsFree: false, keepAwake: false }, 'local-runtime-check');
     await new Promise((resolve) => setTimeout(resolve, 1200));
     await engine.finish(); engine.dispose();
     return { phases, errors, turns, signals, documentVosk: typeof window.Vosk !== 'undefined' };
@@ -113,7 +113,7 @@ try {
     };
     try {
       await sourceAudio.resume();
-      await engine.start({ recognition: 'vosk', output: 'browser', browserVoice: '', premiumVoice: 'flux-haley-en', handsFree: true, keepAwake: false }, 'automatic-runtime-check');
+      await engine.start({ recognition: 'vosk', output: 'browser', browserVoice: '', handsFree: true, keepAwake: false }, 'automatic-runtime-check');
       if (phases.at(-1) !== 'listening') throw new Error(`Automatic voice did not start: ${errors.join('; ')}`);
       for (let index = 0; index < 2; index++) {
         const source = sourceAudio.createBufferSource(); source.buffer = phrase; source.connect(destination); source.start();

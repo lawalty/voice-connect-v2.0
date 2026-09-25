@@ -30,7 +30,7 @@ vi.doMock('../client/audio/output', () => ({ BrowserOutput: FakeOutput, PremiumO
 const { VoiceEngine } = await import('../client/audio/engine');
 
 const signal: AcousticSignal = { energy: 0.4, speechProbability: 0.95, noiseFloor: 0.005, pitch: null, confidence: 0.7 };
-const preferences: SpeechPreferences = { recognition: 'vosk', output: 'browser', browserVoice: '', premiumVoice: 'flux-haley-en', handsFree: true, keepAwake: false };
+const preferences: SpeechPreferences = { recognition: 'vosk', output: 'browser', browserVoice: '', handsFree: true, keepAwake: false };
 let detector: FakeWorker, capture: FakeWorklet, engine: InstanceType<typeof VoiceEngine> | undefined;
 let microphone: ReturnType<typeof vi.fn>;
 class FakeWorker {
