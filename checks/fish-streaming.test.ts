@@ -46,8 +46,16 @@ it('streams three minutes through real sockets, plays before input ends, and dra
           const pcm = Buffer.alloc(this.buffer!.getChannelData().length * 2);
           this.buffer!.getChannelData().forEach((sample, i) => pcm.writeInt16LE(Math.round(sample * 32768), i * 2));
           actual.update(pcm); receivedSamples += pcm.length / 2;
-          timer = setTimeout(() => { timers.delete(timer); this.onended?.(); }, Math.max(0, (time + this.buffer!.duration - context.currentTime) * 1000 / 60));
-          timers.add(timer);
+          const end = time + this.buffer!.duration;
+          const settle = () => {
+            timers.delete(timer);
+            // Node timers round delays; at 60x speed a sub-millisecond early
+            // callback falsely returns several milliseconds of unplayed credit.
+            const remaining = end - context.currentTime;
+            if (remaining <= 0) { this.onended?.(); return; }
+            timer = setTimeout(settle, Math.max(1, Math.ceil(remaining * 1000 / 60))); timers.add(timer);
+          };
+          settle();
         },
         stop() { clearTimeout(timer); timers.delete(timer); },
       };
