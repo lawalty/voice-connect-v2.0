@@ -115,6 +115,57 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it('streams a typed reply through the selected output without opening the microphone', () => {
+    const run = setup();
+    run.engine.prepareSpeech({ recognition: 'vosk', output: 'fish', browserVoice: '', handsFree: true, keepAwake: false }, 'typed-conversation');
+    run.engine.speak('A spoken typed reply. More ');
+    expect(microphone).not.toHaveBeenCalled();
+    expect(fixture.outputs[0]!.words).toEqual(['A spoken typed reply.']);
+    expect(run.phases.at(-1)).toBe('speaking');
+    run.engine.speak('to follow.'); run.engine.responseDone(); fixture.outputs[0]!.end();
+    expect(fixture.outputs[0]!.words).toEqual(['A spoken typed reply.', 'More to follow.']);
+    expect(run.phases.at(-1)).toBe('off');
+  });
+
+  it('interrupting a typed reply returns to rest and fences late playback callbacks', () => {
+    const run = setup();
+    run.engine.prepareSpeech({ recognition: 'browser', output: 'browser', browserVoice: '', handsFree: false, keepAwake: false }, 'typed-interrupt');
+    run.engine.speak('A streamed reply.');
+    run.engine.interrupt(); fixture.outputs[0]!.events.started(); fixture.outputs[0]!.end();
+    expect(run.phases.at(-1)).toBe('off');
+    expect(run.callbacks.onInterrupt).toHaveBeenCalledOnce();
+  });
+
+  it('agent mute stops queued playback without muting capture or cancelling the agent', async () => {
+    const run = setup();
+    await run.engine.start({ recognition: 'vosk', output: 'fish', browserVoice: '', handsFree: true, keepAwake: false }, 'muted-conversation');
+    const recognizer = fixture.recognizers[0]!;
+    const track = (await microphone.mock.results[0]!.value).getAudioTracks()[0];
+    run.engine.speak('The first sentence. More ');
+    const output = fixture.outputs[0]!;
+    run.engine.setSpeakerMuted(true);
+    expect(output.dispose).toHaveBeenCalledOnce(); expect(track.enabled).toBe(true); expect(track.stop).not.toHaveBeenCalled();
+    expect(recognizer.running).toBe(true); expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
+    output.end(); expect(run.phases.at(-1)).not.toBe('speaking');
+    run.engine.speak('words while muted.'); run.engine.setSpeakerMuted(false); run.engine.speak('No old queue replay.');
+    expect(fixture.outputs).toHaveLength(1);
+    run.engine.responseDone(); run.engine.speak('The next reply is audible.');
+    expect(fixture.outputs[1]!.words).toEqual(['The next reply is audible.']);
+    expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
+  });
+
+  it('stopping input for typing leaves the current spoken reply playing', async () => {
+    const run = setup();
+    await run.engine.start({ recognition: 'vosk', output: 'fish', browserVoice: '', handsFree: true, keepAwake: false }, 'shared-conversation');
+    run.engine.speak('Keep speaking while I type.');
+    run.engine.stop();
+    expect(fixture.outputs[0]!.dispose).not.toHaveBeenCalled();
+    expect(run.phases.at(-1)).toBe('speaking');
+    run.engine.speak('This is still the same reply.'); run.engine.responseDone(); fixture.outputs[0]!.end();
+    expect(run.phases.at(-1)).toBe('off');
+    expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
+  });
+
   it('opens Android playback after capture and replaces the route when voice restarts', async () => {
     Object.assign(navigator, { userAgent: 'Mozilla/5.0 (Linux; Android 16)' });
     let captureReady = false;

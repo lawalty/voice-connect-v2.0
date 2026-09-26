@@ -66,6 +66,7 @@ test('active reply remains speakable after a history reconciliation without repl
   const historyRead=page.waitForResponse(response=>response.request().method()==='GET'&&/\/api\/conversations\/[^/]+$/.test(new URL(response.url()).pathname));
   await page.evaluate(()=>{const state=(window as unknown as {vcSpeechReconcile:{deliver(event:unknown):void}}).vcSpeechReconcile;state.deliver({type:'reconcile',conversationId:localStorage.getItem('vc2:conversation')});});
   await historyRead;
+  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await expect(page.getByRole('log',{name:'Messages'}).getByText('Your conversation stays together. I’m here with you.',{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>(window as unknown as {vcSpeechReconcile:{spoken:string[]}}).vcSpeechReconcile.spoken)).toEqual([]);
   await page.evaluate(()=>{const state=(window as unknown as {vcSpeechReconcile:{held:{type:string}[];deliver(event:unknown):void}}).vcSpeechReconcile;state.deliver(state.held.find(event=>event.type==='complete'));});

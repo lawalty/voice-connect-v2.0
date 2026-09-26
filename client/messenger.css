@@ -1,0 +1,98 @@
+/* One conversation, two presentations. The same orb stays mounted between them. */
+.app-shell { height: 100dvh; min-height: 560px; }
+.workspace.orb-workspace { display: flex; justify-content: center; min-height: 0; }
+.orb-workspace .voice-space { width: 100%; padding-top: 28px; }
+.orb-workspace .orb-stage { width: min(620px, 100cqw, max(160px, calc(100cqh - 88px))); min-width: 160px; min-height: 0; max-width: none; max-height: none; }
+.orb-workspace:has(.orb-sleeping) .orb-stage { width: min(620px, 100cqw, max(160px, calc(100cqh - 24px))); }
+.orb-workspace .voice-center { margin: 0; container-type: size; }
+.orb-workspace .voice-state { flex-shrink: 0; margin-top: 0; pointer-events: none; }
+.orb-workspace .acoustic-caption { display: none; }
+.orb-workspace .voice-bottom { margin-top: 12px; min-height: 0; }
+.orb-workspace .voice-state:empty { display: none; }
+.conversation-toggle { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 12px; min-height: 44px; margin-top: 10px; color: #9caeb9; font-size: 12px; background: transparent; }
+.conversation-toggle span { font-size: 10px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 12px; color: #88aaa2; }
+.voice-controls .speaker-button { min-width: 64px; min-height: 44px; }
+.speaker-button.is-active { color: var(--amber); }
+.workspace.messenger-workspace { display: grid; grid-template-columns: 170px minmax(0,1fr); gap: 22px; min-height: 0; padding: 22px 0 18px; }
+.messenger-workspace .voice-space { height: auto; padding: 8px 0; justify-content: flex-start; }
+.messenger-workspace .conversation-title { font-size: 22px; letter-spacing: -.5px; gap: 6px; }
+.messenger-workspace .voice-center { flex: none; margin: 12px 0 0; }
+.messenger-workspace .orb-stage { width: 164px; min-width: 0; min-height: 0; max-height: none; max-width: none; }
+.messenger-workspace .orb-wake-hint { font-size: 9px; bottom: -8%; }
+.messenger-workspace .voice-state { margin: 20px 0 0; min-height: 0; }
+.messenger-workspace .state-label { font-size: 12px; line-height: 1.6; letter-spacing: 0; gap: 6px; }
+.messenger-workspace .voice-state p, .messenger-workspace .acoustic-caption, .messenger-workspace .conversation-toggle { display: none; }
+.messenger-workspace .voice-bottom { margin-top: 24px; min-height: 0; width: 100%; }
+.messenger-workspace .voice-controls { flex-wrap: wrap; gap: 12px 6px; }
+.messenger-workspace .continuous-voice-link { font-size: 10px; line-height: 1.6; margin-top: 16px; }
+.messenger-workspace .heard-draft { position: static; min-width: 0; width: 100%; max-height: 150px; overflow: auto; margin-bottom: 16px; }
+.messenger-panel { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: #131820; border: 1px solid #aeb9d223; border-radius: 18px; }
+.messenger-header { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 12px 16px; border-bottom: 1px solid #aeb9d212; }
+.messenger-header h2 { flex: 1; font-size: 14px; margin: 0; font-weight: 450; }
+.messenger-header h2 span { color: #7d8d9d; font-size: 11px; margin-left: 6px; }
+.messenger-header .icon-button { width: 44px; height: 44px; }
+.messenger-messages { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 18px 22px 28px; scrollbar-width: thin; scrollbar-color: #3a4655 transparent; }
+.messenger-messages .message { display: flex; flex-direction: column; align-items: flex-start; padding: 0; margin: 0 0 20px; border: 0; background: transparent; animation: none; }
+.messenger-messages .message-user { align-items: flex-end; }
+.message-bubble { max-width: min(82%, 850px); padding: 15px 18px; border-radius: 18px 18px 18px 5px; background: #222630; border: 1px solid #b4bace26; color: #e2e5ed; overflow-wrap: anywhere; }
+.message-user .message-bubble { background: #2b374b; border-color: #8faee144; border-radius: 18px 18px 5px 18px; }
+.messenger-messages .message p { font-size: 15px; line-height: 1.65; margin: 0; white-space: pre-wrap; color: inherit; }
+.messenger-messages .message-meta { display: flex; gap: 10px; margin: 7px 5px 0; font-size: 10px; line-height: 1.3; letter-spacing: 0; color: #8493a5; }
+.messenger-messages .message-meta span { color: inherit; }
+.messenger-messages .message-meta time { color: #8493a5; font-size: inherit; }
+.messenger-messages .message-photo { max-width: 100%; max-height: 320px; object-fit: contain; margin: 0 0 8px; border-radius: 10px; }
+.messenger-messages .delivery-status { font-size: 11px; margin: 7px 5px 0; max-width: 85%; }
+.messenger-empty { height: 100%; min-height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; color: #92a4b4; font-size: 14px; }
+.messenger-empty p { margin: 0; }
+.latest-message-button { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 7px; padding: 10px 14px; border: 1px solid #566475; border-radius: 24px; background: #202d3e; box-shadow: 0 4px 18px #0005; font-size: 11px; white-space: nowrap; }
+.messenger-open .composer-area { margin-left: 238px; }
+.messenger-open .composer-caption { display: none; }
+.messenger-open .composer { background: #18212d; }
+@media (min-width: 1400px) { .messenger-open .composer-area { margin-left: 257px; } }
+@media (max-width: 1000px) and (min-width: 761px) { .messenger-open .composer-area { margin-left: 219px; } }
+@media (max-width: 760px) {
+  .app-shell { min-height: 440px; }
+  .orb-workspace .voice-space { padding-top: 24px; padding-bottom: 0; }
+  .orb-workspace .voice-state { min-height: 0; margin-top: 0; }
+  .orb-workspace .voice-state p { margin-bottom: 0; }
+  .orb-workspace .acoustic-caption { display: none; }
+  .conversation-toggle { margin-top: 4px; padding: 10px; }
+  .voice-controls .control-button { min-height: 44px; min-width: 44px; }
+  .workspace.messenger-workspace { display: flex; flex-direction: column; gap: 8px; margin: 0 12px; padding: 8px 0 10px; }
+  .messenger-workspace .voice-space { flex-shrink: 0; display: grid; grid-template-columns: 72px minmax(0,1fr) auto; grid-template-rows: auto auto; align-items: center; padding: 0; min-height: 72px; }
+  .messenger-workspace .voice-center { display: contents; }
+  .messenger-workspace .orb-stage { grid-column: 1; grid-row: 1 / 3; width: 72px; }
+  .messenger-workspace .orb-wake-hint { display: none; }
+  .messenger-workspace .conversation-heading { grid-column: 2; grid-row: 1; align-self: end; padding-bottom: 3px; }
+  .messenger-workspace .conversation-title { font-size: 18px; margin: 0; }
+  .messenger-workspace .conversation-title { max-width: 100%; }
+  .messenger-workspace .conversation-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .messenger-workspace .voice-state { grid-column: 2; grid-row: 2; margin: 0; align-self: start; text-align: left; }
+  .messenger-workspace .state-label { justify-content: flex-start; font-size: 10px; }
+  .messenger-workspace .voice-bottom { grid-column: 3; grid-row: 1 / 3; margin: 0; width: auto; }
+  .messenger-workspace .voice-controls { flex-wrap: nowrap; gap: 2px; }
+  .messenger-workspace .control-button { padding: 5px; font-size: 7px; }
+  .messenger-workspace .control-button span { display: none; }
+  .messenger-workspace .control-button svg { width: 18px; }
+  .messenger-workspace .continuous-voice-link { display: none; }
+  .messenger-workspace .heard-draft { position: absolute; z-index: 5; left: 4px; right: 4px; top: 72px; bottom: auto; width: auto; margin: 0; min-width: 0; background: #182b36; }
+  .messenger-workspace .finish-button { min-height: 44px; padding: 5px; font-size: 9px; width: 52px; max-width: 52px; gap: 3px; }
+  .messenger-workspace .finish-button svg { display: none; }
+  .messenger-panel { flex: 1; border-radius: 14px; }
+  .messenger-header { padding: 4px 8px; }
+  .messenger-header h2 { font-size: 12px; }
+  .messenger-messages { padding: 12px 12px 22px; }
+  .message-bubble { max-width: 91%; padding: 12px 14px; border-radius: 16px 16px 16px 4px; }
+  .message-user .message-bubble { border-radius: 16px 16px 4px 16px; }
+  .messenger-messages .message p { font-size: 14px; line-height: 1.6; }
+  .messenger-messages .message-meta { font-size: 9px; }
+  .messenger-open .composer-area { margin: 0 12px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  .messenger-open .composer textarea { font-size: 16px; }
+  .messenger-open .send-button, .messenger-open .composer-camera { width: 44px; height: 44px; }
+}
+@media (max-width: 390px) {
+  .messenger-workspace .voice-space { grid-template-columns: 54px minmax(0,1fr) auto; }
+  .messenger-workspace .orb-stage { width: 54px; }
+  .messenger-workspace .conversation-title { font-size: 15px; gap: 2px; }
+  .messenger-workspace .voice-controls { gap: 0; }
+}

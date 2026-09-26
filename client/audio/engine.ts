@@ -51,6 +51,8 @@ export class VoiceEngine {
   private playbackGeneration = 0;
   private outputActive = false;
   private outputFailed = false;
+  private speakerMuted = false;
+  private responseSilenced = false;
   private responseOpen = false;
   private wakeLock?: { release(): Promise<void> };
   private gap = false;
@@ -69,6 +71,22 @@ export class VoiceEngine {
   }
   diagnostics(): AudioDiagnosticEntry[] { return this.trace.snapshot(); }
   capabilities(): RecognizerCapabilities | undefined { return this.lastCapabilities ? { ...this.lastCapabilities } : undefined; }
+  /** A typed send unlocks the selected output without requesting a microphone. */
+  prepareSpeech(preferences: SpeechPreferences, conversationId: string) {
+    if (this.disposed) return;
+    this.preferences = { ...preferences }; this.conversationId = conversationId;
+    this.warmContext();
+  }
+  setSpeakerMuted(muted: boolean) {
+    this.speakerMuted = muted;
+    if (!muted) return;
+    // Silence this reply permanently; unmute never replays its cancelled queue.
+    this.responseSilenced = this.responseOpen || this.outputActive;
+    ++this.playbackGeneration;
+    this.output?.dispose(); this.output = undefined; this.outputActive = false;
+    this.protectReply(false);
+    this.setPhase(this.responseOpen ? 'thinking' : this.active && this.ready ? 'listening' : 'off');
+  }
   private setPhase(phase: VoicePhase) {
     if (this.phase !== phase) { this.phase = phase; this.trace.record('phase', { phase }); this.callbacks.onPhase(phase); }
     // Listening/hearing are one continuous user turn. Barge-in availability during
@@ -415,12 +433,12 @@ export class VoiceEngine {
   }
   speak(text: string, replace = false) {
     if (!this.preferences || !text || this.disposed) return;
-    if (!this.responseOpen) { this.sentences.reset(); this.outputFailed = false; this.responseOpen = true; this.protectReply(true); }
+    if (!this.responseOpen) { this.sentences.reset(); this.outputFailed = false; this.responseOpen = true; this.responseSilenced = this.speakerMuted; this.protectReply(!this.responseSilenced); }
     const pieces = this.sentences.append(text, replace);
     for (const piece of pieces) this.enqueue(piece);
   }
   private enqueue(text: string) {
-    if (this.outputFailed) return;
+    if (this.outputFailed || this.speakerMuted || this.responseSilenced) return;
     if (!this.output) {
       const playbackGeneration = ++this.playbackGeneration;
       this.outputRequestedAt = performance.now();
@@ -455,6 +473,7 @@ export class VoiceEngine {
     if (pending) this.trace.record('output-interrupt', { provider: this.preferences?.output, durationMs: performance.now() - requestedAt, reason });
     if (pending) this.callbacks.onInterrupt();
     if (this.active && resumeListening) this.setPhase(this.ready && this.recognizer?.running ? 'listening' : 'paused');
+    else if (!this.active) this.setPhase('off');
   }
   private async requestWakeLock(generation: number) {
     try {

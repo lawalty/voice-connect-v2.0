@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import LandingIntro from './LandingIntro';
 import './style.css';
+import './messenger.css';
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><LandingIntro><App /></LandingIntro></React.StrictMode>);
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

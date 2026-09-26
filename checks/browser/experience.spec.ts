@@ -16,14 +16,14 @@ test('private entry, continuous text conversation, and refresh preserve history'
   await page.getByRole('button',{name:'Begin a new conversation'}).click();
   await page.getByLabel('Message NorthPointe').fill('A browser acceptance thought.');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
-  if(info.project.name==='android-layout')await page.getByRole('button',{name:/Conversation\s*\d/}).click();
+  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await expect(page.getByText('Your conversation stays together. I’m here with you.',{exact:true})).toBeVisible();
   await expect(page.getByText('Your conversation stays together. I’m here with you.',{exact:true})).toHaveCount(1);
-  if(info.project.name==='android-layout')await page.getByRole('button',{name:'Close transcript'}).click();
+  await page.getByRole('button',{name:'Back to orb'}).click();
   const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
   await page.getByLabel('Message NorthPointe').fill('My second message.');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
-  if(info.project.name==='android-layout')await page.getByRole('button',{name:/Conversation\s*\d/}).click();
+  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await expect(page.getByText('Your second message is in the same conversation.',{exact:true})).toBeVisible();
   let releaseHistory=()=>{};
   const historyReady=new Promise<void>(resolve=>{releaseHistory=resolve;});
@@ -35,7 +35,7 @@ test('private entry, continuous text conversation, and refresh preserve history'
     await expect(page.getByRole('button',{name:'Attach a camera photo',exact:true})).toBeDisabled();
   }finally{releaseHistory();}
   await expect(page.getByRole('button',{name:'Wake NorthPointe'})).toBeEnabled();
-  if(info.project.name==='android-layout')await page.getByRole('button',{name:/Conversation\s*\d/}).click();
+  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await expect(page.getByRole('log',{name:'Messages'}).getByText('A browser acceptance thought.',{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(before);
   await page.screenshot({path:info.outputPath('conversation.png'),fullPage:true});
