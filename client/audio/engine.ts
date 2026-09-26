@@ -64,6 +64,7 @@ export class VoiceEngine {
   private protectionEpoch = 0;
   private cues?: ListeningCues;
   private cueTransitions = new CueTransitions();
+  private cuesSuppressed = false;
   private lastBlockedReason = '';
   constructor(private callbacks: VoiceCallbacks) {
     document.addEventListener('visibilitychange', this.visibility);
@@ -76,6 +77,21 @@ export class VoiceEngine {
     if (this.disposed) return;
     this.preferences = { ...preferences }; this.conversationId = conversationId;
     this.warmContext();
+  }
+  /** Presentation changes never restart capture or replay a missed cue. */
+  setCuesSuppressed(suppressed: boolean) {
+    this.cuesSuppressed = suppressed;
+    if (suppressed) this.cues?.cancel();
+  }
+  /** The input is committed; wait for its reply without inviting another turn. */
+  awaitReply() {
+    this.sentences.reset(); this.outputFailed = false; this.responseOpen = true;
+    this.responseSilenced = this.speakerMuted;
+    // A typed send may happen mid-utterance. Keep collecting that spoken turn;
+    // it still owns its transcript and can supersede the typed reply when done.
+    const hearing = this.turnAudio || Boolean(this.transcript.text);
+    this.protectReply(!hearing);
+    this.setPhase(hearing ? 'hearing' : 'thinking');
   }
   setSpeakerMuted(muted: boolean) {
     this.speakerMuted = muted;
@@ -91,8 +107,10 @@ export class VoiceEngine {
     if (this.phase !== phase) { this.phase = phase; this.trace.record('phase', { phase }); this.callbacks.onPhase(phase); }
     // Listening/hearing are one continuous user turn. Barge-in availability during
     // a reply does not pretend the agent has finished and invited the next turn.
-    const listening = this.active && this.ready && !this.muted && !this.gap && (phase === 'listening' || phase === 'hearing');
-    const cue = this.cueTransitions.update(listening, this.preferences?.audioCues !== false);
+    // Local finalization is tentative: resumed speech still belongs to this turn.
+    // Keep the cue window open until the complete input is committed.
+    const listening = this.active && this.ready && !this.muted && !this.gap && (phase === 'listening' || phase === 'hearing' || phase === 'finalizing');
+    const cue = this.cueTransitions.update(listening, !this.cuesSuppressed && this.preferences?.audioCues !== false);
     if (cue) this.cues?.play(cue);
   }
   private protectReply(protecting: boolean) {
@@ -391,9 +409,8 @@ export class VoiceEngine {
       if (draft) this.callbacks.onNotice('Only an unconfirmed draft was returned. Review it and send as text.');
       return;
     }
-    this.callbacks.onDraft(''); this.sentences.reset(); this.outputFailed = false; this.responseOpen = true;
-    this.protectReply(true);
-    this.setPhase('thinking'); this.callbacks.onTurn(text);
+    if (this.outputActive || this.output) this.interrupt('speech-onset', false);
+    this.callbacks.onDraft(''); this.awaitReply(); this.callbacks.onTurn(text);
   }
   mute(muted: boolean) {
     this.muted = muted;

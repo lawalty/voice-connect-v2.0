@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowLeft, MessageSquare, Plus } from 'lucide-react';
+import { ArrowDown, ArrowLeft, AudioLines, MessageSquare, Plus } from 'lucide-react';
 import type { Message } from '../contract/types';
 
-export default function ConversationLog({ messages, activity, onClose, onNew, creating }: {
+export default function ConversationLog({ messages, activity, onClose, onNew, creating, automatic, preparing, autoDisabled, onToggleAuto }: {
   messages: Message[]; activity: string; onClose(): void; onNew(): void; creating: boolean;
+  automatic: boolean; preparing: boolean; autoDisabled: boolean; onToggleAuto(): void;
 }) {
   const scroll = useRef<HTMLDivElement>(null), follow = useRef(true), back = useRef<HTMLButtonElement>(null);
   const [showLatest, setShowLatest] = useState(false);
@@ -23,6 +24,8 @@ export default function ConversationLog({ messages, activity, onClose, onNew, cr
     <header className="messenger-header">
       <button ref={back} className="icon-button" onClick={onClose} aria-label="Back to orb" title="Back to orb"><ArrowLeft size={20} /></button>
       <h2>Conversation <span>{messages.length}</span></h2>
+      <button className="auto-mode-toggle" role="switch" aria-label="Auto mode" aria-checked={automatic} aria-busy={preparing} disabled={autoDisabled} onClick={onToggleAuto}
+        title={automatic ? 'Stop hands-free listening; keep hearing replies' : preparing ? 'Cancel voice startup' : 'Start hands-free voice with silent cues'}><AudioLines size={16} /><span>Auto mode</span><small>{preparing ? 'Starting' : automatic ? 'On' : 'Off'}</small></button>
       <button className="icon-button" onClick={onNew} disabled={creating} aria-label="Start a new conversation" title="New conversation"><Plus size={20} /></button>
     </header>
     <div ref={scroll} className="messenger-messages" role="log" aria-label="Messages" aria-live="polite" aria-relevant="additions text"

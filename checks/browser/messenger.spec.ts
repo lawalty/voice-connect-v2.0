@@ -70,7 +70,14 @@ for (const provider of ['browser', 'fish'] as const) {
     await composer.fill('Another typed reply in messenger.'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect.poll(count).toBeGreaterThan(quietCount);
     await page.getByRole('button', { name: 'Wake NorthPointe' }).click();
-    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible({ timeout: 30000 });
+    const captures = (await state()).captures;
+    await composer.fill('Keep this typed draft while I speak.');
+    expect((await state()).capturing).toBe(true);
+    await page.getByRole('button', { name: 'Back to orb' }).click();
+    await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
+    expect((await state()).captures).toBe(captures);
+    expect((await state()).capturing).toBe(true);
     if (info.project.name === 'android-layout') {
       await page.setViewportSize({ width: 320, height: 740 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
@@ -88,6 +95,7 @@ for (const provider of ['browser', 'fish'] as const) {
     await page.getByRole('button', { name: 'Finish thought', exact: true }).click();
     await expect.poll(count).toBeGreaterThan(beforeVoice);
     await expect(page.getByRole('log').getByText('A voice reply from messenger.', { exact: true })).toBeVisible();
+    await expect(composer).toHaveValue('Keep this typed draft while I speak.');
     expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(conversation);
     await page.getByRole('button', { name: 'End voice session' }).click();
     await page.getByRole('button', { name: 'Mute agent', exact: true }).click();

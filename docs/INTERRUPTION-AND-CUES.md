@@ -12,10 +12,17 @@ are preserved.
   energy. These windows are not measured microphone-to-speaker stop latency.
 - **Subtle Audio Cues**: enabled by default. The supplied `vc-cue-listening.wav`
   marks a ready green listening turn; `vc-cue-sent.wav` marks the end of listening
-  at finalization, mute, end, or loss of input.
+  when the completed turn is submitted, or listening explicitly stops.
+  Tentative Vosk finalization keeps the listening window open while final words
+  drain; resumed speech does not trigger another pair of cues.
   Listening → hearing does not play another cue. Hands-free capture remains
   available for interruption during a reply; an off cue does not mean the
   microphone has been released. Disabling cues does not alter microphone policy.
+  Messenger suppresses both cues regardless of the saved preference. Switching
+  views preserves capture, agent playback, and the conversation; returning to
+  Orb does not replay a missed cue. The next actual turn transition uses the
+  saved setting. Auto mode in Messenger starts the same automatic voice pipeline;
+  Auto off closes capture and keeps any unsent words without stopping the reply.
 
 ## Local playback check
 

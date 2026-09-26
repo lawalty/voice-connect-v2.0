@@ -125,8 +125,8 @@ test('production security headers allow isolated local recognition without permi
   expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.some(track=>track.readyState==='live'))).toBe(true);
   await composer.focus();
   await expect(composer).toHaveValue('Keep my existing text draft.');
-  await expect(page.getByRole('button',{name:'Wake NorthPointe'})).toBeEnabled();
-  expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.every(track=>track.readyState==='ended'))).toBe(true);
+  await expect(page.getByRole('button',{name:'End voice session'})).toBeVisible();
+  expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.some(track=>track.readyState==='live'))).toBe(true);
   expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(conversation);
   await page.getByRole('button',{name:'Open settings'}).click();
   // Selecting a paid recognizer never removes the verified on-device model or
@@ -150,7 +150,7 @@ test('production security headers allow isolated local recognition without permi
   await page.getByRole('button',{name:'Use automatic turns',exact:true}).click();
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('vc2:speech')!))).toMatchObject({recognition:'vosk',handsFree:true,turnMode:'automatic'});
   expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.every(track=>track.readyState==='ended'))).toBe(true);
-  // Let any queued local endpoint arrive: typing must not leave a recognizer capable of sending it.
+  // Provider settings explicitly close capture; their old callbacks cannot submit.
   await page.waitForTimeout(1500);
   await page.getByRole('button',{name:'Open settings'}).click();
   await page.getByText('Device diagnostics',{exact:true}).click();
@@ -160,7 +160,7 @@ test('production security headers allow isolated local recognition without permi
   expect(errors).toEqual([]);expect(submissions).toEqual([]);
 });
 
-for(const handoff of ['composer focus','Edit as text','direct Send'] as const){
+for(const handoff of ['Edit as text'] as const){
   test(`active speech hands off through ${handoff} without losing text or accepting stale recognition`,async({page,context},info)=>{
     test.skip(info.project.name!=='desktop','Speech handoff is independent of the separately covered layout.');
     await context.grantPermissions(['microphone']);
@@ -169,12 +169,7 @@ for(const handoff of ['composer focus','Edit as text','direct Send'] as const){
     page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/turns'))submissions.push({url:request.url(),text:request.postDataJSON().text});});
     await enterPrivateSpace(page,context);
     await expect(page.getByRole('button',{name:'Set up continuous voice',exact:true})).toBeVisible();
-    if(handoff==='composer focus'){
-      await page.getByRole('button',{name:'Set up continuous voice',exact:true}).click();
-      await expect(page.getByRole('dialog',{name:'A conversation that keeps listening'})).toBeVisible();
-      await page.keyboard.press('Escape');
-      expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('vc2:speech')!))).toMatchObject({recognition:'browser',handsFree:false});
-    }
+
     const conversation=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
     const composer=page.getByRole('textbox',{name:'Message NorthPointe'});
     await composer.fill('An existing typed thought.');
@@ -182,13 +177,12 @@ for(const handoff of ['composer focus','Edit as text','direct Send'] as const){
     await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
     await page.evaluate(()=>(window as unknown as {vcTestSpeech:{emit(text:string):void}}).vcTestSpeech.emit('Words spoken before typing.'));
     await expect(page.getByRole('region',{name:'Voice conversation'}).getByText('Words spoken before typing.',{exact:true})).toBeVisible();
-    if(handoff==='composer focus')await composer.focus();
-    else await page.getByRole('button',{name:handoff==='Edit as text'?'Edit as text':'Send message',exact:true}).click();
+    await page.getByRole('button',{name:'Edit as text',exact:true}).click();
     await expect(page.getByRole('button',{name:'Wake NorthPointe'})).toBeEnabled();
     expect(await page.evaluate(()=>(window as unknown as {vcTestSpeech:{aborted:boolean}}).vcTestSpeech.aborted)).toBe(true);
     await page.evaluate(()=>{const speech=(window as unknown as {vcTestSpeech:{emit(text:string):void;onend():void}}).vcTestSpeech;speech.emit('A stale late recognition result.');speech.onend();});
     const combined='An existing typed thought.\nWords spoken before typing.';
-    if(handoff!=='direct Send'){
+    {
       await expect(composer).toHaveValue(combined);
       expect(submissions).toEqual([]);
       await page.getByRole('button',{name:'Send message',exact:true}).click();
@@ -237,13 +231,13 @@ for(const source of ['voice','text'] as const){
         expect(await page.evaluate(()=>(window as unknown as {vcTestSpeech:{aborted:boolean}}).vcTestSpeech.aborted)).toBe(true);
       }
       await composer.focus();
-      await expect(composer).toHaveValue(source==='voice'?'An earlier typed draft.\nA second completed thought.':'An earlier typed draft.\nA complete spoken turn.');
+      await expect(composer).toHaveValue(source==='voice'?'An earlier typed draft.\nA second completed thought.':'An earlier typed draft.');
       await composer.fill('New words typed while the receipt is delayed.');
       const received=page.waitForResponse(response=>response.url().endsWith('/turns')&&response.request().method()==='POST');
       releaseReceipt();await received;
       await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeEnabled();
       await expect(composer).toHaveValue('New words typed while the receipt is delayed.');
-      expect(submissions).toEqual([source==='voice'?'A complete spoken turn.':'An earlier typed draft.\nA complete spoken turn.']);
+      expect(submissions).toEqual([source==='voice'?'A complete spoken turn.':'An earlier typed draft.']);
       expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(conversation);
     }finally{releaseReceipt();}
   });

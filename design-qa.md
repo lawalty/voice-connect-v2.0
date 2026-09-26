@@ -34,3 +34,29 @@ No additional image-region crop was needed: there are no new raster assets or de
 - Physical Android sound, hardware routing, and background behavior are not established by browser fixtures. This change does not claim new physical-device acceptance. Existing Markdown remains intact in the log and continues through the existing speech-only cleanup pipeline.
 
 No actionable P0/P1/P2 visual findings remain. Future standby behavior is deliberately outside this change.
+
+## Messenger Auto mode and cue continuity
+
+The Messenger header now has an accessible Auto mode On/Off switch. It uses the
+same selected automatic Vosk or Deepgram capture pipeline as Orb mode. Browser
+tap-to-talk users enter the existing local-model setup when needed. No paid
+provider is selected implicitly. This is an explicit capture control, not the
+future standby or wake-word feature.
+
+Switching views, focusing the composer, and sending typed text leave voice
+capture open. The microphone can accept complete spoken turns while a separate
+typed draft is unfinished. Turning Auto off deliberately closes capture, keeps
+unsent speech in the composer, and allows the current agent reply to finish.
+
+Messenger suppresses the supplied listening/sent recordings without changing
+the saved setting. Returning to Orb does not replay cues. Repeated automatic
+turns are checked at the application boundary: listening, sent on submission,
+reply playback, listening after playback completes. Vosk's tentative finalization
+does not close and reopen that cue window when the user continues speaking.
+
+Desktop and Android-layout browser checks cover those transitions using actual
+WAV decoding and capture/AudioWorklet startup, with provider STT and TTS events
+controlled by fixtures. The narrow 320 × 740 layout fits the Auto control without
+horizontal overflow. Evidence: `.local/messenger-qa/auto-mode-mobile.png` and the
+`turn-cadence` browser-test screenshots. Physical Android cue timing and audible
+playback remain a separate check on the owner's device.

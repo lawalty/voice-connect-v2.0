@@ -35,6 +35,7 @@ vi.doMock('../client/audio/cues', async () => ({
   ListeningCues: class {
     async prepare() {}
     play(kind: 'on' | 'off') { fixture.cues.push(kind); }
+    cancel() {}
     dispose() {}
   },
 }));
@@ -154,7 +155,7 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
   });
 
-  it('stopping input for typing leaves the current spoken reply playing', async () => {
+  it('deliberately stopping capture leaves the current spoken reply playing', async () => {
     const run = setup();
     await run.engine.start({ recognition: 'vosk', output: 'fish', browserVoice: '', handsFree: true, keepAwake: false }, 'shared-conversation');
     run.engine.speak('Keep speaking while I type.');
@@ -548,6 +549,44 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     run.engine.mute(false); expect(fixture.cues).toEqual(['on', 'off', 'on', 'off', 'on']);
     run.engine.stop(); run.engine.stop();
     expect(fixture.cues).toEqual(['on', 'off', 'on', 'off', 'on', 'off']);
+  });
+
+  it('suppresses messenger cues without restarting capture, silencing speech, or replaying missed cues', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, audioCues: true }, 'same-conversation');
+    const recognition = fixture.recognizers[0]!;
+    expect(fixture.cues).toEqual(['on']);
+    run.engine.setCuesSuppressed(true);
+    await frame('start'); recognition.finals.push('I can still talk in messenger.'); await frame('end');
+    run.engine.speak('And I can still answer out loud.'); run.engine.responseDone(); fixture.outputs[0]!.end();
+    expect(run.turns).toEqual(['I can still talk in messenger.']); expect(fixture.outputs[0]!.words).toHaveLength(1);
+    expect(fixture.cues).toEqual(['on']); expect(recognition.running).toBe(true); expect(microphone).toHaveBeenCalledTimes(1);
+    run.engine.setCuesSuppressed(false); expect(fixture.cues).toEqual(['on']);
+    await frame('start'); recognition.finals.push('Back at the orb.'); await frame('end');
+    expect(fixture.cues).toEqual(['on', 'off']);
+    run.engine.speak('This is the next answer.'); run.engine.responseDone(); fixture.outputs[1]!.end();
+    expect(fixture.cues).toEqual(['on', 'off', 'on']);
+  });
+
+  it('does not sound sent or listening again while a tentative endpoint drains and speech continues', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, audioCues: true }, 'same-conversation');
+    const recognition = fixture.recognizers[0]!;
+    let release!: () => void; recognition.barrier = new Promise<void>(resolve => { release = resolve; });
+    await frame('start'); recognition.finals.push('Let me finish'); await frame('end');
+    expect(fixture.cues).toEqual(['on']);
+    await frame('start'); release(); await drain();
+    expect(run.turns).toEqual([]); expect(fixture.cues).toEqual(['on']);
+    recognition.barrier = undefined; recognition.finals.push('the rest of my thought.'); await frame('end');
+    expect(run.turns).toEqual(['Let me finish the rest of my thought.']); expect(fixture.cues).toEqual(['on', 'off']);
+  });
+
+  it('keeps an unfinished spoken turn when a typed reply starts waiting', async () => {
+    const run = setup(); await run.engine.start(preferences, 'same-conversation');
+    const recognition = fixture.recognizers[0]!;
+    await frame('start'); recognition.partial('Spoken words are');
+    run.engine.awaitReply(); expect(run.phases.at(-1)).toBe('hearing');
+    recognition.finals.push('Spoken words are kept separate and complete.'); await frame('end');
+    expect(run.turns).toEqual(['Spoken words are kept separate and complete.']);
+    expect(microphone).toHaveBeenCalledTimes(1); expect(recognition.running).toBe(true);
   });
 
   it('emits no readiness sounds after cues are disabled for the next voice session', async () => {

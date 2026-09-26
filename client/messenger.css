@@ -31,6 +31,10 @@
 .messenger-header h2 { flex: 1; font-size: 14px; margin: 0; font-weight: 450; }
 .messenger-header h2 span { color: #7d8d9d; font-size: 11px; margin-left: 6px; }
 .messenger-header .icon-button { width: 44px; height: 44px; }
+.auto-mode-toggle { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 8px 12px; border: 1px solid #6b819b55; border-radius: 20px; background: #202a37; color: #aab7c7; font-size: 11px; white-space: nowrap; }
+.auto-mode-toggle small { font-size: 10px; color: inherit; }
+.auto-mode-toggle[aria-checked="true"] { background: #23433d; border-color: #7bbbab88; color: #caeadd; }
+.auto-mode-toggle:disabled { opacity: .5; }
 .messenger-messages { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 18px 22px 28px; scrollbar-width: thin; scrollbar-color: #3a4655 transparent; }
 .messenger-messages .message { display: flex; flex-direction: column; align-items: flex-start; padding: 0; margin: 0 0 20px; border: 0; background: transparent; animation: none; }
 .messenger-messages .message-user { align-items: flex-end; }
@@ -81,6 +85,9 @@
   .messenger-panel { flex: 1; border-radius: 14px; }
   .messenger-header { padding: 4px 8px; }
   .messenger-header h2 { font-size: 12px; }
+  .messenger-header { gap: 5px; }
+  .auto-mode-toggle { gap: 4px; padding: 6px 8px; font-size: 10px; }
+  .auto-mode-toggle svg { display: none; }
   .messenger-messages { padding: 12px 12px 22px; }
   .message-bubble { max-width: 91%; padding: 12px 14px; border-radius: 16px 16px 16px 4px; }
   .message-user .message-bubble { border-radius: 16px 16px 4px 16px; }
