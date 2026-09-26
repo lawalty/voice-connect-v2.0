@@ -35,14 +35,23 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('listening cue transitions', () => {
-  it('sounds once on readiness and once on departure, without chiming during continued listening', () => {
+  it('sounds once on readiness and once on submission, without chiming during continued listening', () => {
     const transitions = new CueTransitions();
     expect(transitions.update(false, true)).toBeUndefined();
     expect(transitions.update(true, true)).toBe('on');
     expect(transitions.update(true, true)).toBeUndefined();
-    expect(transitions.update(false, true)).toBe('off');
+    expect(transitions.update(false, true, true)).toBe('off');
     expect(transitions.update(false, true)).toBeUndefined();
     expect(transitions.update(true, true)).toBe('on');
+  });
+
+  it('ends silently without a submission and still cues the next real listening turn', () => {
+    const transitions = new CueTransitions();
+    expect(transitions.update(true, true)).toBe('on');
+    expect(transitions.update(false, true)).toBeUndefined();
+    expect(transitions.update(false, true, true)).toBeUndefined();
+    expect(transitions.update(true, true)).toBe('on');
+    expect(transitions.update(false, true, true)).toBe('off');
   });
 
   it('tracks silent changes without replaying them when cues are enabled', () => {

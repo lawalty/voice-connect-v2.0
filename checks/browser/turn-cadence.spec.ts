@@ -143,4 +143,15 @@ test('automatic turns keep cue order and one capture session across orb, messeng
   await expect(composer).toHaveValue('');
   expect((await state()).cues).toEqual(expected);
   expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(id);
+  await page.getByRole('button', { name: 'Back to orb' }).click();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
+    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+    expected.push('listening'); expect((await state()).cues).toEqual(expected);
+    const submitted = turns.length;
+    await page.getByRole('button', { name: 'End voice session', exact: true }).click();
+    expect((await state()).capturing).toBe(false);
+    await expect(page.locator('.orb-stage')).toHaveAttribute('data-presence', 'sleeping');
+    expect((await state()).cues).toEqual(expected); expect(turns).toHaveLength(submitted);
+  }
 });

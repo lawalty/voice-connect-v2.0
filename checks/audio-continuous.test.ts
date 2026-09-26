@@ -522,6 +522,7 @@ describe('automatic continuous VoiceEngine orchestration', () => {
 
   it('does not invite a new turn when unmuting during playback or ending the voice session', async () => {
     const run = setup(); await run.engine.start({ ...preferences, output: 'fish', fishVoice: 'fixture-voice', audioCues: true }, 'one-conversation');
+    run.engine.awaitReply();
     run.engine.speak('The reply is speaking while the microphone is muted and unmuted.');
     const output = fixture.outputs[0]!;
     expect(fixture.cues).toEqual(['on', 'off']); expect(run.phases.at(-1)).toBe('speaking');
@@ -535,7 +536,7 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     expect(run.phases.at(-1)).toBe('off'); expect(fixture.cues).toEqual(['on', 'off']);
   });
 
-  it('cues readiness once per turn, submission, playback completion, mute, unmute, and end', async () => {
+  it('cues readiness and submission but keeps capture stops silent', async () => {
     const run = setup(); await run.engine.start({ ...preferences, audioCues: true }, 'one-conversation');
     expect(fixture.cues).toEqual(['on']);
     await frame('start'); fixture.recognizers[0]!.partial('One thought');
@@ -545,10 +546,25 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     run.engine.speak('Here is a reply.'); run.engine.responseDone();
     expect(fixture.cues).toEqual(['on', 'off']);
     fixture.outputs[0]!.end(); expect(fixture.cues).toEqual(['on', 'off', 'on']);
-    run.engine.mute(true); expect(fixture.cues).toEqual(['on', 'off', 'on', 'off']);
-    run.engine.mute(false); expect(fixture.cues).toEqual(['on', 'off', 'on', 'off', 'on']);
+    run.engine.mute(true); expect(fixture.cues).toEqual(['on', 'off', 'on']);
+    run.engine.mute(false); expect(fixture.cues).toEqual(['on', 'off', 'on', 'on']);
     run.engine.stop(); run.engine.stop();
-    expect(fixture.cues).toEqual(['on', 'off', 'on', 'off', 'on', 'off']);
+    expect(fixture.cues).toEqual(['on', 'off', 'on', 'on']);
+  });
+
+  it('ends an unfinished listening turn without a sent cue, submission, or delayed cue', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, audioCues: true }, 'same-conversation');
+    const recognition = fixture.recognizers[0]!;
+    const track = (await microphone.mock.results[0]!.value).getAudioTracks()[0];
+    await frame('start'); recognition.partial('Keep this unfinished thought');
+    run.engine.interrupt('manual', false); run.engine.stop();
+    expect(track.stop).toHaveBeenCalledOnce(); expect(run.phases.at(-1)).toBe('off');
+    expect(fixture.cues).toEqual(['on']); expect(run.turns).toEqual([]);
+    recognition.events.result({ text: 'A late final result.', final: true, turnComplete: true });
+    expect(fixture.cues).toEqual(['on']); expect(run.turns).toEqual([]);
+    await run.engine.start({ ...preferences, audioCues: true }, 'same-conversation');
+    expect(fixture.cues).toEqual(['on', 'on']);
+    run.engine.stop(); expect(fixture.cues).toEqual(['on', 'on']);
   });
 
   it('suppresses messenger cues without restarting capture, silencing speech, or replaying missed cues', async () => {
@@ -591,7 +607,7 @@ describe('automatic continuous VoiceEngine orchestration', () => {
 
   it('emits no readiness sounds after cues are disabled for the next voice session', async () => {
     const run = setup(); await run.engine.start({ ...preferences, audioCues: true }, 'one-conversation');
-    run.engine.stop(); expect(fixture.cues).toEqual(['on', 'off']); fixture.cues.length = 0;
+    run.engine.stop(); expect(fixture.cues).toEqual(['on']); fixture.cues.length = 0;
     await run.engine.start({ ...preferences, audioCues: false }, 'one-conversation');
     await frame('start'); fixture.recognizers.at(-1)!.finals.push('A silent cue setting.'); await frame('end');
     run.engine.speak('The reply still uses speech.'); run.engine.responseDone(); fixture.outputs[0]!.end();

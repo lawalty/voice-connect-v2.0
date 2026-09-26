@@ -12,7 +12,9 @@ are preserved.
   energy. These windows are not measured microphone-to-speaker stop latency.
 - **Subtle Audio Cues**: enabled by default. The supplied `vc-cue-listening.wav`
   marks a ready green listening turn; `vc-cue-sent.wav` marks the end of listening
-  when the completed turn is submitted, or listening explicitly stops.
+  when the completed turn is submitted. End voice, capture failures, pauses,
+  and other session shutdowns do not play the sent cue. End also cancels any
+  listening cue still playing; waking again cues readiness normally.
   Tentative Vosk finalization keeps the listening window open while final words
   drain; resumed speech does not trigger another pair of cues.
   Listening → hearing does not play another cue. Hands-free capture remains

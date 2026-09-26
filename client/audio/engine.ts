@@ -91,7 +91,7 @@ export class VoiceEngine {
     // it still owns its transcript and can supersede the typed reply when done.
     const hearing = this.turnAudio || Boolean(this.transcript.text);
     this.protectReply(!hearing);
-    this.setPhase(hearing ? 'hearing' : 'thinking');
+    this.setPhase(hearing ? 'hearing' : 'thinking', !hearing);
   }
   setSpeakerMuted(muted: boolean) {
     this.speakerMuted = muted;
@@ -103,14 +103,14 @@ export class VoiceEngine {
     this.protectReply(false);
     this.setPhase(this.responseOpen ? 'thinking' : this.active && this.ready ? 'listening' : 'off');
   }
-  private setPhase(phase: VoicePhase) {
+  private setPhase(phase: VoicePhase, turnSubmitted = false) {
     if (this.phase !== phase) { this.phase = phase; this.trace.record('phase', { phase }); this.callbacks.onPhase(phase); }
     // Listening/hearing are one continuous user turn. Barge-in availability during
     // a reply does not pretend the agent has finished and invited the next turn.
     // Local finalization is tentative: resumed speech still belongs to this turn.
     // Keep the cue window open until the complete input is committed.
     const listening = this.active && this.ready && !this.muted && !this.gap && (phase === 'listening' || phase === 'hearing' || phase === 'finalizing');
-    const cue = this.cueTransitions.update(listening, !this.cuesSuppressed && this.preferences?.audioCues !== false);
+    const cue = this.cueTransitions.update(listening, !this.cuesSuppressed && this.preferences?.audioCues !== false, turnSubmitted);
     if (cue) this.cues?.play(cue);
   }
   private protectReply(protecting: boolean) {
@@ -432,6 +432,7 @@ export class VoiceEngine {
   }
   stop() {
     ++this.generation; this.active = false; this.ready = false; this.finishing = false;
+    this.cues?.cancel();
     clearTimeout(this.maxTurnTimer); this.recognizer?.stop(); this.recognizer = undefined;
     this.closeCapture();
     this.prebuffer = []; this.prebufferSamples = 0; this.analysisBuffer = []; this.turnAudio = false;

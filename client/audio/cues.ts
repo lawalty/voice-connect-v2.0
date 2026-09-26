@@ -5,13 +5,14 @@ export type ListeningCue = 'on' | 'off';
 export interface CueReference { samples: Float32Array; sampleRate: number; startTime: number; }
 export interface CueSchedule { startTime: number; endTime: number; }
 
-/** Track readiness, not each visual phase: hearing someone is still listening. */
+/** Readiness opens a turn; only submission sounds sent, never stopping capture. */
 export class CueTransitions {
   private listening = false;
-  update(listening: boolean, enabled: boolean): ListeningCue | undefined {
+  update(listening: boolean, enabled: boolean, turnSubmitted = false): ListeningCue | undefined {
     const changed = listening !== this.listening;
     this.listening = listening;
-    return changed && enabled ? listening ? 'on' : 'off' : undefined;
+    if (!changed || !enabled) return;
+    return listening ? 'on' : turnSubmitted ? 'off' : undefined;
   }
 }
 
