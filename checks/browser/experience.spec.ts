@@ -14,36 +14,43 @@ test('private entry, continuous text conversation, and refresh preserve history'
   await signIn(page);
   await page.getByRole('button',{name:'NorthPointe',exact:true}).click();
   await page.getByRole('button',{name:'Begin a new conversation'}).click();
+  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await page.getByLabel('Message NorthPointe').fill('A browser acceptance thought.');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
-  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await expect(page.getByText('Your conversation stays together. I’m here with you.',{exact:true})).toBeVisible();
   await expect(page.getByText('Your conversation stays together. I’m here with you.',{exact:true})).toHaveCount(1);
   await page.getByRole('button',{name:'Back to orb'}).click();
   const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
+  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await page.getByLabel('Message NorthPointe').fill('My second message.');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
-  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await expect(page.getByText('Your second message is in the same conversation.',{exact:true})).toBeVisible();
   let releaseHistory=()=>{};
   const historyReady=new Promise<void>(resolve=>{releaseHistory=resolve;});
   await page.route('**/api/conversations',async route=>{const response=await route.fetch();await historyReady;await route.fulfill({response});},{times:1});
   try{
     await page.reload();
+    await expect(page.getByLabel('Message NorthPointe')).toHaveCount(0);
+    await page.getByRole('button',{name:/Conversation\s*\d/}).click();
     await expect(page.getByLabel('Message NorthPointe')).toBeDisabled();
     await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
     await expect(page.getByRole('button',{name:'Attach a camera photo',exact:true})).toBeDisabled();
   }finally{releaseHistory();}
   await expect(page.getByRole('button',{name:'Wake NorthPointe'})).toBeEnabled();
-  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await expect(page.getByRole('log',{name:'Messages'}).getByText('A browser acceptance thought.',{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(before);
   await page.screenshot({path:info.outputPath('conversation.png'),fullPage:true});
   expect(errors).toEqual([]);
 });
-test('camera captures deliberately and attaches to the current conversation',async({page,context},info)=>{
-  await context.grantPermissions(['camera']);
+test('awake orb camera captures deliberately and shares its attachment with messenger',async({page,context},info)=>{
+  await context.grantPermissions(['camera','microphone']);
   await page.addInitScript(()=>{
+    localStorage.setItem('vc2:speech',JSON.stringify({recognition:'browser',output:'browser',handsFree:false,audioCues:false}));
+    class Recognition {
+      onstart?:()=>void; onend?:()=>void;
+      start(){queueMicrotask(()=>this.onstart?.());} stop(){this.onend?.();} abort(){}
+    }
+    Object.defineProperty(window,'SpeechRecognition',{configurable:true,value:Recognition});
     const tracks:MediaStreamTrack[]=[];
     Object.assign(window,{__vcTestTracks:tracks});
     const capture=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -53,7 +60,11 @@ test('camera captures deliberately and attaches to the current conversation',asy
   const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
   const uploads:string[]=[],turns:string[]=[];
   page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/api/uploads'))uploads.push(request.url());if(request.method()==='POST'&&request.url().endsWith('/turns'))turns.push(request.postData()||'');});
-  await page.getByRole('button',{name:'Attach a camera photo'}).click();
+  await expect(page.getByRole('button',{name:'Attach a camera photo'})).toHaveCount(0);
+  await page.getByRole('button',{name:'Wake NorthPointe'}).click();
+  await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
+  await expect(page.locator('.composer-area')).toHaveCount(0);
+  await page.locator('.voice-controls').getByRole('button',{name:'Attach a camera photo'}).click();
   await expect(page.getByRole('button',{name:'Take photo',exact:true})).toBeEnabled();
   expect(uploads).toHaveLength(0);
   await page.getByRole('button',{name:'Take photo',exact:true}).click();
@@ -61,8 +72,14 @@ test('camera captures deliberately and attaches to the current conversation',asy
   expect(uploads).toHaveLength(0);
   await page.getByRole('button',{name:'Attach photo',exact:true}).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  expect(await page.evaluate(()=>((window as unknown as {__vcTestTracks:MediaStreamTrack[]}).__vcTestTracks).every(track=>track.readyState==='ended'))).toBe(true);
+  expect(await page.evaluate(()=>((window as unknown as {__vcTestTracks:MediaStreamTrack[]}).__vcTestTracks).filter(track=>track.kind==='video').every(track=>track.readyState==='ended'))).toBe(true);
+  expect(await page.evaluate(()=>((window as unknown as {__vcTestTracks:MediaStreamTrack[]}).__vcTestTracks).some(track=>track.kind==='audio'&&track.readyState==='live'))).toBe(true);
   expect(uploads).toHaveLength(1);expect(turns).toHaveLength(0);
+  await expect(page.locator('.voice-bottom .attachment-chip')).toBeVisible();
+  await page.screenshot({path:info.outputPath('orb-camera.png'),fullPage:true});
+  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
+  await expect(page.locator('.composer .attachment-chip')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Attach a camera photo'})).toHaveCount(1);
   await page.getByLabel('Message NorthPointe').fill('A deliberately captured test image.');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
   await expect.poll(()=>turns.length).toBe(1);
@@ -111,6 +128,7 @@ test('offline draft remains unsent and cancellation cannot resurrect old output'
   await signIn(page);
   await page.getByRole('button',{name:'NorthPointe',exact:true}).click();
   await page.getByRole('button',{name:'Begin a new conversation'}).click();
+  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await page.getByLabel('Message NorthPointe').fill('Please give a slow fixture response.');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
   await page.getByRole('button',{name:'Interrupt',exact:true}).click();

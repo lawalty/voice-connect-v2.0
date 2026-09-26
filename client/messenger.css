@@ -7,6 +7,9 @@
 .orb-workspace .voice-state { flex-shrink: 0; min-height: 64px; margin-top: 0; pointer-events: none; }
 .orb-workspace .acoustic-caption { display: none; }
 .orb-workspace .voice-bottom { margin-top: 12px; min-height: 0; }
+.orb-workspace .voice-controls { flex-wrap: wrap; }
+.orb-workspace .attachment-chip { position: static; width: fit-content; max-width: 100%; margin: 0 auto 12px; }
+.orb-open .conversation-toggle { margin-bottom: max(12px, env(safe-area-inset-bottom)); }
 /* Keep the canvas in place when End removes the label, so sleep can settle
    inward instead of jumping into a newly enlarged canvas. */
 .orb-workspace .voice-state:empty { display: block; min-height: 64px; }

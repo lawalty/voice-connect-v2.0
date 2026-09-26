@@ -78,6 +78,7 @@ try {
   await page.reload();
   await expect(page.getByRole('button', { name: 'Wake NorthPointe' })).toBeEnabled({ timeout: 30000 });
   const prelude = 'Synthetic Voice Connect acceptance test only. The next message will be a prerecorded public speech-recognition number test, not a real user request. Do not use tools, take external actions, or save any memory for either test message. Reply READY now. After the following number recording, reply VOICE-TEST-ACK and briefly repeat the recognized numbers; do nothing else.';
+  await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
   await page.getByLabel('Message NorthPointe').fill(prelude);
   const preludeResponse = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/api/conversations/${created.id}/turns`));
   await page.getByRole('button', { name: 'Send message' }).click();
@@ -86,6 +87,7 @@ try {
   assert.deepEqual(terminal.get(preludeReceipt.turnId), { conversationId: created.id, cancelled: false, failed: false });
   assert.equal(turnRequests.length, 1, 'only the synthetic prelude was sent');
   console.log('PASS synthetic text prelude completed in the new native conversation');
+  await page.getByRole('button', { name: 'Back to orb' }).click();
 
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: /^Vosk/ }).click();

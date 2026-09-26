@@ -105,7 +105,9 @@ test('production security headers allow isolated local recognition without permi
   const response=await enterPrivateSpace(page,context);
   expect(response!.headers()['content-security-policy']).not.toContain("'unsafe-eval'");
   const composer=page.getByRole('textbox',{name:'Message NorthPointe'});
+  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await composer.fill('Keep my existing text draft.');
+  await page.getByRole('button',{name:'Back to orb'}).click();
   const conversation=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
   expect(downloads).toEqual([]);
   await page.getByRole('button',{name:'Wake NorthPointe'}).click();
@@ -123,11 +125,13 @@ test('production security headers allow isolated local recognition without permi
   await expect(page.getByRole('button',{name:'Finish thought',exact:true})).toHaveCount(0);
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('vc2:speech')!))).toMatchObject({recognition:'vosk',handsFree:true,turnMode:'automatic'});
   expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.some(track=>track.readyState==='live'))).toBe(true);
+  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
   await composer.focus();
   await expect(composer).toHaveValue('Keep my existing text draft.');
   await expect(page.getByRole('button',{name:'End voice session'})).toBeVisible();
   expect(await page.evaluate(()=>(window as unknown as {vcTestTracks:MediaStreamTrack[]}).vcTestTracks.some(track=>track.readyState==='live'))).toBe(true);
   expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(conversation);
+  await page.getByRole('button',{name:'Back to orb'}).click();
   await page.getByRole('button',{name:'Open settings'}).click();
   // Selecting a paid recognizer never removes the verified on-device model or
   // changes speech output. A mocked successful credential check starts no provider.
@@ -172,7 +176,9 @@ for(const handoff of ['Edit as text'] as const){
 
     const conversation=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
     const composer=page.getByRole('textbox',{name:'Message NorthPointe'});
+    await page.getByRole('button',{name:/Conversation\s*\d/}).click();
     await composer.fill('An existing typed thought.');
+    await page.getByRole('button',{name:'Back to orb'}).click();
     await page.getByRole('button',{name:'Wake NorthPointe'}).click();
     await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
     await page.evaluate(()=>(window as unknown as {vcTestSpeech:{emit(text:string):void}}).vcTestSpeech.emit('Words spoken before typing.'));
@@ -184,6 +190,7 @@ for(const handoff of ['Edit as text'] as const){
     const combined='An existing typed thought.\nWords spoken before typing.';
     {
       await expect(composer).toHaveValue(combined);
+      await expect(composer).toBeFocused();
       expect(submissions).toEqual([]);
       await page.getByRole('button',{name:'Send message',exact:true}).click();
     }
@@ -203,11 +210,15 @@ for(const source of ['voice','text'] as const){
     await enterPrivateSpace(page,context);
     const composer=page.getByRole('textbox',{name:'Message NorthPointe'});
     const conversation=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
+    await page.getByRole('button',{name:/Conversation\s*\d/}).click();
     await composer.fill('An earlier typed draft.');
+    await page.getByRole('button',{name:'Back to orb'}).click();
     await page.getByRole('button',{name:'Wake NorthPointe'}).click();
     await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
-    await page.evaluate(()=>(window as unknown as {vcTestSpeech:{emit(text:string):void}}).vcTestSpeech.emit('A complete spoken turn.'));
-    await expect(page.getByRole('region',{name:'Voice conversation'}).getByText('A complete spoken turn.',{exact:true})).toBeVisible();
+    if(source==='voice'){
+      await page.evaluate(()=>(window as unknown as {vcTestSpeech:{emit(text:string):void}}).vcTestSpeech.emit('A complete spoken turn.'));
+      await expect(page.getByRole('region',{name:'Voice conversation'}).getByText('A complete spoken turn.',{exact:true})).toBeVisible();
+    }else await page.getByRole('button',{name:/Conversation\s*\d/}).click();
     let releaseReceipt=()=>{},markAdmitted=()=>{};
     const heldReceipt=new Promise<void>(resolve=>{releaseReceipt=resolve;});
     const admitted=new Promise<void>(resolve=>{markAdmitted=resolve;});
@@ -229,6 +240,7 @@ for(const source of ['voice','text'] as const){
         await expect(page.getByText(/Your next thought is kept in the composer/)).toBeVisible();
         expect(submissions).toHaveLength(1);
         expect(await page.evaluate(()=>(window as unknown as {vcTestSpeech:{aborted:boolean}}).vcTestSpeech.aborted)).toBe(true);
+        await page.getByRole('button',{name:/Conversation\s*\d/}).click();
       }
       await composer.focus();
       await expect(composer).toHaveValue(source==='voice'?'An earlier typed draft.\nA second completed thought.':'An earlier typed draft.');

@@ -108,12 +108,14 @@ try {
   Object.assign(report, created);
   await page.reload();
   await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled({ timeout: 30000 });
+  await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
   await page.getByLabel('Message NorthPointe').fill('Synthetic Voice Connect automatic-turn test. The next two messages will contain only numbers from a public speech sample, not real user requests. Do not use tools, take external actions or save memory for this test. Reply READY now. For each of the following two number messages, reply only AUTO-TEST-ACK.');
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect.poll(() => receipts.length, { timeout: 30000 }).toBe(1);
   await expect.poll(() => terminal.has(receipts[0].turnId), { timeout: 120000 }).toBe(true);
   assert.ok(!terminal.get(receipts[0].turnId).failed && !terminal.get(receipts[0].turnId).cancelled);
   console.log('PASS synthetic prelude in the native conversation');
+  await page.getByRole('button', { name: 'Back to orb' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: /^Vosk/ }).click();
   await page.getByRole('button', { name: 'Download', exact: true }).click();

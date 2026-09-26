@@ -65,6 +65,7 @@ test('history and gateway recovery clear only connection errors after the subscr
     ++submissions;
     await route.fulfill({ json: { turnId: route.request().postDataJSON().id, delivery: 'uncertain' } });
   });
+  await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
   await page.getByLabel('Message NorthPointe').fill('Preserve this uncertain delivery.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.locator('.notice')).toContainText('Delivery is uncertain.');

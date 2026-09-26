@@ -26,6 +26,12 @@ OpenClaw connector. OpenClaw owns reasoning, tools, persona, and canonical histo
 SQLite is not a second conversational memory and is never used to reconstruct a
 parallel LLM context.
 
+Full Orb mode has voice controls and the Conversation link; its text composer and
+footer caption are not mounted. Waking voice reveals a camera control alongside
+Mute and End. A captured photo remains visible and removable until the next turn
+submits it. Messenger retains its composer and camera, sharing the same draft,
+attachment, conversation, capture, and playback across view switches.
+
 Vosk with hands-free mode is the default for fresh devices. Its approximately 40 MB
 local recognition download requires an explicit one-time setup action. The primary
 interaction is one Start, followed by speaking and pausing to send a turn, hearing
