@@ -44,8 +44,8 @@ provider is selected implicitly. This is an explicit capture control, not the
 future standby or wake-word feature.
 
 Switching views, focusing the composer, and sending typed text leave voice
-capture open. The microphone can accept complete spoken turns while a separate
-typed draft is unfinished. Turning Auto off deliberately closes capture, keeps
+capture open. Messenger displays live transcription in the composer. If typing and speech
+overlap, both become one automatically submitted message. Turning Auto off deliberately closes capture, keeps
 unsent speech in the composer, and allows the current agent reply to finish.
 
 Messenger suppresses the supplied listening/sent recordings without changing
@@ -60,3 +60,19 @@ controlled by fixtures. The narrow 320 × 740 layout fits the Auto control witho
 horizontal overflow. Evidence: `.local/messenger-qa/auto-mode-mobile.png` and the
 `turn-cadence` browser-test screenshots. Physical Android cue timing and audible
 playback remain a separate check on the owner's device.
+
+## Transcription in the Messenger composer
+
+Messenger no longer renders the floating transcription box or its old placement
+rules. Partial speech appears in the existing message textarea and is replaced
+as recognition revises its hypothesis. Only a completed turn submits. Typed
+additions and corrections survive recognition updates and join the spoken turn,
+as requested. Auto off retains the combined draft for further editing; the draft
+is saved locally for refresh recovery.
+
+The composer grows to 130 pixels, then scrolls, including after viewport width
+changes. Inspection at 320 pixels caught a wrapping issue on resize; a width
+observer now refits the field. The browser checks verify no floating box in
+Messenger, no partial submission, one combined final message, preservation on
+Auto off, and continuity through view switching. Provider fixtures cover device
+and Fish speech output. These checks do not requalify physical Android audio.

@@ -25,7 +25,6 @@
 .messenger-workspace .voice-bottom { margin-top: 24px; min-height: 0; width: 100%; }
 .messenger-workspace .voice-controls { flex-wrap: wrap; gap: 12px 6px; }
 .messenger-workspace .continuous-voice-link { font-size: 10px; line-height: 1.6; margin-top: 16px; }
-.messenger-workspace .heard-draft { position: static; min-width: 0; width: 100%; max-height: 150px; overflow: auto; margin-bottom: 16px; }
 .messenger-panel { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: #131820; border: 1px solid #aeb9d223; border-radius: 18px; }
 .messenger-header { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 12px 16px; border-bottom: 1px solid #aeb9d212; }
 .messenger-header h2 { flex: 1; font-size: 14px; margin: 0; font-weight: 450; }
@@ -79,7 +78,6 @@
   .messenger-workspace .control-button span { display: none; }
   .messenger-workspace .control-button svg { width: 18px; }
   .messenger-workspace .continuous-voice-link { display: none; }
-  .messenger-workspace .heard-draft { position: absolute; z-index: 5; left: 4px; right: 4px; top: 72px; bottom: auto; width: auto; margin: 0; min-width: 0; background: #182b36; }
   .messenger-workspace .finish-button { min-height: 44px; padding: 5px; font-size: 9px; width: 52px; max-width: 52px; gap: 3px; }
   .messenger-workspace .finish-button svg { display: none; }
   .messenger-panel { flex: 1; border-radius: 14px; }

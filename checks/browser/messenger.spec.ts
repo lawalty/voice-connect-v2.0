@@ -94,8 +94,8 @@ for (const provider of ['browser', 'fish'] as const) {
     await page.evaluate(() => (window as unknown as { vcMessengerProbe: { emit(text: string): void } }).vcMessengerProbe.emit('A voice reply from messenger.'));
     await page.getByRole('button', { name: 'Finish thought', exact: true }).click();
     await expect.poll(count).toBeGreaterThan(beforeVoice);
-    await expect(page.getByRole('log').getByText('A voice reply from messenger.', { exact: true })).toBeVisible();
-    await expect(composer).toHaveValue('Keep this typed draft while I speak.');
+    await expect(page.getByRole('log').getByText('Keep this typed draft while I speak.\nA voice reply from messenger.', { exact: true })).toBeVisible();
+    await expect(composer).toHaveValue('');
     expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(conversation);
     await page.getByRole('button', { name: 'End voice session' }).click();
     await page.getByRole('button', { name: 'Mute agent', exact: true }).click();
