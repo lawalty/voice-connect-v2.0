@@ -18,6 +18,8 @@ services:
       VC_GATEWAY_TOKEN_FILE: /run/secrets/gateway-token
       VC_MASTER_KEY_FILE: /run/secrets/master-key
       VC_BOOTSTRAP_TOKEN_FILE: /run/secrets/bootstrap-token
+      VC_LIBRARY_URL: https://hermes-agent-n3zu.srv1391383.hstgr.cloud
+      VC_LIBRARY_TOKEN_FILE: /run/secrets/library-token
       VC_BUILD: ${VC_RELEASE}
     volumes:
       - /opt/voice-connect-v2/state:/state

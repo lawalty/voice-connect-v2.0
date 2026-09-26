@@ -5,6 +5,7 @@ export interface ServiceConfig {
   origin: string; stateDir: string; gatewayUrl: string; gatewayToken: string;
   masterKey: Buffer; bootstrapToken: string; build: string; host: string; port: number;
   secureCookie: boolean; staticDir: string; gatewayEnabled: boolean; qualifiedImageModels: string[]; gatewayModel: string;
+  libraryUrl: string; libraryToken: string;
 }
 function secretFile(name: string, optional=false): string {
   const path = process.env[name];
@@ -25,6 +26,7 @@ export function loadConfig(overrides: Partial<ServiceConfig> = {}): ServiceConfi
     host: process.env.VC_HOST ?? '127.0.0.1', port: Number(process.env.VC_PORT ?? 18880),
     secureCookie: origin.startsWith('https:'), staticDir: resolve('dist/client'), gatewayEnabled: true,
     qualifiedImageModels:(process.env.VC_IMAGE_MODEL_ALLOWLIST??'').split(',').map(v=>v.trim()).filter(Boolean),gatewayModel:process.env.VC_GATEWAY_MODEL??'',
+    libraryUrl:process.env.VC_LIBRARY_URL??'',libraryToken:overrides.libraryToken??secretFile('VC_LIBRARY_TOKEN_FILE',true),
     ...overrides,
   };
 }
