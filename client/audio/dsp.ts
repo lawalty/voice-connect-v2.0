@@ -1,4 +1,5 @@
 import type { AcousticSignal } from '../../contract/types';
+import { speechText } from './speech-text';
 
 /** Stateful area resampling: low-pass box integration, with no block-boundary drift. */
 export class Resampler {
@@ -137,10 +138,10 @@ export class SentenceStream {
         if (character === '\n') { boundary = i + 1; break; }
         if (!/[.!?]/.test(character)) continue;
         let end = i + 1;
-        while (end < pending.length && /[.!?"'”’)}\]]/.test(pending[end]!)) end++;
+        while (end < pending.length && /[.!?"'”’)}\]*_~`]/.test(pending[end]!)) end++;
         if (end < pending.length && !/\s/.test(pending[end]!)) continue;
         if (character === '.') {
-          const token = pending.slice(0, i + 1).match(/[^\s]+$/)?.[0] ?? '';
+          const token = speechText(pending.slice(0, i + 1).match(/[^\s]+$/)?.[0] ?? '');
           // A streamed decimal, initial, abbreviation, or URL is not a sentence.
           if (/^(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e)\.$/i.test(token) || /^(?:[A-Za-z]\.)+$/.test(token)) continue;
           if (/\d\.$/.test(token) && end === pending.length && !final) continue;
@@ -161,7 +162,7 @@ export class SentenceStream {
         }
       }
       if (!boundary) { if (!final) break; boundary = pending.length; }
-      const piece = pending.slice(0, boundary).trim();
+      const piece = speechText(pending.slice(0, boundary));
       this.emitted += boundary;
       if (piece) output.push(piece);
     }

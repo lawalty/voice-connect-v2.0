@@ -36,6 +36,18 @@ Old cached clients can still use the bridge; refreshed clients negotiate pacing.
 
 ## Verification
 
+Speech chunks remove common emphasis markers (`**`, `*`, `__`, `_`, `~~`)
+and heading, quote, and bullet prefixes before either speech provider receives
+them. The original reply and raw snapshot offsets remain unchanged, so OpenClaw
+can use Markdown and history keeps it. Sentence boundaries recognize closing
+emphasis markers without waiting for the rest of the answer. Explicit inline
+code and escaped symbols remain literal content.
+
+- `checks/speech-text.test.ts`: split Markdown markers, character-at-a-time
+  delivery, long chunks, snapshot corrections, abbreviations and literal symbols.
+- `checks/browser/markdown-speech.spec.ts`: browser speech and Fish transport
+  receive clean sentences before completion; persisted history retains Markdown.
+
 - `checks/fish-streaming.test.ts`: real local WebSockets, accelerated playback of
   three minutes of PCM, byte-for-byte integrity, at most 4.1 seconds ahead, and
   playback before the second text passage and final response boundary.

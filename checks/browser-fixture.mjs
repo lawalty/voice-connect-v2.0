@@ -36,7 +36,7 @@ gateway.on('connection',ws=>{
       const history=sessions.get(p.sessionKey)||[];
       history.push({id:randomUUID(),role:'user',content:[{type:'text',text:p.message}],timestamp:Date.now(),runId});sessions.set(p.sessionKey,history);
       res(receipt);
-      const answer=p.message.includes('second')?'Your second message is in the same conversation.':'Your conversation stays together. I’m here with you.';
+      const answer=p.message.includes('Markdown speech fixture')?'**Your first sentence.** A *second* thought.':p.message.includes('second')?'Your second message is in the same conversation.':'Your conversation stays together. I’m here with you.';
       const slow=p.message.includes('slow');
       event('chat',{sessionKey:p.sessionKey,runId,seq:0,state:'status'});
       const first=setTimeout(()=>event('chat',{sessionKey:p.sessionKey,runId,seq:1,state:'delta',deltaText:answer.slice(0,33)}),100);
