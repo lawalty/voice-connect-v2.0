@@ -7,16 +7,23 @@ test('automatic turns keep cue order and one capture session across orb, messeng
   await context.grantPermissions(['microphone']);
   await page.addInitScript(() => {
     localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'deepgram', output: 'browser', handsFree: true, turnMode: 'automatic', audioCues: true }));
-    const probe = { cues: [] as string[], captures: 0, tracks: [] as MediaStreamTrack[], spoken: [] as string[], pending: [] as SpeechSynthesisUtterance[], cancellations: 0 };
+    const probe = { cues: [] as string[], captures: 0, tracks: [] as MediaStreamTrack[], spoken: [] as string[], pending: [] as SpeechSynthesisUtterance[], cancellations: 0, cutSentCues: 0 };
     Object.assign(window, { vcCadence: probe });
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     navigator.mediaDevices.getUserMedia = async constraints => { probe.captures++; const stream = await capture(constraints); probe.tracks.push(...stream.getAudioTracks()); return stream; };
     const start = AudioBufferSourceNode.prototype.start;
+    const starts = new WeakMap<AudioBufferSourceNode, number>();
     AudioBufferSourceNode.prototype.start = function(...args) {
+      starts.set(this, args[0] ?? this.context.currentTime);
       if (Math.abs((this.buffer?.duration || 0) - .48) < .001) probe.cues.push('listening');
       if (Math.abs((this.buffer?.duration || 0) - .26) < .001) probe.cues.push('sent');
       if (Math.abs((this.buffer?.duration || 0) - 1.5) < .001) probe.cues.push('sleep');
       return start.apply(this, args);
+    };
+    const stop = AudioBufferSourceNode.prototype.stop;
+    AudioBufferSourceNode.prototype.stop = function(...args) {
+      if (Math.abs((this.buffer?.duration || 0) - .26) < .001 && this.context.currentTime < (starts.get(this) ?? 0) + .25) probe.cutSentCues++;
+      return stop.apply(this, args);
     };
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
       getVoices: () => [], addEventListener() {}, removeEventListener() {},
@@ -144,6 +151,7 @@ test('automatic turns keep cue order and one capture session across orb, messeng
   await expect(composer).toHaveValue('');
   expect((await state()).cues).toEqual(expected);
   expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(id);
+  expect(await page.evaluate(() => (window as unknown as { vcCadence: { cutSentCues: number } }).vcCadence.cutSentCues)).toBe(0);
   await page.getByRole('button', { name: 'Back to orb' }).click();
   for (let attempt = 0; attempt < 2; attempt++) {
     await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();

@@ -543,6 +543,10 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     expect(fixture.cues).toEqual(['on']);
     fixture.recognizers[0]!.finals.push('One thought.'); await frame('end');
     expect(fixture.cues).toEqual(['on', 'off']);
+    const cancellations = fixture.cueCancellations;
+    // App prepares output for voice submissions too, immediately after commit.
+    run.engine.prepareSpeech({ ...preferences, audioCues: true }, 'one-conversation');
+    expect(fixture.cueCancellations).toBe(cancellations);
     run.engine.speak('Here is a reply.'); run.engine.responseDone();
     expect(fixture.cues).toEqual(['on', 'off']);
     fixture.outputs[0]!.end(); expect(fixture.cues).toEqual(['on', 'off', 'on']);

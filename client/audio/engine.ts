@@ -75,7 +75,9 @@ export class VoiceEngine {
   /** A typed send unlocks the selected output without requesting a microphone. */
   prepareSpeech(preferences: SpeechPreferences, conversationId: string) {
     if (this.disposed) return;
-    this.cues?.cancel();
+    // Voice submission also uses this method just after scheduling its sent
+    // cue. Only an inactive session can still have a sleep tail to cancel.
+    if (!this.active) this.cues?.cancel();
     this.preferences = { ...preferences }; this.conversationId = conversationId;
     this.warmContext();
   }
