@@ -32,13 +32,19 @@ for (const output of ['browser', 'fish'] as const) {
       socket.send(JSON.stringify({ type: 'ready', sampleRate: 24000 }));
     });
     let complete = false;
+    let submittedTurn: string | undefined;
+    page.on('request', request => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/turns')) submittedTurn = request.postDataJSON().id;
+    });
     const subscribed = new Set<string>();
     page.on('websocket', socket => {
       const url = new URL(socket.url());
       if (url.pathname === '/api/events') socket.on('framereceived', frame => {
         const event = JSON.parse(String(frame.payload));
         if (event.type === 'hello') subscribed.add(url.searchParams.get('conversationId')!);
-        if (event.type === 'complete') complete = true;
+        // The initial subscription may briefly belong to the previous fixture
+        // conversation. Its late completion says nothing about this new turn.
+        if (event.type === 'complete' && event.turnId === submittedTurn) complete = true;
       });
     });
     await enterFixtureSession(page);
