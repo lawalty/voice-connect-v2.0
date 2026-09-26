@@ -108,3 +108,9 @@
 
 .camera-caption { margin-top: 18px; }
 .camera-caption textarea { width: 100%; min-height: 90px; max-height: 180px; }
+.clipboard-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 38dvh; overflow: auto; padding: 16px; background: #0b141e; border: 1px solid #283640; border-radius: 10px; font-size: 14px; line-height: 1.6; }
+.clipboard-inline { border: 1px solid #34434f; border-radius: 12px; background: #15212b; margin-bottom: 8px; padding: 10px 12px; max-height: 32dvh; overflow: auto; }
+.clipboard-thumbnail img { display: block; max-width: 100%; max-height: 100px; object-fit: contain; border-radius: 6px; }
+.clipboard-inline-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.clipboard-inline-actions .muted { font-size: 11px; }
+.clipboard-inline .error-text { margin: 8px 0; }

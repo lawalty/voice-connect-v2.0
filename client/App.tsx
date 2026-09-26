@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowDown, ArrowRight, AudioLines, Camera as CameraIcon, Check, ChevronDown, CircleStop, Headphones, LockKeyhole, MessageSquare, Mic, Plus, Send, Settings2, Square, Volume2, VolumeX, WifiOff, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, AudioLines, Camera as CameraIcon, Clipboard as ClipboardIcon, Check, ChevronDown, CircleStop, Headphones, LockKeyhole, MessageSquare, Mic, Plus, Send, Settings2, Square, Volume2, VolumeX, WifiOff, X } from 'lucide-react';
 import { type AcousticSignal, type AppSettings, type AppStatus, type Attachment, type Conversation, type ConversationView, type Message, type ServerEvent, type SpeechPreferences, type TurnReceipt, type VoicePhase } from '../contract/types';
 import { api, ApiError, setCsrf } from './api';
 import { VoiceEngine } from './audio/engine';
 import Orb from './Orb';
 import Settings from './Settings';
 import Camera from './Camera';
+import ClipboardShare, { type ClipboardShareHandle, type ClipboardShareState } from './ClipboardShare';
+import { pastedContent, readClipboard, type ClipboardContent } from './clipboard';
 import Dialog from './Dialog';
 import VoiceSetup from './VoiceSetup';
 import ConversationLog from './ConversationLog';
@@ -41,6 +43,10 @@ export default function App() {
     return '';
   }), [activity, setActivity] = useState(''), [activeTurn, setActiveTurn] = useState<TurnReceipt | null>(null);
   const [modal, setModal] = useState<'settings' | 'camera' | 'conversations' | 'voice-setup' | null>(null), [showTranscript, setShowTranscript] = useState(false);
+  const [clipboard, setClipboard] = useState<{ source: Promise<ClipboardContent>; composer: boolean } | null>(null);
+  const [clipboardState, setClipboardState] = useState<ClipboardShareState>({ ready: false, locked: false });
+  const clipboardHandle = useRef<ClipboardShareHandle>(null);
+  const pasteHandler = useRef<(event: ClipboardEvent) => void>(() => {});
   const [voiceSetupPreferences, setVoiceSetupPreferences] = useState<SpeechPreferences | null>(null);
   const [approval, setApproval] = useState<Extract<ServerEvent, { type: 'approval' }> | null>(null), [question, setQuestion] = useState<Extract<ServerEvent, { type: 'question' }> | null>(null), [answer, setAnswer] = useState('');
   const [approvalHidden, setApprovalHidden] = useState(false), [questionHidden, setQuestionHidden] = useState(false);
@@ -51,7 +57,7 @@ export default function App() {
   const [liveText, setLiveText] = useState<string | null>(null);
   const clearLiveDraft = useCallback(() => { liveDraft.current = null; setLiveText(null); }, []);
   const voiceStart = useRef<symbol | null>(null), conversationToggle = useRef<HTMLButtonElement>(null);
-  const messengerRef = useRef(false), cameraOpen = useRef(false);
+  const messengerRef = useRef(false), shareOpen = useRef(false);
   const changeView = useCallback((messenger: boolean) => {
     messengerRef.current = messenger; engine.current?.setCuesSuppressed(messenger); setShowTranscript(messenger);
     if (messenger && heardRef.current) {
@@ -64,7 +70,7 @@ export default function App() {
   const spoken = useRef(new Map<string, string>()), sequences = useRef(new Map<string, number>()), latest = useRef({ preferences, draft }); latest.current = { preferences, draft };
   const completed = useRef(new Set<string>()), cancelled = useRef(new Set<string>()), speakingTurn = useRef(''), sendingRef = useRef(false), aborting = useRef<Promise<void> | null>(null), suppressAbort = useRef(false);
   const audibleTurns = useRef(new Set<string>()), speakerMutedRef = useRef(speakerMuted);
-  const photoAttempts = useRef(new Set<string>());
+  const shareAttempts = useRef(new Set<string>());
   activeTurnRef.current = activeTurn; conversationRef.current = conversationId; voiceRef.current = voiceActive;
 
   const updateDraft = useCallback((next: string | ((current: string) => string)) => {
@@ -106,6 +112,7 @@ export default function App() {
 
   const authenticate = useCallback((next: AppStatus) => { setCsrf(next.csrfToken); setStatus(next); }, []);
   const selectConversation = useCallback((id: string) => {
+    shareOpen.current = false; setClipboard(null);
     let restored = ''; try { restored = localStorage.getItem(`vc2:draft:${id}`) || ''; localStorage.setItem('vc2:conversation', id); } catch {}
     // Restore before exposing the new composer; a delayed effect must never erase freshly typed input.
     clearLiveDraft(); updateDraft(restored); setConversationId(id); conversationRef.current = id;
@@ -134,7 +141,7 @@ export default function App() {
     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
   }, []);
   useEffect(() => {
-    const expired = () => { cameraOpen.current = false; setModal(null); cancelVoiceStart(); voiceRef.current = false; suppressAbort.current = true; engine.current?.interrupt(); engine.current?.stop(); suppressAbort.current = false; setVoiceActive(false); setPhase('off'); setStatus(value => value ? { ...value, authenticated: false, csrfToken: undefined } : value); setCsrf(); setInitialError('Your session ended. Sign in again to continue.'); };
+    const expired = () => { shareOpen.current = false; setClipboard(null); setModal(null); cancelVoiceStart(); voiceRef.current = false; suppressAbort.current = true; engine.current?.interrupt(); engine.current?.stop(); suppressAbort.current = false; setVoiceActive(false); setPhase('off'); setStatus(value => value ? { ...value, authenticated: false, csrfToken: undefined } : value); setCsrf(); setInitialError('Your session ended. Sign in again to continue.'); };
     window.addEventListener('vc-auth-expired', expired);
     return () => window.removeEventListener('vc-auth-expired', expired);
   }, [cancelVoiceStart]);
@@ -167,8 +174,8 @@ export default function App() {
 
   useEffect(() => {
     const instance = new VoiceEngine({
-      onPhase: setPhase, onDraft: text => { if (voiceRef.current && !cameraOpen.current) updateHeard(text); },
-      onTurn: text => { if (voiceRef.current && !cameraOpen.current) { updateHeard(''); void submitRef.current(text); } }, onSignal: setSignal,
+      onPhase: setPhase, onDraft: text => { if (voiceRef.current && !shareOpen.current) updateHeard(text); },
+      onTurn: text => { if (voiceRef.current && !shareOpen.current) { updateHeard(''); void submitRef.current(text); } }, onSignal: setSignal,
       onError: error => { voiceRef.current = false; setVoiceActive(false); setNotice(typeof error === 'string' ? error : messageFor(error)); },
       onInterrupt: () => { if (!suppressAbort.current) void abortRef.current(); }, onNotice: setNotice,
     }); instance.setSpeakerMuted(speakerMutedRef.current); instance.setCuesSuppressed(messengerRef.current); engine.current = instance;
@@ -299,45 +306,45 @@ export default function App() {
     aborting.current = operation; return operation;
   }, []);
   abortRef.current = async () => { try { await abort(); } catch {} };
-  const submit = useCallback(async (text: string, source: 'voice' | 'text' | 'photo' = 'text', imageTurn?: { photo: Attachment; turnId: string }) => {
+  const submit = useCallback(async (text: string, source: 'voice' | 'text' | 'share' = 'text', imageTurn?: { photo?: Attachment; turnId: string }) => {
     const trimmed = text.trim(), id = conversationRef.current, photo = imageTurn?.photo;
-    if (source === 'photo' && !id) throw new Error('This conversation is no longer available.');
+    if (source === 'share' && !id) throw new Error('This conversation is no longer available.');
     if ((!trimmed && !photo) || !id) return;
     if (sendingRef.current) {
-      if (source === 'photo') throw new Error('The previous message is still being delivered. Please try again.');
+      if (source === 'share') throw new Error('The previous message is still being delivered. Please try again.');
       if (source === 'voice' && trimmed) {
         updateHeard(trimmed); enterTextMode();
         setNotice('Your next thought is kept in the composer while the earlier delivery is pending. Voice is paused; review and send when ready.');
       }
       return;
     }
-    if (!navigator.onLine && source === 'photo') throw new Error('You’re offline. Your photo and caption are kept here.');
+    if (!navigator.onLine && source === 'share') throw new Error('You’re offline. Your content and caption are kept here.');
     if (!navigator.onLine) { updateDraft(trimmed); setNotice('You’re offline. Your words are kept in the composer.'); return; }
     sendingRef.current = true; setSending(true); setNotice('');
     const turnId = imageTurn?.turnId ?? crypto.randomUUID(), submittedRevision = draftRevision.current;
-    const checkingPhoto = source === 'photo' && photoAttempts.current.has(turnId);
+    const checkingShare = source === 'share' && shareAttempts.current.has(turnId);
     // Both kinds of local send own speech. Refresh/reconnection history stays silent.
     engine.current?.prepareSpeech(latest.current.preferences, id);
     const restoreSubmittedDraft = () => {
-      if (conversationRef.current !== id || source === 'photo') return;
+      if (conversationRef.current !== id || source === 'share') return;
       if (source === 'voice') updateDraft(value => value.includes(trimmed) ? value : value ? `${value}\n${trimmed}` : trimmed);
       else if (draftRevision.current === submittedRevision) updateDraft(trimmed);
     };
     try {
       // A voice endpoint already owns a new pending reply. Stale playback from
       // the previous turn must not interrupt it and briefly reopen listening.
-      if (source !== 'voice' && !checkingPhoto) { engine.current?.interrupt('manual', false); engine.current?.awaitReply(); }
-      if (!checkingPhoto && (activeTurnRef.current || aborting.current)) await abort();
+      if (source !== 'voice' && !checkingShare) { engine.current?.interrupt('manual', false); engine.current?.awaitReply(); }
+      if (!checkingShare && (activeTurnRef.current || aborting.current)) await abort();
       audibleTurns.current.add(turnId);
-      if (source === 'photo') photoAttempts.current.add(turnId);
+      if (source === 'share') shareAttempts.current.add(turnId);
       const receipt = await api<TurnReceipt>(`/api/conversations/${encodeURIComponent(id)}/turns`, { method: 'POST', body: JSON.stringify({ id: turnId, text: trimmed, ...(photo ? { attachments: [photo.id] } : {}) }) });
       if (conversationRef.current !== id) return;
       setMessages(items => items.some(item => item.turnId === receipt.turnId && item.role === 'user') ? items : [...items, { id: turnId, role: 'user', text: trimmed, createdAt: Date.now(), turnId: receipt.turnId, delivery: receipt.delivery, attachments: photo ? [photo] : undefined }]);
       if (!completed.current.has(receipt.turnId) && ['pending', 'accepted', 'uncertain'].includes(receipt.delivery)) { setActiveTurn(receipt); activeTurnRef.current = receipt; }
       if (receipt.delivery === 'failed' || receipt.delivery === 'cancelled' || receipt.delivery === 'uncertain') {
-        if (source === 'photo') {
+        if (source === 'share') {
           if (receipt.delivery !== 'uncertain') { audibleTurns.current.delete(turnId); engine.current?.responseDone(); }
-          throw new Error(receipt.delivery === 'uncertain' ? 'Delivery is uncertain. Check delivery again or close this window to review the conversation.' : `This photo message was ${receipt.delivery}. Close this window to review the conversation.`);
+          throw new Error(receipt.delivery === 'uncertain' ? 'Delivery is uncertain. Check delivery again or close this window to review the conversation.' : `This shared message was ${receipt.delivery}. Close this window to review the conversation.`);
         }
         restoreSubmittedDraft();
         setNotice(receipt.delivery === 'uncertain' ? 'Delivery is uncertain. Your draft is kept; check the conversation before sending again.' : `This turn was ${receipt.delivery}. Your draft is kept.`);
@@ -347,7 +354,7 @@ export default function App() {
       if (completed.current.has(receipt.turnId) || receipt.delivery === 'complete') audibleTurns.current.delete(receipt.turnId);
       void api<Conversation[]>('/api/conversations').then(setConversations).catch(() => {});
     } catch (reason) {
-      if (source === 'photo') {
+      if (source === 'share') {
         if (reason instanceof ApiError && reason.status >= 400 && reason.status < 500) { audibleTurns.current.delete(turnId); engine.current?.responseDone(); }
         void refreshHistory(id, true).catch(() => {}); throw reason;
       }
@@ -367,32 +374,64 @@ export default function App() {
     else updateDraft(text);
   }
   function sendComposer() {
+    if (clipboard?.composer) { void clipboardHandle.current?.send(); return; }
     if (liveDraft.current && voiceRef.current) { void engine.current?.finish(); return; }
     const text = liveDraft.current?.text ?? latest.current.draft;
     if (liveDraft.current) { clearLiveDraft(); updateHeard(''); updateDraft(text); }
     void submit(text);
   }
 
-  function openCamera() {
-    cameraOpen.current = true;
+  function pauseForShare() {
+    shareOpen.current = true;
     // Keep incomplete voice input in the shared draft; it is not the photo caption.
     if (liveDraft.current) updateDraft(liveDraft.current.text);
     else if (heardRef.current.trim()) updateDraft(value => value ? value + '\n' + heardRef.current.trim() : heardRef.current.trim());
     clearLiveDraft(); updateHeard('');
-    engine.current?.pauseInput(); setSignal(null); setModal('camera');
+    engine.current?.pauseInput(); setSignal(null);
   }
+  function openCamera() { pauseForShare(); setModal('camera'); }
   function closeCamera() {
-    cameraOpen.current = false; setModal(null);
+    shareOpen.current = false; setModal(null); setClipboard(null);
     if (voiceRef.current) void engine.current?.resumeInput();
   }
   async function sendPhoto(photo: Attachment, caption: string, turnId: string) {
-    await submit(caption, 'photo', { photo, turnId });
+    await submit(caption, 'share', { photo, turnId });
     closeCamera();
   }
 
+  function openClipboard(source: Promise<ClipboardContent>, composer = false) {
+    // Attach a rejection handler now, before React mounts the preview.
+    void source.catch(() => {});
+    pauseForShare(); setClipboardState({ ready: false, locked: false }); setClipboard({ source, composer });
+  }
+  async function sendClipboard(photo: Attachment | undefined, text: string, turnId: string) {
+    await submit(text, 'share', { photo, turnId });
+    if (clipboard?.composer) updateDraft('');
+    closeCamera();
+  }
+  pasteHandler.current = event => {
+    // Never intercept passwords, settings, camera captions, or an existing preview.
+    if (!status?.authenticated || !conversationId || modal || clipboard || creatingConversation || !event.clipboardData) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('dialog')) return;
+    if (showTranscript && target !== textarea.current) return;
+    if (!showTranscript && target?.closest('input,textarea,[contenteditable="true"]')) return;
+    // Leave native text insertion/caret/selection behavior intact in Messenger.
+    if (showTranscript && !event.clipboardData.files.length) return;
+    event.preventDefault();
+    if (preparingVoice) { setNotice('Your microphone is starting. Paste again when listening begins.'); return; }
+    try { openClipboard(Promise.resolve(pastedContent(event.clipboardData)), showTranscript); }
+    catch (reason) { setNotice(messageFor(reason)); }
+  };
+  useEffect(() => {
+    const paste = (event: ClipboardEvent) => pasteHandler.current(event);
+    window.addEventListener('paste', paste);
+    return () => window.removeEventListener('paste', paste);
+  }, []);
+
   function savePreferences(value: SpeechPreferences) { setPreferences(value); try { localStorage.setItem(preferenceKey, JSON.stringify(value)); } catch {} }
   async function startVoice(nextPreferences = preferences) {
-    if (!conversationId || !engine.current || voiceStart.current) return;
+    if (!conversationId || !engine.current || voiceStart.current || shareOpen.current) return;
     const request = Symbol('wake'); voiceStart.current = request; setPreparingVoice(true);
     try {
       if (nextPreferences.recognition === 'vosk') {
@@ -429,7 +468,7 @@ export default function App() {
   }
   function interrupt() { if (activeTurnRef.current) cancelled.current.add(activeTurnRef.current.turnId); engine.current?.interrupt(); void abortRef.current(); }
   async function newConversation() {
-    if (creatingConversation) return;
+    if (creatingConversation || shareOpen.current) return;
     setCreatingConversation(true);
     try { endVoice(); const created = await api<Conversation>('/api/conversations', { method: 'POST', body: '{}' }); setConversations(items => [created, ...items]); selectConversation(created.id); setModal(null); }
     catch (reason) { setNotice(messageFor(reason)); }
@@ -450,15 +489,16 @@ export default function App() {
   const automaticTurns = preferences.recognition !== 'browser' && preferences.handsFree;
   const orbAsleep = !voiceActive && !busy && !preparingVoice && phase !== 'speaking';
   const wakeDisabled = preparingVoice || creatingConversation || !conversationId || !online || !connected || !harnessConnected;
-  return <div className={`app-shell ${showTranscript ? 'messenger-open' : 'orb-open'}`}><header className="site-header"><Brand /><div className="header-center"><LockKeyhole size={11} />PRIVATE CONVERSATION</div><div className="header-actions"><span className={`connection-pill ${fullyConnected ? 'is-connected' : ''}`} role="status" aria-live="polite" title={connectionDetail}><span className="status-dot" />{connectionLabel}</span><button className="icon-button" onClick={() => { enterTextMode(); setModal('settings'); }} aria-label="Open settings" disabled={!settings}><Settings2 size={20} /></button></div></header><main className={`workspace ${showTranscript ? 'messenger-workspace' : 'orb-workspace'}`}><section className="voice-space" aria-label="Voice conversation"><div className="conversation-heading"><button className="conversation-title" onClick={() => setModal('conversations')}><span>NorthPointe</span><ChevronDown size={16} /></button></div><div className="voice-center"><Orb phase={displayPhase} signal={signal} asleep={orbAsleep} waking={preparingVoice || phase === 'starting'} onWake={!voiceActive ? () => void startVoice() : undefined} wakeDisabled={wakeDisabled} /><div className="voice-state" role="status" aria-live="polite">{labels[displayPhase] && <><div className={`state-label state-${displayPhase}`}><span className="state-light" />{labels[displayPhase]}</div><p>{activity || hints[displayPhase]}</p></>}</div>{!orbAsleep && <div className="acoustic-caption"><span className="acoustic-line" /><span>{signal && voiceActive ? 'RESPONDING TO YOUR SOUND' : 'A LITTLE ROOM TO BREATHE'}</span><span className="acoustic-line" /></div>}</div><div className="voice-bottom">{heard && !showTranscript && <div className="heard-draft"><span>HEARING</span><p>{heard}</p><small>Not sent yet</small><button className="text-button edit-heard" onClick={() => { enterTextMode(); changeView(true); requestAnimationFrame(() => textarea.current?.focus()); }}>Edit as text</button></div>}<div className="voice-controls">
+  return <div className={`app-shell ${showTranscript ? 'messenger-open' : 'orb-open'}`}><header className="site-header"><Brand /><div className="header-center"><LockKeyhole size={11} />PRIVATE CONVERSATION</div><div className="header-actions"><span className={`connection-pill ${fullyConnected ? 'is-connected' : ''}`} role="status" aria-live="polite" title={connectionDetail}><span className="status-dot" />{connectionLabel}</span><button className="icon-button" onClick={() => { enterTextMode(); setModal('settings'); }} aria-label="Open settings" disabled={!settings || Boolean(clipboard)}><Settings2 size={20} /></button></div></header><main className={`workspace ${showTranscript ? 'messenger-workspace' : 'orb-workspace'}`}><section className="voice-space" aria-label="Voice conversation"><div className="conversation-heading"><button className="conversation-title" disabled={Boolean(clipboard)} onClick={() => setModal('conversations')}><span>NorthPointe</span><ChevronDown size={16} /></button></div><div className="voice-center"><Orb phase={displayPhase} signal={signal} asleep={orbAsleep} waking={preparingVoice || phase === 'starting'} onWake={!voiceActive ? () => void startVoice() : undefined} wakeDisabled={wakeDisabled} /><div className="voice-state" role="status" aria-live="polite">{labels[displayPhase] && <><div className={`state-label state-${displayPhase}`}><span className="state-light" />{labels[displayPhase]}</div><p>{activity || hints[displayPhase]}</p></>}</div>{!orbAsleep && <div className="acoustic-caption"><span className="acoustic-line" /><span>{signal && voiceActive ? 'RESPONDING TO YOUR SOUND' : 'A LITTLE ROOM TO BREATHE'}</span><span className="acoustic-line" /></div>}</div><div className="voice-bottom">{heard && !showTranscript && <div className="heard-draft"><span>HEARING</span><p>{heard}</p><small>Not sent yet</small><button className="text-button edit-heard" onClick={() => { enterTextMode(); changeView(true); requestAnimationFrame(() => textarea.current?.focus()); }}>Edit as text</button></div>}<div className="voice-controls">
           <button className={`control-button speaker-button ${speakerMuted ? 'is-active' : ''}`} onClick={toggleSpeaker} aria-label={speakerMuted ? 'Unmute agent' : 'Mute agent'} aria-pressed={speakerMuted} title={speakerMuted ? 'Turn agent sound on for the next reply' : 'Silence agent replies; keep listening'}>{speakerMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}<span>{speakerMuted ? 'Agent muted' : 'Mute agent'}</span></button>
-          {voiceActive && !showTranscript && <button className="control-button camera-button" onClick={openCamera} disabled={!conversationId || !settings?.harness.images || !online || preparingVoice} aria-label="Attach a camera photo" title={settings?.harness.images ? 'Share a photo with your next spoken turn' : 'Image input is unavailable for this connection'}><CameraIcon size={20} /><span>Camera</span></button>}
+          {voiceActive && !showTranscript && <button className="control-button camera-button" onClick={openCamera} disabled={!conversationId || !settings?.harness.images || !online || preparingVoice || Boolean(clipboard)} aria-label="Attach a camera photo" title={settings?.harness.images ? 'Take a photo and add a caption' : 'Image input is unavailable for this connection'}><CameraIcon size={20} /><span>Camera</span></button>}
+          {voiceActive && !showTranscript && <button className="control-button clipboard-button" onClick={() => openClipboard(readClipboard())} disabled={!conversationId || preparingVoice || Boolean(clipboard)} aria-label="Paste from clipboard" title="Share copied text or an image"><ClipboardIcon size={20} /><span>Clipboard</span></button>}
           {preparingVoice && !voiceActive && <button className="control-button end-button" onClick={() => endVoice()}><Square size={17} /><span>Cancel wake</span></button>}
           {voiceActive && <>
             {!automaticTurns && <button className="button finish-button" onClick={() => void engine.current?.finish()} disabled={['starting', 'finalizing', 'thinking', 'speaking'].includes(phase)}><Check size={19} />Finish thought</button>}
-            {(phase === 'paused' || phase === 'error') && <button className="control-button" onClick={() => void startVoice()}><Mic size={18} /><span>Record again</span></button>}
+            {!clipboard && (phase === 'paused' || phase === 'error') && <button className="control-button" onClick={() => void startVoice()}><Mic size={18} /><span>Record again</span></button>}
             <button className="control-button end-button" onClick={() => endVoice(true)} aria-label="End voice session"><Square size={17} fill="currentColor" /><span>End voice</span></button>
           </>}
           {(busy || phase === 'speaking') && <button className="control-button interrupt-button" onClick={interrupt} aria-label="Interrupt"><CircleStop size={20} /><span>Interrupt</span></button>}
-        </div>{!voiceActive && preferences.recognition === 'browser' && <button className="text-button continuous-voice-link" onClick={() => { setVoiceSetupPreferences({ ...preferences, recognition: 'vosk', handsFree: true, turnMode: 'automatic' }); setModal('voice-setup'); }}>Set up continuous voice</button>}{!voiceActive && preferences.recognition !== 'browser' && !preferences.handsFree && <button className="text-button continuous-voice-link" onClick={() => { savePreferences({ ...preferences, handsFree: true, turnMode: 'automatic' }); setNotice('Automatic turns selected. Start talking once to begin; pauses will send each thought.'); }}>Use automatic turns</button>}</div><button ref={conversationToggle} className="conversation-toggle" onClick={() => changeView(true)} aria-expanded={showTranscript}><MessageSquare size={17} />Conversation<span>{messages.length}</span></button></section>{showTranscript && <ConversationLog key={conversationId} messages={messages} activity={activity} onClose={closeMessenger} onNew={() => void newConversation()} creating={creatingConversation} automatic={voiceActive && automaticTurns} preparing={preparingVoice} autoDisabled={!voiceActive && !preparingVoice && wakeDisabled} onToggleAuto={toggleAutoMode} />}</main>{notice && <div className="notice" role="status"><span>{!online && <WifiOff size={15} />}{notice}</span><button className="icon-button" onClick={() => setNotice('')} aria-label="Dismiss notice"><X size={16} /></button></div>}{((approval && approvalHidden) || (question && questionHidden)) && <div className="pending-action">{approval && approvalHidden && <button className="button secondary small" onClick={() => setApprovalHidden(false)}>Review pending approval</button>}{question && questionHidden && <button className="button secondary small" onClick={() => setQuestionHidden(false)}>Answer pending question</button>}</div>}{showTranscript && <footer className="composer-area"><form className="composer" onSubmit={event => { event.preventDefault(); sendComposer(); }}><button type="button" className="composer-camera icon-button" onClick={openCamera} disabled={!conversationId || !settings?.harness.images || !online || preparingVoice} aria-label="Attach a camera photo" title={settings?.harness.images ? 'Share a photo' : 'Image input is unavailable for this connection'}><CameraIcon size={20} /></button><textarea ref={textarea} aria-label="Message NorthPointe" rows={1} disabled={creatingConversation || !conversationId} placeholder="Message NorthPointe…" value={composerValue} onChange={event => { editComposer(event.target.value); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); sendComposer(); } }} /><button type="submit" className="send-button" aria-label="Send message" disabled={!conversationId || creatingConversation || sending || !composerValue.trim() || !online || !connected || !harnessConnected}>{sending ? <span className="loading-dot" /> : <ArrowRight size={22} />}</button></form></footer>}{modal === 'settings' && settings && <Settings settings={settings} conversationId={conversationId} preferences={preferences} build={status.build} getAudioDiagnostics={() => engine.current?.diagnostics() || []} onSave={value => { if (voiceActive) endVoice(); savePreferences(value); setNotice('Preferences saved. Your next voice session will use them.'); }} onRefresh={refreshSettings} onClose={() => setModal(null)} onLogout={() => void logout()} onBeforeModelRemove={() => { if (heard.trim()) updateDraft(value => value ? value + "\n" + heard.trim() : heard.trim()); endVoice(); }} />}{modal === 'voice-setup' && <VoiceSetup automatic={(voiceSetupPreferences || preferences).handsFree} onClose={() => setModal(null)} onStart={() => { const next = voiceSetupPreferences || preferences; savePreferences(next); setModal(null); void startVoice(next); }} onFallback={() => { savePreferences({ ...preferences, recognition: 'browser', handsFree: false }); setModal(null); setNotice('Browser tap-to-talk selected. Start talking, then use Finish to send each thought.'); }} />}{modal === 'camera' && <Camera onClose={closeCamera} onSend={sendPhoto} voicePaused={voiceActive} canSend={Boolean(conversationId && online && connected && harnessConnected && !sending)} />}{modal === 'conversations' && <Dialog title="Your conversations" onClose={() => setModal(null)}><button className="button primary full-width" onClick={() => void newConversation()}><Plus size={17} />Begin a new conversation</button><div className="conversation-list">{conversations.map(conversation => <button key={conversation.id} className={conversation.id === conversationId ? 'selected' : ''} onClick={() => { if (conversation.id !== conversationId) { endVoice(); selectConversation(conversation.id); } setModal(null); }}><MessageSquare size={18} /><span><strong>{conversation.title || 'Untitled conversation'}</strong><small>{new Date(conversation.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}</small></span>{conversation.id === conversationId && <Check size={16} />}</button>)}</div></Dialog>}{approval && !approvalHidden && <Dialog title="NorthPointe needs your approval" onClose={() => setApprovalHidden(true)}><p className="approval-copy">{approval.label}</p>{approval.detail ? <pre className="approval-detail">{approval.detail}</pre> : <p className="error-text">The exact action was not supplied. Review it in OpenClaw before granting approval.</p>}{approval.expiresAt && <p className="muted">Expires {new Date(approval.expiresAt).toLocaleTimeString()}</p>}<div className="dialog-actions"><button className="button secondary" onClick={() => void resolveApproval('deny')}>Deny</button><button className="button primary" disabled={!approval.detail || Boolean(approval.expiresAt && approval.expiresAt < Date.now())} onClick={() => void resolveApproval('allow-once')}>Allow once</button></div></Dialog>}{question && !questionHidden && <Dialog title="A question for you" onClose={() => setQuestionHidden(true)}><p className="approval-copy">{question.text}</p>{question.options?.map(option => <button className="question-option" key={option} onClick={() => void answerQuestion(option)}>{option}<ArrowRight size={16} /></button>)}<form onSubmit={event => { event.preventDefault(); void answerQuestion(answer); }}><label>Your answer<textarea value={answer} onChange={event => setAnswer(event.target.value)} required /></label><button className="button primary" type="submit" disabled={!answer.trim()}>Send answer<Send size={16} /></button></form></Dialog>}</div>;
+        </div>{!voiceActive && preferences.recognition === 'browser' && <button className="text-button continuous-voice-link" onClick={() => { setVoiceSetupPreferences({ ...preferences, recognition: 'vosk', handsFree: true, turnMode: 'automatic' }); setModal('voice-setup'); }}>Set up continuous voice</button>}{!voiceActive && preferences.recognition !== 'browser' && !preferences.handsFree && <button className="text-button continuous-voice-link" onClick={() => { savePreferences({ ...preferences, handsFree: true, turnMode: 'automatic' }); setNotice('Automatic turns selected. Start talking once to begin; pauses will send each thought.'); }}>Use automatic turns</button>}</div><button ref={conversationToggle} className="conversation-toggle" onClick={() => changeView(true)} aria-expanded={showTranscript}><MessageSquare size={17} />Conversation<span>{messages.length}</span></button></section>{showTranscript && <ConversationLog key={conversationId} messages={messages} activity={activity} onClose={closeMessenger} onNew={() => void newConversation()} creating={creatingConversation || Boolean(clipboard)} automatic={voiceActive && automaticTurns} preparing={preparingVoice} autoDisabled={Boolean(clipboard) || (!voiceActive && !preparingVoice && wakeDisabled)} onToggleAuto={toggleAutoMode} />}</main>{notice && <div className="notice" role="status"><span>{!online && <WifiOff size={15} />}{notice}</span><button className="icon-button" onClick={() => setNotice('')} aria-label="Dismiss notice"><X size={16} /></button></div>}{((approval && approvalHidden) || (question && questionHidden)) && <div className="pending-action">{approval && approvalHidden && <button className="button secondary small" onClick={() => setApprovalHidden(false)}>Review pending approval</button>}{question && questionHidden && <button className="button secondary small" onClick={() => setQuestionHidden(false)}>Answer pending question</button>}</div>}{(showTranscript || clipboard) && <footer className={showTranscript ? 'composer-area' : undefined}>{clipboard && <ClipboardShare ref={clipboardHandle} source={clipboard.source} inline={clipboard.composer && showTranscript} composerCaption={clipboard.composer ? composerValue : undefined} onCaption={editComposer} canSend={Boolean(conversationId && online && connected && harnessConnected && !sending)} imagesAllowed={Boolean(settings?.harness.images)} voicePaused={voiceActive} onClose={closeCamera} onSend={sendClipboard} onState={setClipboardState} />}{showTranscript && <form className="composer" onSubmit={event => { event.preventDefault(); sendComposer(); }}><button type="button" className="composer-camera icon-button" onClick={openCamera} disabled={!conversationId || !settings?.harness.images || !online || preparingVoice || Boolean(clipboard)} aria-label="Attach a camera photo" title={settings?.harness.images ? 'Share a photo' : 'Image input is unavailable for this connection'}><CameraIcon size={20} /></button><textarea ref={textarea} aria-label="Message NorthPointe" rows={1} disabled={creatingConversation || !conversationId || Boolean(clipboard && clipboardState.locked)} placeholder={clipboard?.composer ? "Caption (optional)…" : "Message NorthPointe…"} value={composerValue} onChange={event => { editComposer(event.target.value); }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); sendComposer(); } }} /><button type="submit" className="send-button" aria-label="Send message" disabled={!conversationId || creatingConversation || sending || (clipboard?.composer ? !clipboardState.ready : !composerValue.trim()) || !online || !connected || !harnessConnected}>{sending ? <span className="loading-dot" /> : <ArrowRight size={22} />}</button></form>}</footer>}{modal === 'settings' && settings && <Settings settings={settings} conversationId={conversationId} preferences={preferences} build={status.build} getAudioDiagnostics={() => engine.current?.diagnostics() || []} onSave={value => { if (voiceActive) endVoice(); savePreferences(value); setNotice('Preferences saved. Your next voice session will use them.'); }} onRefresh={refreshSettings} onClose={() => setModal(null)} onLogout={() => void logout()} onBeforeModelRemove={() => { if (heard.trim()) updateDraft(value => value ? value + "\n" + heard.trim() : heard.trim()); endVoice(); }} />}{modal === 'voice-setup' && <VoiceSetup automatic={(voiceSetupPreferences || preferences).handsFree} onClose={() => setModal(null)} onStart={() => { const next = voiceSetupPreferences || preferences; savePreferences(next); setModal(null); void startVoice(next); }} onFallback={() => { savePreferences({ ...preferences, recognition: 'browser', handsFree: false }); setModal(null); setNotice('Browser tap-to-talk selected. Start talking, then use Finish to send each thought.'); }} />}{modal === 'camera' && <Camera onClose={closeCamera} onSend={sendPhoto} voicePaused={voiceActive} canSend={Boolean(conversationId && online && connected && harnessConnected && !sending)} />}{modal === 'conversations' && <Dialog title="Your conversations" onClose={() => setModal(null)}><button className="button primary full-width" onClick={() => void newConversation()}><Plus size={17} />Begin a new conversation</button><div className="conversation-list">{conversations.map(conversation => <button key={conversation.id} className={conversation.id === conversationId ? 'selected' : ''} onClick={() => { if (conversation.id !== conversationId) { endVoice(); selectConversation(conversation.id); } setModal(null); }}><MessageSquare size={18} /><span><strong>{conversation.title || 'Untitled conversation'}</strong><small>{new Date(conversation.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}</small></span>{conversation.id === conversationId && <Check size={16} />}</button>)}</div></Dialog>}{approval && !approvalHidden && <Dialog title="NorthPointe needs your approval" onClose={() => setApprovalHidden(true)}><p className="approval-copy">{approval.label}</p>{approval.detail ? <pre className="approval-detail">{approval.detail}</pre> : <p className="error-text">The exact action was not supplied. Review it in OpenClaw before granting approval.</p>}{approval.expiresAt && <p className="muted">Expires {new Date(approval.expiresAt).toLocaleTimeString()}</p>}<div className="dialog-actions"><button className="button secondary" onClick={() => void resolveApproval('deny')}>Deny</button><button className="button primary" disabled={!approval.detail || Boolean(approval.expiresAt && approval.expiresAt < Date.now())} onClick={() => void resolveApproval('allow-once')}>Allow once</button></div></Dialog>}{question && !questionHidden && <Dialog title="A question for you" onClose={() => setQuestionHidden(true)}><p className="approval-copy">{question.text}</p>{question.options?.map(option => <button className="question-option" key={option} onClick={() => void answerQuestion(option)}>{option}<ArrowRight size={16} /></button>)}<form onSubmit={event => { event.preventDefault(); void answerQuestion(answer); }}><label>Your answer<textarea value={answer} onChange={event => setAnswer(event.target.value)} required /></label><button className="button primary" type="submit" disabled={!answer.trim()}>Send answer<Send size={16} /></button></form></Dialog>}</div>;
 }
