@@ -29,6 +29,9 @@ existing recovery gap; it does not establish the physical tablet's exact trigger
   resubmits the user's turn or replays saved replies. A healthy socket does not
   require restarting voice. Actual connection loss retains the existing explicit
   microphone-resume behavior.
+- Ordinary native history updates preserve ownership of the current spoken
+  reply: the final text/speech event may still be arriving. Only foreground or
+  connection recovery retires completed speech from the recovered history.
 - Probes accept only a bounded nonce, require the existing owner session and
   origin checks, and are rate limited. No message text or microphone audio is
   added to diagnostics.

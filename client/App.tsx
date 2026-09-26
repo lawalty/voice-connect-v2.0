@@ -120,7 +120,7 @@ export default function App() {
     clearLiveDraft(); updateDraft(restored); setConversationId(id); conversationRef.current = id;
   }, [updateDraft, clearLiveDraft]);
   const refreshSettings = useCallback(async () => { setSettings(await api<AppSettings>('/api/settings')); }, []);
-  const refreshHistory = useCallback(async (id: string, baseline = false) => {
+  const refreshHistory = useCallback(async (id: string, baseline = false, recoverFinished = false) => {
     const request = ++historyRead.current, revision = conversationRevision.current;
     const view = await api<ConversationView>(`/api/conversations/${encodeURIComponent(id)}`);
     // A slow history read must never overwrite a newer streamed update or send.
@@ -138,7 +138,9 @@ export default function App() {
     setActiveTurn(view.activeTurn || null); activeTurnRef.current = view.activeTurn || null;
     const terminal = new Set(view.messages.filter(message => message.turnId && ['complete', 'cancelled', 'failed'].includes(message.delivery || '')).map(message => message.turnId!));
     let missedCompletion = false;
-    for (const turnId of audibleTurns.current) if (terminal.has(turnId)) {
+    // Routine native reconciliation can precede the final speech event. Retire
+    // speech ownership only during confirmed resume/connection recovery.
+    for (const turnId of audibleTurns.current) if (recoverFinished && terminal.has(turnId)) {
       audibleTurns.current.delete(turnId); completed.current.add(turnId); missedCompletion = true;
     }
     if (missedCompletion) {
@@ -213,20 +215,21 @@ export default function App() {
     if (!conversationId || !status?.authenticated) return;
     let alive = true, socket: WebSocket | null = null, timer: ReturnType<typeof setTimeout>, retries = 0, connectionEpoch = 0;
     let probe: { nonce: string; sync: boolean } | undefined, probeTimer: ReturnType<typeof setTimeout>, helloTimer: ReturnType<typeof setTimeout>;
-    let eventRevision = 0, hasHello = false, syncing = false, syncAgain = false, syncTimer: ReturnType<typeof setTimeout>;
-    async function syncHistory() {
+    let eventRevision = 0, hasHello = false, syncing = false, syncAgain = false, recoverOnSync = false, syncTimer: ReturnType<typeof setTimeout>;
+    async function syncHistory(recoverFinished = false) {
       if (!alive || !navigator.onLine || document.visibilityState === 'hidden') return;
+      recoverOnSync ||= recoverFinished;
       if (syncing) { syncAgain = true; return; }
-      const epoch = connectionEpoch; syncing = true;
+      const epoch = connectionEpoch, recover = recoverOnSync; recoverOnSync = false; syncing = true;
       try {
         // Coalesce resume/focus/probe events and retry a snapshot superseded by
         // live traffic, without polling continuously while the agent streams.
         for (let attempt = 0; attempt < 3 && alive && epoch === connectionEpoch; attempt++) {
           syncAgain = false;
-          if (await refreshHistory(conversationId, true)) break;
+          if (await refreshHistory(conversationId, true, recover)) break;
         }
       } catch { if (alive && epoch === connectionEpoch) reconnect('Unable to refresh your conversation. Retrying…'); }
-      finally { syncing = false; if (syncAgain && alive && epoch === connectionEpoch) { clearTimeout(syncTimer); syncTimer = setTimeout(() => void syncHistory(), 500); } }
+      finally { syncing = false; if ((syncAgain || recoverOnSync) && alive && epoch === connectionEpoch) { clearTimeout(syncTimer); syncTimer = setTimeout(() => void syncHistory(), 500); } }
     }
     function probeStream(sync = false) {
       if (!alive || !navigator.onLine || document.visibilityState === 'hidden') return;
@@ -249,7 +252,7 @@ export default function App() {
       if (hadVoice) setNotice('Voice paused during the connection loss. Your conversation is saved; tap the orb when connected.');
     }
     function disconnect() {
-      ++connectionEpoch; clearTimeout(timer); clearTimeout(probeTimer); clearTimeout(helloTimer); clearTimeout(syncTimer); probe = undefined; eventRevision = 0; hasHello = false;
+      ++connectionEpoch; clearTimeout(timer); clearTimeout(probeTimer); clearTimeout(helloTimer); clearTimeout(syncTimer); probe = undefined; eventRevision = 0; hasHello = false; recoverOnSync = false; syncAgain = false;
       const previous = socket; socket = null;
       if (previous) { previous.onclose = null; previous.onmessage = null; previous.onopen = null; previous.onerror = null; previous.close(); }
       setConnected(false);
@@ -265,7 +268,7 @@ export default function App() {
       clearTimeout(timer);
       const epoch = ++connectionEpoch;
       try {
-        await refreshHistory(conversationId, true); if (!alive || epoch !== connectionEpoch || !navigator.onLine) return;
+        await refreshHistory(conversationId, true, true); if (!alive || epoch !== connectionEpoch || !navigator.onLine) return;
         const currentSocket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/events?conversationId=${encodeURIComponent(conversationId)}`);
         socket = currentSocket;
         helloTimer = setTimeout(() => { if (alive && epoch === connectionEpoch) reconnect('Reply connection did not respond. Retrying…'); }, 8000);
@@ -286,7 +289,7 @@ export default function App() {
             const sync = probe.sync || (typeof event.revision === 'number' && event.revision > eventRevision);
             clearTimeout(probeTimer); probe = undefined;
             if (typeof event.revision === 'number') eventRevision = Math.max(eventRevision, event.revision);
-            if (sync) void syncHistory();
+            if (sync) void syncHistory(true);
             return;
           }
           if (typeof event.revision === 'number') {
