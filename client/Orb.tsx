@@ -33,6 +33,7 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
     let wasAsleep = latest.current.asleep;
     let sleepBlend = wasAsleep ? 1 : 0;
     let wakeAt = -Infinity;
+    let sleepAt = -Infinity;
     const acoustics = new OrbAcousticMotion();
     const color = [97, 180, 179];
     const schedule = () => {
@@ -56,7 +57,9 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
       const current = latest.current;
       // Only a transition wakes the orb; a decorative or already-active mount stays settled.
       if (wasAsleep && !current.asleep && !motion.matches) wakeAt = time;
+      if (!wasAsleep && current.asleep && !motion.matches) sleepAt = time;
       if (current.asleep) wakeAt = -Infinity;
+      else sleepAt = -Infinity;
       wasAsleep = current.asleep;
       sleepBlend = motion.matches ? Number(current.asleep) : sleepBlend + (Number(current.asleep) - sleepBlend) * (1 - Math.exp(-elapsed / 360));
       const wakeProgress = (time - wakeAt) / 1350;
@@ -65,9 +68,16 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
       const wakeBloom = !wakeActive ? 0 : wakeProgress < .22
         ? Math.sin(wakeProgress / .22 * Math.PI / 2)
         : (1 + Math.cos((wakeProgress - .22) / .78 * Math.PI)) / 2;
-      if (current.signal !== lastSignal) { lastSignal = current.signal; acoustics.observe(lastSignal, time); }
+      const sleepProgress = (time - sleepAt) / 1500;
+      const fallingAsleep = !motion.matches && sleepProgress >= 0 && sleepProgress < 1;
+      // One soft exhale, then the atmosphere folds inward. Capture has already
+      // stopped; this is visual settling only and can be interrupted by waking.
+      const sleepExhale = fallingAsleep ? Math.sin(Math.min(1, sleepProgress / .65) * Math.PI) : 0;
+      const input = current.asleep ? null : current.signal;
+      if (input !== lastSignal) { lastSignal = input; acoustics.observe(input, time); }
       const shape = orbMotionShape(acoustics.sample(time), motion.matches);
-      flow += elapsed * shape.flowRate * (1 - sleepBlend * .58 + wakeBloom * 3.4);
+      const voice = shape.radiance * (1 - sleepBlend);
+      flow += elapsed * shape.flowRate * (1 - sleepBlend * .78 + wakeBloom * 3.4);
       const t = motion.matches ? 0 : flow;
       const paintState = `${current.phase}:${current.asleep}:${current.waking}`;
       if (motion.matches && reducedPaintState === paintState) return;
@@ -75,14 +85,42 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
       const target = palette[current.phase];
       for (let i = 0; i < 3; i++) color[i] = motion.matches ? target[i] : color[i] + (target[i] - color[i]) * .035;
       const rgb = color.map(value => Math.round(value + (255 - value) * wakeBloom * .3)).join(',');
-      const light = 1 - sleepBlend * .3 + wakeBloom * 1.7;
+      const light = 1 - sleepBlend * .42 + wakeBloom * 1.7 + voice * 1.5 + sleepExhale * .35;
       const alpha = (opacity: number) => `rgba(${rgb},${Math.min(1, opacity * light)})`;
-      const r = radius * (1 - (motion.matches ? 0 : sleepBlend * .025) + Math.sin(t * 1.2) * (.019 - sleepBlend * .007) + shape.expansion * (1 - sleepBlend) + wakeBloom * .18);
+      const r = radius * (1 - sleepBlend * .12 + Math.sin(t * 1.2) * (.019 - sleepBlend * .007) + shape.expansion * (1 - sleepBlend) + wakeBloom * .18 + sleepExhale * .055);
       ctx.clearRect(0, 0, size, size);
       ctx.save(); ctx.translate(size / 2, size / 2);
-      const halo = ctx.createRadialGradient(0, 0, r * .65, 0, 0, Math.min(size * .49, r * 1.62));
-      halo.addColorStop(0, alpha(0)); halo.addColorStop(.35, alpha(.065 + wakeBloom * .10)); halo.addColorStop(1, alpha(0));
+      const outer = Math.min(size * .475, r * (1.55 + voice * .18));
+      const halo = ctx.createRadialGradient(0, 0, r * .65, 0, 0, outer);
+      halo.addColorStop(0, alpha(0)); halo.addColorStop(.35, alpha(.065 + wakeBloom * .10 + voice * .09)); halo.addColorStop(1, alpha(0));
       ctx.fillStyle = halo; ctx.fillRect(-size / 2, -size / 2, size, size);
+      // These veils follow the measured voice envelope rather than an invented
+      // talking loop. Geometry scales down with the Messenger orb, inside its bounds.
+      if (voice > .005) {
+        const gap = outer - r;
+        for (let veil = 0; veil < 3; veil++) {
+          ctx.beginPath();
+          for (let point = 0; point <= 96; point++) {
+            const angle = point / 96 * Math.PI * 2;
+            const distortion = (Math.sin(angle * 3 + t * 2.4 + veil * 1.3) + Math.cos(angle * 5 - t * 1.7 + veil) * .45) * gap * .12 * voice;
+            const distance = r + gap * (.23 + veil * .27) + distortion;
+            const x = Math.cos(angle) * distance, y = Math.sin(angle) * distance;
+            if (point === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.strokeStyle = alpha(voice * (.15 - veil * .035));
+          ctx.lineWidth = Math.max(.65, size / 400) * (1.1 - veil * .2); ctx.stroke();
+        }
+      }
+      if (fallingAsleep) {
+        for (const delay of [0, 180]) {
+          const progress = (time - sleepAt - delay) / 1200;
+          if (progress <= 0 || progress >= 1) continue;
+          const inward = progress * progress * (3 - 2 * progress);
+          ctx.strokeStyle = alpha(Math.sin(progress * Math.PI) * .55);
+          ctx.lineWidth = Math.max(.7, size / 400) * (1.5 - progress * .6);
+          ctx.beginPath(); ctx.arc(0, 0, radius * (1.48 - inward * .62), 0, Math.PI * 2); ctx.stroke();
+        }
+      }
       if (wakeActive) {
         // Two outward ripples stay inside the canvas and fade instead of flashing.
         for (const delay of [0, 180]) {
@@ -109,7 +147,7 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
         for (let step = 0; step <= 120; step++) {
           const angle = step / 120 * Math.PI * 2;
           const front = Math.sin(angle);
-          const wave = Math.sin(angle * 3 + t * 2.1 + latitude * 5 + Math.sin(t) * shape.pitchCurl * .12) * (3.4 + shape.pitchCurl + wakeBloom * 2.8) + Math.cos(angle * 5 - t + latitude * 3) * (2.2 + shape.rhythm);
+          const wave = (Math.sin(angle * 3 + t * 2.1 + latitude * 5 + Math.sin(t) * shape.pitchCurl * .12) * (3.4 + shape.pitchCurl + wakeBloom * 2.8 + voice * 5.5) + Math.cos(angle * 5 - t + latitude * 3) * (2.2 + shape.rhythm + voice * 2.5)) * size / 400;
           const x = Math.cos(angle) * (width + wave * Math.cos(latitude));
           const py = y + front * width * .28 + wave * .75;
           if (step === 0) ctx.moveTo(x, py); else ctx.lineTo(x, py);
@@ -133,7 +171,7 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
       if (!motion.matches) schedule();
     };
     const invalidate = () => { reducedPaintState = undefined; schedule(); };
-    const motionChanged = () => { wakeAt = -Infinity; invalidate(); };
+    const motionChanged = () => { wakeAt = -Infinity; sleepAt = -Infinity; invalidate(); };
     const visibilityChanged = () => {
       if (document.hidden) { cancelAnimationFrame(frame); frame = 0; }
       else { lastFrame = 0; invalidate(); }

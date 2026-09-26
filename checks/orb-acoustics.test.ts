@@ -45,7 +45,28 @@ describe('uncertainty-aware orb motion', () => {
     const quiet = orbMotionShape({ energy: 0, pitchVariation: 0, pace: 0, confidence: 0 }, true);
     const expressive = orbMotionShape({ energy: 1, pitchVariation: 1, pace: 1, confidence: 1 }, true);
     expect(expressive).toEqual(quiet);
-    expect(expressive).toEqual({ expansion: 0, pitchCurl: 0, rhythm: 0, flowRate: 0 });
+    expect(expressive).toEqual({ expansion: 0, radiance: 0, pitchCurl: 0, rhythm: 0, flowRate: 0 });
     expect(orbMotionShape({ energy: 0, pitchVariation: 0, pace: 0, confidence: 0 }, false).flowRate).toBeGreaterThan(0);
+  });
+  it('catches a spoken onset within two visual frames and releases without a flash', () => {
+    const model = new OrbAcousticMotion();
+    model.observe(null, 0); model.sample(0);
+    model.observe(signal(160, .7), 1);
+    const onset = model.sample(66);
+    expect(onset.energy).toBeGreaterThan(.5);
+    const expression = orbMotionShape(onset, false);
+    expect(expression.expansion).toBeGreaterThan(.075);
+    expect(expression.radiance).toBeGreaterThan(.6);
+    model.observe(null, 67);
+    expect(model.sample(99).energy).toBeGreaterThan(.3);
+    expect(model.sample(800).energy).toBeLessThan(.02);
+  });
+  it('keeps quiet speech visible and caps loud input geometry', () => {
+    const quiet = orbMotionShape({ energy: .15, pitchVariation: 0, pace: 0, confidence: 1 }, false);
+    const loud = orbMotionShape({ energy: 8, pitchVariation: 8, pace: 8, confidence: 1 }, false);
+    expect(quiet.expansion).toBeGreaterThan(.03);
+    expect(quiet.radiance).toBeGreaterThan(.2);
+    expect(loud.expansion).toBeLessThan(.15);
+    expect(loud.radiance).toBe(1);
   });
 });

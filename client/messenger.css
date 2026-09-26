@@ -3,12 +3,13 @@
 .workspace.orb-workspace { display: flex; justify-content: center; min-height: 0; }
 .orb-workspace .voice-space { width: 100%; padding-top: 28px; }
 .orb-workspace .orb-stage { width: min(620px, 100cqw, max(160px, calc(100cqh - 88px))); min-width: 160px; min-height: 0; max-width: none; max-height: none; }
-.orb-workspace:has(.orb-sleeping) .orb-stage { width: min(620px, 100cqw, max(160px, calc(100cqh - 24px))); }
 .orb-workspace .voice-center { margin: 0; container-type: size; }
-.orb-workspace .voice-state { flex-shrink: 0; margin-top: 0; pointer-events: none; }
+.orb-workspace .voice-state { flex-shrink: 0; min-height: 64px; margin-top: 0; pointer-events: none; }
 .orb-workspace .acoustic-caption { display: none; }
 .orb-workspace .voice-bottom { margin-top: 12px; min-height: 0; }
-.orb-workspace .voice-state:empty { display: none; }
+/* Keep the canvas in place when End removes the label, so sleep can settle
+   inward instead of jumping into a newly enlarged canvas. */
+.orb-workspace .voice-state:empty { display: block; min-height: 64px; }
 .conversation-toggle { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 12px; min-height: 44px; margin-top: 10px; color: #9caeb9; font-size: 12px; background: transparent; }
 .conversation-toggle span { font-size: 10px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 12px; color: #88aaa2; }
 .voice-controls .speaker-button { min-width: 64px; min-height: 44px; }
@@ -56,7 +57,7 @@
 @media (max-width: 760px) {
   .app-shell { min-height: 440px; }
   .orb-workspace .voice-space { padding-top: 24px; padding-bottom: 0; }
-  .orb-workspace .voice-state { min-height: 0; margin-top: 0; }
+  .orb-workspace .voice-state, .orb-workspace .voice-state:empty { min-height: 48px; margin-top: 0; }
   .orb-workspace .voice-state p { margin-bottom: 0; }
   .orb-workspace .acoustic-caption { display: none; }
   .conversation-toggle { margin-top: 4px; padding: 10px; }

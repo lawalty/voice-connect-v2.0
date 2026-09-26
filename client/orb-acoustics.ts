@@ -63,9 +63,12 @@ export class OrbAcousticMotion {
     const elapsed = this.steppedAt === undefined ? 33 : Math.max(0, Math.min(2000, now - this.steppedAt));
     this.steppedAt = now;
     const freshness = unit(1 - Math.max(0, now - this.observedAt - 180) / 470);
-    const follow = 1 - Math.exp(-elapsed / 240);
     for (const key of ['energy', 'pitchVariation', 'pace', 'confidence'] as const) {
-      this.current[key] += (this.target[key] * freshness - this.current[key]) * follow;
+      const target = this.target[key] * freshness;
+      // Catch the start of each word quickly; release gently between syllables.
+      // Pitch and rhythm still need the longer window to avoid nervous motion.
+      const responseMs = key === 'energy' ? target > this.current[key] ? 45 : 180 : 240;
+      this.current[key] += (target - this.current[key]) * (1 - Math.exp(-elapsed / responseMs));
       if (Math.abs(this.current[key]) < .0001) this.current[key] = 0;
     }
     return { ...this.current };
@@ -73,6 +76,11 @@ export class OrbAcousticMotion {
 }
 
 export function orbMotionShape(acoustics: OrbAcoustics, reducedMotion: boolean) {
-  if (reducedMotion) return { expansion: 0, pitchCurl: 0, rhythm: 0, flowRate: 0 };
-  return { expansion: unit(acoustics.energy) * .065, pitchCurl: unit(acoustics.pitchVariation) * 2.8, rhythm: unit(acoustics.pace) * 1.1, flowRate: .00035 * (1 + unit(acoustics.pace) * .42) };
+  if (reducedMotion) return { expansion: 0, radiance: 0, pitchCurl: 0, rhythm: 0, flowRate: 0 };
+  const voice = unit(acoustics.energy) ** .7;
+  return {
+    expansion: voice * .13, radiance: voice,
+    pitchCurl: unit(acoustics.pitchVariation) * 2.8, rhythm: unit(acoustics.pace) * 1.1,
+    flowRate: .00035 * (1 + voice * .8 + unit(acoustics.pace) * .42),
+  };
 }
