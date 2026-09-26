@@ -32,13 +32,24 @@ for (const output of ['browser', 'fish'] as const) {
       socket.send(JSON.stringify({ type: 'ready', sampleRate: 24000 }));
     });
     let complete = false;
+    const subscribed = new Set<string>();
     page.on('websocket', socket => {
-      if (new URL(socket.url()).pathname === '/api/events') socket.on('framereceived', frame => { if (JSON.parse(String(frame.payload)).type === 'complete') complete = true; });
+      const url = new URL(socket.url());
+      if (url.pathname === '/api/events') socket.on('framereceived', frame => {
+        const event = JSON.parse(String(frame.payload));
+        if (event.type === 'hello') subscribed.add(url.searchParams.get('conversationId')!);
+        if (event.type === 'complete') complete = true;
+      });
     });
     await enterFixtureSession(page);
     await expect(page.getByRole('button', { name: 'Wake NorthPointe' })).toBeEnabled();
     await page.getByRole('button', { name: 'NorthPointe', exact: true }).click();
+    const created = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/conversations');
     await page.getByRole('button', { name: 'Begin a new conversation', exact: true }).click();
+    const conversationId = (await (await created).json()).id as string;
+    // A fresh conversation replaces the old socket. Wait for its handshake,
+    // rather than clicking during the old/new connection's enabled-state change.
+    await expect.poll(() => subscribed.has(conversationId)).toBe(true);
     await page.getByRole('button', { name: 'Wake NorthPointe' }).click();
     await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
     await page.evaluate(() => (window as unknown as { vcMarkdownProbe: { emit(text: string): void } }).vcMarkdownProbe.emit('Markdown speech fixture slow'));
@@ -49,10 +60,7 @@ for (const output of ['browser', 'fish'] as const) {
     await expect.poll(spoken).toEqual(['Your first sentence.', 'A second thought.']);
     await expect.poll(() => complete).toBe(true);
     // Read the actual persisted fixture conversation, independent of speech cleanup.
-    const history = await page.evaluate(async () => {
-      const conversations = await (await fetch('/api/conversations')).json();
-      return await (await fetch(`/api/conversations/${conversations[0].id}`)).json();
-    });
+    const history = await page.evaluate(async id => (await fetch(`/api/conversations/${id}`)).json(), conversationId);
     expect(history.messages.some((message: { role: string; text: string }) => message.role === 'assistant' && message.text === '**Your first sentence.** A *second* thought.')).toBe(true);
   });
 }
