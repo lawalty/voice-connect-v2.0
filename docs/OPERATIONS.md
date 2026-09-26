@@ -106,6 +106,11 @@ or unrelated Docker resources.
 | `VC_BUILD` | Immutable source commit identity |
 | `VC_GATEWAY_MODEL` | Default model name when Gateway omits it from handshake |
 | `VC_IMAGE_MODEL_ALLOWLIST` | Models independently verified with real image input |
+| `VC_LIBRARY_URL` | Existing shared RAG API origin |
+| `VC_LIBRARY_TOKEN_FILE` | Server-only RAG agent credential file |
+
+See [shared RAG library](SHARED-RAG-LIBRARY.md) for the existing Supabase schema,
+credential boundary and additive OpenClaw tools.
 
 The current allowlist is limited to the live `openai/gpt-6-astra` model. Requalify
 camera support when changing models; a model name alone is not proof of vision.

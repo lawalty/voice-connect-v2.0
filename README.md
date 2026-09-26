@@ -52,6 +52,15 @@ Physical echo rejection, interruption during speaker playback, and reliable turn
 boundaries in a noisy car remain unqualified. Browser fixtures cannot establish
 those real-device results.
 
+## Shared document library
+
+The authenticated Library panel connects to the existing Hermes RAG API for
+collection browsing, cited passage search and expiring downloads. It uses the same
+Supabase documents, groups, embeddings and private originals. The optional
+OpenClaw adapter exposes those reads to the agent alongside conversational memory.
+See [connection and activation](docs/SHARED-RAG-LIBRARY.md). Ingestion and document
+management remain in the existing library portal.
+
 ## Development
 
 Use Node 24 and npm. No historical repository is needed.

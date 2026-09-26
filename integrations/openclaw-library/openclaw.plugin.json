@@ -1,0 +1,10 @@
+{
+  "id": "vc-shared-library", "name": "Voice Connect Shared Library", "version": "0.1.0",
+  "description": "Read the existing shared document library alongside agent memory.",
+  "contracts": { "tools": ["vc_library_groups", "vc_library_documents", "vc_library_search", "vc_library_download"] },
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object", "additionalProperties": false,
+    "properties": { "baseUrl": {"type":"string"}, "tokenFile": {"type":"string"} }
+  }
+}

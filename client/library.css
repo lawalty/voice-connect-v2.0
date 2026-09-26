@@ -1,0 +1,23 @@
+.library-content { display: grid; gap: 20px; }
+.library-content > p { margin: 0; }
+.library-search { display: grid; gap: 14px; }
+.library-search label { display: grid; gap: 8px; }
+.library-search select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #465053; border-radius: 10px; background: #172326; color: inherit; font: inherit; }
+.library-search .library-checkbox { display: flex; flex-direction: row; align-items: center; gap: 10px; font-size: 12px; }
+.library-checkbox input { width: 16px; min-height: 16px; }
+.library-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.library-summary { font-size: 12px; color: #b5c4c5; margin: 0 0 14px; }
+.library-documents, .library-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.library-documents li { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-top: 1px solid #344144; }
+.library-documents li > svg { flex: none; color: #94b1ae; }
+.library-documents li > div { flex: 1; min-width: 0; }
+.library-documents strong { display: block; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.library-content small { display: block; margin-top: 6px; font-size: 11px; color: #a8b8ba; }
+.library-download { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 12px; }
+.library-results li { border: 1px solid #344144; border-radius: 12px; padding: 16px; }
+.library-results h3 { font-size: 14px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
+.library-passage { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; color: #d0ddde; }
+.library-ready { border: 1px solid #567b72; border-radius: 12px; padding: 14px; overflow-wrap: anywhere; }
+.library-ready a { color: #b4dacb; }
+.library-launch { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; font-size: 12px; }
+@media (max-width: 480px) { .library-documents li { flex-wrap: wrap; } .library-documents li > div { flex-basis: calc(100% - 36px); } .library-documents .library-download { margin-left: 30px; } .library-launch span { display: none; } }
