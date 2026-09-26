@@ -5,7 +5,7 @@ import { CueTransitions, ListeningCues } from './cues';
 import { LocalRecognizer } from './vosk';
 import { BrowserRecognizer } from './browser-recognizer';
 import { FluxRecognizer } from './flux-recognizer';
-import { AudioDiagnostics, type AudioDiagnosticEntry } from './diagnostics';
+import { AudioDiagnostics, type AudioDiagnosticEntry, type AudioDiagnosticReason, type VoiceStopReason } from './diagnostics';
 import captureWorkletURL from './capture.worklet.ts?worker&url';
 export interface VoiceCallbacks {
   onPhase(phase: VoicePhase): void; onDraft(text: string): void; onTurn(text: string): void;
@@ -137,7 +137,7 @@ export class VoiceEngine {
     if (!this.context || this.context.state === 'closed') {
       const context = this.context = new AudioContext({ latencyHint: 'interactive' });
       context.onstatechange = () => {
-        if (this.context === context && this.active && this.ready && context.state !== 'running') { this.trace.record('capture-gap', { reason: 'suspended' }); this.captureFailure('Browser audio was suspended. Review the draft before restarting.'); }
+        if (this.context === context && this.active && this.ready && context.state !== 'running') { this.trace.record('capture-gap', { reason: 'suspended' }); this.captureFailure('Browser audio was suspended. Review the draft before restarting.', 'suspended'); }
       };
     }
     void this.context.resume().catch(() => this.callbacks.onNotice('Tap the microphone or speaker to allow audio playback.'));
@@ -151,8 +151,8 @@ export class VoiceEngine {
   async start(preferences: SpeechPreferences, conversationId: string): Promise<void> {
     if (this.disposed) return;
     if (this.outputActive || this.responseOpen) this.interrupt();
-    this.stop();
-    this.trace.clear();
+    this.stop('restart');
+    this.trace.record('voice-start', { provider: preferences.recognition });
     const generation = ++this.generation;
     this.preferences = { ...preferences }; this.conversationId = conversationId;
     this.active = true; this.muted = false; this.inputPaused = false; this.gap = false; this.transcript.clear();
@@ -196,7 +196,8 @@ export class VoiceEngine {
     } catch (error) {
       if (generation !== this.generation) return;
       const message = error instanceof Error ? error.message : String(error);
-      this.stop(); this.setPhase('error'); this.callbacks.onError(message);
+      this.trace.record('input-failure', { reason: 'start-error', phase: this.phase });
+      this.stop('start-error'); this.setPhase('error'); this.callbacks.onError(message);
     }
   }
   private async openCapture(generation: number, requireVad: boolean) {
@@ -210,8 +211,8 @@ export class VoiceEngine {
       echoCancellation: typeof settings?.echoCancellation === 'boolean' ? settings.echoCancellation : undefined,
       noiseSuppression: settings?.noiseSuppression, autoGainControl: settings?.autoGainControl });
     stream.getAudioTracks().forEach((track) => {
-      track.onended = () => { if (generation === this.generation) { this.trace.record('capture-gap', { reason: 'mic-ended' }); this.captureFailure('Microphone disconnected. Your unsent draft is preserved.'); } };
-      track.onmute = () => { if (generation === this.generation && this.ready) { this.trace.record('capture-gap', { reason: 'mic-muted' }); this.captureFailure('Microphone capture was interrupted. Review your draft before sending.'); } };
+      track.onended = () => { if (generation === this.generation) { this.trace.record('capture-gap', { reason: 'mic-ended' }); this.captureFailure('Microphone disconnected. Your unsent draft is preserved.', 'mic-ended'); } };
+      track.onmute = () => { if (generation === this.generation && this.ready) { this.trace.record('capture-gap', { reason: 'mic-muted' }); this.captureFailure('Microphone capture was interrupted. Review your draft before sending.', 'mic-muted'); } };
     });
     await context.audioWorklet.addModule(captureWorkletURL);
     if (generation !== this.generation) return;
@@ -220,10 +221,10 @@ export class VoiceEngine {
     worklet.port.onmessage = (event) => {
       worklet.port.postMessage('ack');
       if (generation !== this.generation || !this.active) return;
-      if (event.data.dropped > 0 && this.ready) { this.trace.record('backpressure', { reason: 'capture-backlog', pendingFrames: Math.ceil(event.data.dropped / 512) }); this.captureFailure('Microphone processing fell behind. Review your draft; incomplete audio was not sent.'); return; }
+      if (event.data.dropped > 0 && this.ready) { this.trace.record('backpressure', { reason: 'capture-backlog', pendingFrames: Math.ceil(event.data.dropped / 512) }); this.captureFailure('Microphone processing fell behind. Review your draft; incomplete audio was not sent.', 'capture-backlog'); return; }
       if (this.muted || !this.ready) return;
       const now = performance.now();
-      if (this.lastCaptureAt && now - this.lastCaptureAt > 500) { this.trace.record('capture-gap', { reason: 'capture-gap', durationMs: now - this.lastCaptureAt }); this.captureFailure('Microphone audio had an unexpected gap. Review your draft before sending.'); return; }
+      if (this.lastCaptureAt && now - this.lastCaptureAt > 500) { this.trace.record('capture-gap', { reason: 'capture-gap', durationMs: now - this.lastCaptureAt }); this.captureFailure('Microphone audio had an unexpected gap. Review your draft before sending.', 'capture-gap'); return; }
       this.lastCaptureAt = now;
       this.process(event.data.samples as Float32Array, event.data.endTime ?? context.currentTime);
     };
@@ -246,7 +247,7 @@ export class VoiceEngine {
         else if (event.data.type === 'error') {
           clearTimeout(timeout);
           if (!ready) reject(new Error(event.data.message));
-          else this.captureFailure('Speech detection stopped. Review your draft before restarting.');
+          else this.captureFailure('Speech detection stopped. Review your draft before restarting.', 'vad-error');
         } else if (event.data.type === 'signal') {
           this.vadPending = Math.max(0, this.vadPending - 1);
           this.vadProcessed = Math.max(this.vadProcessed, event.data.sequence);
@@ -268,7 +269,7 @@ export class VoiceEngine {
           this.consumeFrame(event.data.samples as Float32Array, event.data.transition, event.data.interruption === true);
         }
       };
-      worker.onerror = () => { clearTimeout(timeout); if (!ready) reject(new Error('Speech detector could not load.')); else this.captureFailure('Speech detector stopped.'); };
+      worker.onerror = () => { clearTimeout(timeout); if (!ready) reject(new Error('Speech detector could not load.')); else this.captureFailure('Speech detector stopped.', 'vad-error'); };
       worker.postMessage({ type: 'init', sensitivity: this.preferences?.interruptionSensitivity ?? 50 });
     });
   }
@@ -291,7 +292,7 @@ export class VoiceEngine {
       this.analysisBuffer.push(...samples);
       while (this.analysisBuffer.length >= 512) {
         const frame = Float32Array.from(this.analysisBuffer.splice(0, 512));
-        if (this.vadPending >= 12) { this.trace.record('backpressure', { reason: 'vad-backlog', pendingFrames: this.vadPending }); this.captureFailure('This device could not keep up with speech detection. Nothing incomplete was sent.'); return; }
+        if (this.vadPending >= 12) { this.trace.record('backpressure', { reason: 'vad-backlog', pendingFrames: this.vadPending }); this.captureFailure('This device could not keep up with speech detection. Nothing incomplete was sent.', 'vad-backlog'); return; }
         const frameEnd = endTime - this.analysisBuffer.length / 16000;
         this.vadPending++; this.vad!.postMessage({ type: 'frame', samples: frame, sequence: this.vadSequence++, endTime: frameEnd,
           protecting: this.protectingReply, epoch: this.protectionEpoch, turnActive: this.turnAudio }, [frame.buffer]);
@@ -301,7 +302,7 @@ export class VoiceEngine {
   private consumeFrame(samples: Float32Array, transition: 'start' | 'end' | null, interruption: boolean) {
     if (!samples?.length) return;
     if (this.finishing && !this.gap && this.preferences?.handsFree && this.recognizer?.capabilities.input === 'pcm16k') {
-      if (this.deferredSamples + samples.length > 64000) { this.captureFailure('Speech finalization fell behind. Your complete draft is preserved; review it before restarting.'); return; }
+      if (this.deferredSamples + samples.length > 64000) { this.captureFailure('Speech finalization fell behind. Your complete draft is preserved; review it before restarting.', 'endpoint-error'); return; }
       this.deferredAudio.push(samples.slice()); this.deferredSamples += samples.length;
       if (transition === 'start') { this.deferredOnset = true; this.deferredEndpoint = false; }
       else if (transition === 'end' && this.deferredOnset) this.deferredEndpoint = true;
@@ -337,7 +338,7 @@ export class VoiceEngine {
       if (this.recognizer?.capabilities.endpointing === 'local-vad') for (const frame of buffered) this.recognizer.push(frame);
       this.prebuffer = []; this.prebufferSamples = 0;
       clearTimeout(this.maxTurnTimer);
-      this.maxTurnTimer = setTimeout(() => { this.callbacks.onNotice('This turn reached two minutes. Review and send your draft.'); this.captureFailure('Long recording paused to keep the turn complete.'); }, 120000);
+      this.maxTurnTimer = setTimeout(() => { this.callbacks.onNotice('This turn reached two minutes. Review and send your draft.'); this.captureFailure('Long recording paused to keep the turn complete.', 'turn-limit'); }, 120000);
     }
     this.setPhase('hearing');
   }
@@ -350,7 +351,7 @@ export class VoiceEngine {
         this.trace.record(recovering ? 'provider-reconnecting' : 'provider-restored', { provider: this.preferences?.recognition, attempt, closeCode });
         if (!recovering && attempt === 0) return;
         if (recovering && (this.turnAudio || this.transcript.text || this.finishing)) {
-          this.captureFailure('The microphone connection was interrupted mid-turn. Your words are kept in the draft; review them before continuing.'); return;
+          this.captureFailure('The microphone connection was interrupted mid-turn. Your words are kept in the draft; review them before continuing.', 'provider-mid-turn'); return;
         }
         this.ready = !recovering && Boolean(this.recognizer?.running); this.lastCaptureAt = 0;
         this.prebuffer = []; this.prebufferSamples = 0; this.vadIgnoreBefore = this.vadSequence;
@@ -381,7 +382,7 @@ export class VoiceEngine {
         if (generation !== this.generation || inputEpoch !== this.inputEpoch) return;
         if (error.code === 'capture' && this.recognizer?.capabilities.input === 'browser-managed') { this.browserMeterSupported = false; this.closeCapture(); }
         this.trace.record(error.code === 'overload' ? 'backpressure' : 'capture-gap', { provider: this.preferences?.recognition, reason: 'provider-error' });
-        if (error.fatal && (this.ready || this.preferences?.recognition === 'deepgram' && this.phase !== 'starting')) this.captureFailure(error.message);
+        if (error.fatal && (this.ready || this.preferences?.recognition === 'deepgram' && this.phase !== 'starting')) this.captureFailure(error.message, 'provider-error');
         else if (!error.fatal) this.callbacks.onNotice(error.message);
       },
     };
@@ -421,7 +422,7 @@ export class VoiceEngine {
         }
       }
     } catch (error) {
-      if (generation === this.generation && inputEpoch === this.inputEpoch) this.captureFailure(error instanceof Error ? error.message : String(error));
+      if (generation === this.generation && inputEpoch === this.inputEpoch) this.captureFailure(error instanceof Error ? error.message : String(error), 'endpoint-error');
     } finally { if (generation === this.generation && inputEpoch === this.inputEpoch && this.phase !== 'finalizing') this.finishing = false; }
   }
   /** Camera composition owns the next send. Fence recognition immediately while
@@ -456,7 +457,8 @@ export class VoiceEngine {
       this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : this.ready ? 'listening' : 'paused');
     } catch (error) {
       if (generation !== this.generation || inputEpoch !== this.inputEpoch) return;
-      this.stop(); this.setPhase('error'); this.callbacks.onError(error instanceof Error ? error.message : String(error));
+      this.trace.record('input-failure', { reason: 'resume-error', phase: this.phase });
+      this.stop('resume-error'); this.setPhase('error'); this.callbacks.onError(error instanceof Error ? error.message : String(error));
     }
   }
   private commit() {
@@ -484,20 +486,22 @@ export class VoiceEngine {
     } else if (this.recognizer?.capabilities.input === 'browser-managed' || this.gap) this.callbacks.onNotice('Tap the microphone to start a new recording. Your draft is preserved.');
     else if (this.active && this.ready) { this.vad?.postMessage({ type: 'reset' }); this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : 'listening'); }
   }
-  private captureFailure(message: string) {
+  private captureFailure(message: string, reason: AudioDiagnosticReason) {
     if (!this.active || this.gap) return;
-    this.gap = true; this.callbacks.onNotice(message); this.stop(); this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : 'paused');
+    this.trace.record('input-failure', { reason, phase: this.phase, provider: this.preferences?.recognition });
+    this.gap = true; this.callbacks.onNotice(message); this.stop('capture-error'); this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : 'paused');
   }
   /** A deliberate End has its own sound. Shut capture/output first; never wait
    * for a sound to load, and never play it for a failure or cancelled startup. */
   endSession() {
     const wasReady = this.active && this.ready;
-    this.interrupt('manual', false); this.stop();
+    this.interrupt('manual', false); this.stop('end-session');
     // Messenger suppresses turn cues; the explicit End action still gets its
     // sleep confirmation. The saved audio-cues preference silences both kinds.
     if (wasReady && this.preferences?.audioCues !== false) this.cues?.play('sleep');
   }
-  stop() {
+  stop(reason: VoiceStopReason = 'manual') {
+    if (this.active || this.stream) this.trace.record('voice-stop', { reason, phase: this.phase, provider: this.preferences?.recognition });
     ++this.generation; ++this.inputEpoch; this.inputPaused = false; this.active = false; this.ready = false; this.finishing = false;
     this.callbacks.onInputConnection?.(false);
     this.cues?.cancel();
@@ -571,15 +575,15 @@ export class VoiceEngine {
     } catch { this.callbacks.onNotice('Keep this page visible while speaking; the browser could not keep the screen awake.'); }
   }
   private visibility = () => {
-    if (document.visibilityState === 'hidden' && this.active) this.captureFailure('Voice paused because the page was hidden. Reopen it and tap the microphone to resume.');
+    if (document.visibilityState === 'hidden' && this.active) this.captureFailure('Voice paused because the page was hidden. Reopen it and tap the microphone to resume.', 'page-hidden');
   };
   private offline = () => {
     // Flux owns transient transport retries; an unrelated connection event must
     // not destroy the microphone route or healthy speech output.
-    if (this.active && this.recognizer?.capabilities.processing !== 'local' && this.preferences?.recognition !== 'deepgram') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.');
+    if (this.active && this.recognizer?.capabilities.processing !== 'local' && this.preferences?.recognition !== 'deepgram') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.', 'network-offline');
   };
   dispose() {
-    this.disposed = true; ++this.playbackGeneration; this.stop(); this.output?.dispose(); this.output = undefined; this.cues?.dispose(); this.cues = undefined;
+    this.disposed = true; ++this.playbackGeneration; this.stop('disposed'); this.output?.dispose(); this.output = undefined; this.cues?.dispose(); this.cues = undefined;
     this.releaseContext();
     document.removeEventListener('visibilitychange', this.visibility); window.removeEventListener('offline', this.offline);
   }

@@ -1,13 +1,20 @@
 import type { VoicePhase } from '../../contract/types';
 
 export type AudioDiagnosticEvent =
+  | 'voice-start' | 'voice-stop' | 'input-failure'
   | 'phase' | 'capture-settings' | 'provider-starting' | 'provider-ready' | 'provider-reconnecting' | 'provider-restored' | 'connection-retry'
   | 'endpoint-request' | 'endpoint-ready' | 'output-start' | 'output-end'
   | 'output-interrupt' | 'output-request' | 'output-error' | 'capture-gap' | 'backpressure' | 'barge-in' | 'barge-in-blocked';
 
-export type AudioDiagnosticReason =
+export type VoiceStopReason =
+  | 'manual' | 'restart' | 'end-session' | 'settings' | 'library' | 'edit-as-text'
+  | 'auto-off' | 'delivery-pending' | 'conversation-change' | 'logout' | 'auth-expired'
+  | 'start-error' | 'resume-error' | 'capture-error' | 'disposed';
+
+export type AudioDiagnosticReason = VoiceStopReason
   | 'mic-ended' | 'mic-muted' | 'capture-gap' | 'vad-backlog' | 'capture-backlog'
-  | 'suspended' | 'provider-error' | 'manual' | 'speech-onset' | 'playback-echo' | 'background' | 'low-confidence' | 'reply-timeout' | 'reply-close';
+  | 'suspended' | 'provider-error' | 'speech-onset' | 'playback-echo' | 'background' | 'low-confidence' | 'reply-timeout' | 'reply-close'
+  | 'vad-error' | 'endpoint-error' | 'turn-limit' | 'page-hidden' | 'network-offline' | 'provider-mid-turn';
 
 export interface AudioDiagnosticValues {
   provider?: 'browser' | 'vosk' | 'deepgram' | 'fish';
@@ -32,6 +39,7 @@ export interface AudioDiagnosticEntry {
 }
 
 const EVENTS = new Set<AudioDiagnosticEvent>([
+  'voice-start', 'voice-stop', 'input-failure',
   'phase', 'capture-settings', 'provider-starting', 'provider-ready', 'provider-reconnecting', 'provider-restored', 'connection-retry',
   'endpoint-request', 'endpoint-ready', 'output-start', 'output-end',
   'output-interrupt', 'output-request', 'output-error', 'capture-gap', 'backpressure', 'barge-in', 'barge-in-blocked',
@@ -41,9 +49,32 @@ const PHASES = new Set<VoicePhase>([
   'speaking', 'reconnecting', 'paused', 'error',
 ]);
 const REASONS = new Set<AudioDiagnosticReason>([
+  'restart', 'end-session', 'settings', 'library', 'edit-as-text', 'auto-off', 'delivery-pending',
+  'conversation-change', 'logout', 'auth-expired', 'start-error', 'resume-error', 'capture-error', 'disposed',
+  'vad-error', 'endpoint-error', 'turn-limit', 'page-hidden', 'network-offline', 'provider-mid-turn',
   'mic-ended', 'mic-muted', 'capture-gap', 'vad-backlog', 'capture-backlog',
   'suspended', 'provider-error', 'manual', 'speech-onset', 'playback-echo', 'background', 'low-confidence', 'reply-timeout', 'reply-close',
 ]);
+const LIFECYCLE = new Set<AudioDiagnosticEvent>(['voice-start', 'voice-stop', 'input-failure']);
+
+export function audioReasonLabel(reason?: AudioDiagnosticReason): string {
+  if (!reason) return 'No reason recorded';
+  const labels: Partial<Record<AudioDiagnosticReason, string>> = {
+    'mic-ended': 'Microphone disconnected', 'mic-muted': 'Microphone interrupted',
+    'capture-gap': 'Microphone frames delayed', 'capture-backlog': 'Microphone processing fell behind',
+    'vad-backlog': 'Speech detection fell behind', 'suspended': 'Browser audio suspended',
+    'page-hidden': 'Page became hidden', 'network-offline': 'Network went offline',
+    'provider-error': 'Recognition provider error', 'provider-mid-turn': 'Recognition lost during a turn',
+    'vad-error': 'Speech detector failed', 'endpoint-error': 'Turn finalization failed',
+    'turn-limit': 'Two-minute turn limit', 'settings': 'Opened settings', 'library': 'Opened library',
+    'end-session': 'End voice pressed', 'edit-as-text': 'Edit as text selected', 'auto-off': 'Auto mode turned off',
+    'delivery-pending': 'Previous message still being delivered', 'conversation-change': 'Conversation changed',
+    'auth-expired': 'Login session expired', 'capture-error': 'Input stopped after a capture failure',
+    'start-error': 'Voice startup failed', 'resume-error': 'Voice resume failed', 'restart': 'Voice restarted',
+    'disposed': 'Voice engine closed', 'logout': 'Signed out', 'manual': 'Voice stopped',
+  };
+  return labels[reason] || reason.replaceAll('-', ' ');
+}
 const NUMERIC_LIMITS = {
   durationMs: 86_400_000,
   sampleRate: 384_000,
@@ -86,6 +117,9 @@ function safeValues(values: AudioDiagnosticValues): AudioDiagnosticValues {
 export class AudioDiagnostics {
   private readonly capacity: number;
   private readonly entries: AudioDiagnosticEntry[] = [];
+  // Keep a small independent stop/start history so noisy playback measurements
+  // cannot erase the cause before the user opens diagnostics or wakes again.
+  private readonly lifecycle: AudioDiagnosticEntry[] = [];
   private next = 0;
   private origin = performance.now();
   private elapsed = 0;
@@ -100,7 +134,12 @@ export class AudioDiagnostics {
     if (!EVENTS.has(event)) return;
     const now = performance.now() - this.origin;
     if (Number.isFinite(now)) this.elapsed = Math.max(this.elapsed, now, 0);
-    this.entries[this.next] = { atMs: this.elapsed, event, values: safeValues(values) };
+    const entry = { atMs: this.elapsed, event, values: safeValues(values) };
+    this.entries[this.next] = entry;
+    if (LIFECYCLE.has(event)) {
+      this.lifecycle.push(entry);
+      if (this.lifecycle.length > Math.min(32, this.capacity)) this.lifecycle.shift();
+    }
     this.next = (this.next + 1) % this.capacity;
   }
 
@@ -108,11 +147,14 @@ export class AudioDiagnostics {
     const chronological = this.entries.length < this.capacity
       ? this.entries
       : [...this.entries.slice(this.next), ...this.entries.slice(0, this.next)];
-    return chronological.map(entry => ({ ...entry, values: { ...entry.values } }));
+    const retained = this.lifecycle.filter(entry => !chronological.includes(entry));
+    return [...retained, ...chronological].sort((a, b) => a.atMs - b.atMs)
+      .map(entry => ({ ...entry, values: { ...entry.values } }));
   }
 
   clear(): void {
     this.entries.length = 0;
+    this.lifecycle.length = 0;
     this.next = 0;
     this.origin = performance.now();
     this.elapsed = 0;

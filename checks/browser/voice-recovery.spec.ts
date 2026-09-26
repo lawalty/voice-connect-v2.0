@@ -51,6 +51,27 @@ async function finishSentence(page: Page) {
   });
 }
 
+test('a microphone failure during speech remains visible in diagnostics after waking again', async ({ page }) => {
+  const p = await setup(page);
+  p.recognition[0]!.send(JSON.stringify({ type: 'stt', text: 'Synthetic diagnostics check.', started: true, final: true, turnComplete: true }));
+  await expect.poll(async () => (await p.state()).spoken.length).toBe(1);
+  await page.evaluate(() => {
+    const probe = (window as unknown as { voiceRecovery: Probe }).voiceRecovery;
+    probe.tracks[0]!.dispatchEvent(new Event('mute'));
+  });
+  await expect(page.getByText('Microphone capture was interrupted. Review your draft before sending.')).toBeVisible();
+  await expect(page.getByText('NorthPointe is speaking', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'End voice session' }).click();
+  await page.getByRole('switch', { name: 'Auto mode' }).click();
+  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByText('Device diagnostics', { exact: true }).click();
+  const events = page.getByRole('list', { name: 'Recent voice events' });
+  await expect(events).toContainText('Microphone interrupted · speaking');
+  await expect(events).toContainText('Opened settings');
+  await expect(events.getByText('Voice started', { exact: true })).toHaveCount(2);
+});
+
 for (const fault of ['reply connection', 'recognition connection'] as const) {
   test(`${fault} retries during speech without ending auto mode, losing the audio queue, or repeating a turn`, async ({ page }) => {
     let armed = false, cut = false, connections = 0;

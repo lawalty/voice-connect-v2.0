@@ -116,6 +116,24 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it('retains the exact input failure during playback across a restart and settings stop', async () => {
+    const run = setup(); await run.engine.start(preferences, 'same-conversation');
+    run.engine.speak('An answer continues after the input fails.'); run.engine.responseDone();
+    const track = (await microphone.mock.results[0]!.value).getAudioTracks()[0];
+    track.onmute();
+    expect(track.stop).toHaveBeenCalledOnce(); expect(run.phases.at(-1)).toBe('speaking');
+    expect(fixture.outputs[0]!.cancel).not.toHaveBeenCalled();
+    fixture.outputs[0]!.end();
+    await run.engine.start(preferences, 'same-conversation');
+    run.engine.stop('settings');
+    const events = run.engine.diagnostics().filter(entry => ['voice-start', 'voice-stop', 'input-failure'].includes(entry.event));
+    expect(events.map(entry => [entry.event, entry.values.reason])).toEqual([
+      ['voice-start', undefined], ['input-failure', 'mic-muted'], ['voice-stop', 'capture-error'],
+      ['voice-start', undefined], ['voice-stop', 'settings'],
+    ]);
+    expect(events[1]!.values.phase).toBe('speaking'); expect(run.turns).toEqual([]);
+  });
+
   it('reconnects premium recognition during playback without replacing the microphone or cancelling speech', async () => {
     const sockets = installFluxSocket(), run = setup();
     await run.engine.start({ ...preferences, recognition: 'deepgram' }, 'recovery');

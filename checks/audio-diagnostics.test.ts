@@ -4,6 +4,24 @@ import { AudioDiagnostics, type AudioDiagnosticEvent, type AudioDiagnosticValues
 afterEach(() => vi.restoreAllMocks());
 
 describe('local audio diagnostics', () => {
+  it('retains bounded failure evidence when playback events flood the ordinary ring', () => {
+    const diagnostics = new AudioDiagnostics(3);
+    diagnostics.record('input-failure', { reason: 'mic-muted', phase: 'speaking', text: 'private transcript' } as AudioDiagnosticValues);
+    diagnostics.record('voice-stop', { reason: 'capture-error' });
+    for (let i = 0; i < 20; i++) diagnostics.record('barge-in-blocked', { reason: 'background' });
+    diagnostics.record('voice-start', { provider: 'deepgram' });
+    const snapshot = diagnostics.snapshot();
+    expect(snapshot.filter(entry => entry.event === 'input-failure')).toEqual([
+      expect.objectContaining({ values: { reason: 'mic-muted', phase: 'speaking' } }),
+    ]);
+    expect(snapshot.filter(entry => entry.event === 'voice-start')).toHaveLength(1);
+    expect(snapshot.length).toBeLessThanOrEqual(6);
+    expect(JSON.stringify(snapshot)).not.toContain('private transcript');
+    for (let i = 0; i < 20; i++) diagnostics.record('voice-stop', { reason: 'manual' });
+    expect(diagnostics.snapshot().length).toBeLessThanOrEqual(6);
+    diagnostics.clear(); expect(diagnostics.snapshot()).toEqual([]);
+  });
+
   it('keeps only the newest entries in chronological order and bounds all capacities', () => {
     const diagnostics = new AudioDiagnostics(3);
     for (let i = 0; i < 8; i++) diagnostics.record('endpoint-ready', { durationMs: i });
