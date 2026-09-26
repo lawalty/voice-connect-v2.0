@@ -28,7 +28,7 @@ function fixture(state: AudioContextState = 'running') {
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    const name = url.includes('vc-cue-listening') ? 'vc-cue-listening.wav' : 'vc-cue-sent.wav';
+    const name = url.includes('vc-cue-listening') ? 'vc-cue-listening.wav' : url.includes('vc-cue-sleep') ? 'vc-cue-sleep.wav' : 'vc-cue-sent.wav';
     return new Response(readFileSync(`client/assets/cues/${name}`));
   }));
 });
@@ -84,8 +84,20 @@ describe('local listening cue playback', () => {
       expect(sources[index]!.connect).toHaveBeenCalledExactlyOnceWith(context.destination);
     }
     await cues.prepare(); cues.play('on');
-    expect(fetch).toHaveBeenCalledTimes(2); expect(context.decodeAudioData).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(3); expect(context.decodeAudioData).toHaveBeenCalledTimes(3);
     expect(context.resume).not.toHaveBeenCalled();
+  });
+
+  it('preloads a quiet sleep sound with a zero-ended tail and cancels it on waking', async () => {
+    const { cues, sources, references } = fixture(); await cues.prepare();
+    const scheduled = cues.play('sleep');
+    expect(scheduled!.endTime - scheduled!.startTime).toBeCloseTo(1.5);
+    const samples = references[0]!.samples;
+    expect(samples[0]).toBe(0); expect(samples.at(-1)).toBe(0);
+    expect(Math.max(...samples.map(Math.abs))).toBeLessThan(.1);
+    expect(Math.max(...samples.slice(-4410).map(Math.abs))).toBeLessThan(.001);
+    cues.cancel(); expect(sources[0]!.stop).toHaveBeenCalledOnce();
+    expect(sources[0]!.disconnect).toHaveBeenCalledOnce();
   });
 
   it('cancels previous cues and disposes permanently without late callbacks detaching a newer cue', async () => {

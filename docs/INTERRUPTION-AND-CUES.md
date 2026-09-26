@@ -15,6 +15,12 @@ are preserved.
   when the completed turn is submitted. End voice, capture failures, pauses,
   and other session shutdowns do not play the sent cue. End also cancels any
   listening cue still playing; waking again cues readiness normally.
+  The explicit **End voice** button has a separate, original 1.5-second descending
+  hum (`vc-cue-sleep.wav`) that fades with the orb's sleep animation. It plays
+  after capture and agent playback stop, in either view. The Subtle Audio Cues
+  toggle also silences this sound. Ordinary failures, Auto off, conversation
+  switching, and cancelled startup do not play it. Waking or sending a typed
+  message cancels a remaining sleep tail.
   Tentative Vosk finalization keeps the listening window open while final words
   drain; resumed speech does not trigger another pair of cues.
   Listening → hearing does not play another cue. Hands-free capture remains
@@ -56,8 +62,10 @@ On approval, that prefix and already-captured continuation frames are delivered
 once; reference-matched echo is excluded. Deepgram's EndOfTurn still owns premium
 turn completion. Local Vosk still uses the existing automatic silence endpoint.
 
-Cues use the owner's unmodified mono 44.1 kHz WAV recordings: 480 ms listening
-and 260 ms sent. Vite publishes versioned assets that the service worker caches.
+Turn cues use the owner's unmodified mono 44.1 kHz WAV recordings: 480 ms listening
+and 260 ms sent. The separately synthesized mono sleep cue is also 44.1 kHz, with
+a peak below 0.1 and a tail that reaches zero. Vite publishes versioned assets
+that the service worker caches.
 They decode once on the existing audio context alongside recognizer startup;
 there is no fetch, decoding, or server acknowledgement to wait for at each turn.
 Disabled cues skip loading. Unavailable files time out after 1.5 seconds without

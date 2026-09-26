@@ -15,6 +15,7 @@ test('automatic turns keep cue order and one capture session across orb, messeng
     AudioBufferSourceNode.prototype.start = function(...args) {
       if (Math.abs((this.buffer?.duration || 0) - .48) < .001) probe.cues.push('listening');
       if (Math.abs((this.buffer?.duration || 0) - .26) < .001) probe.cues.push('sent');
+      if (Math.abs((this.buffer?.duration || 0) - 1.5) < .001) probe.cues.push('sleep');
       return start.apply(this, args);
     };
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
@@ -150,6 +151,7 @@ test('automatic turns keep cue order and one capture session across orb, messeng
     expected.push('listening'); expect((await state()).cues).toEqual(expected);
     const submitted = turns.length;
     await page.getByRole('button', { name: 'End voice session', exact: true }).click();
+    expected.push('sleep');
     expect((await state()).capturing).toBe(false);
     await expect(page.locator('.orb-stage')).toHaveAttribute('data-presence', 'sleeping');
     expect((await state()).cues).toEqual(expected); expect(turns).toHaveLength(submitted);

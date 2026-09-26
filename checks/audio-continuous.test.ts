@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcousticSignal, RecognizerCapabilities, RecognizerEvents, SpeechPreferences, VoicePhase } from '../contract/types';
 
-const fixture = vi.hoisted(() => ({ recognizers: [] as FakeRecognizer[], outputs: [] as FakeOutput[], cues: [] as ('on' | 'off')[] }));
+const fixture = vi.hoisted(() => ({ recognizers: [] as FakeRecognizer[], outputs: [] as FakeOutput[], cues: [] as ('on' | 'off' | 'sleep')[], cueCancellations: 0 }));
 class FakeRecognizer {
   readonly capabilities: RecognizerCapabilities = { provider: 'vosk', available: true, input: 'pcm16k', processing: 'local', handsFree: true, endpointing: 'local-vad' };
   running = false; frames: Float32Array[] = []; finals: string[] = []; barrier?: Promise<void>;
@@ -34,8 +34,8 @@ vi.doMock('../client/audio/cues', async () => ({
   ...await vi.importActual<typeof import('../client/audio/cues')>('../client/audio/cues'),
   ListeningCues: class {
     async prepare() {}
-    play(kind: 'on' | 'off') { fixture.cues.push(kind); }
-    cancel() {}
+    play(kind: 'on' | 'off' | 'sleep') { fixture.cues.push(kind); }
+    cancel() { fixture.cueCancellations++; }
     dispose() {}
   },
 }));
@@ -100,7 +100,7 @@ function setup() {
   return { engine, phases, turns, drafts, notices, callbacks };
 }
 beforeEach(() => {
-  fixture.recognizers.length = 0; fixture.outputs.length = 0; fixture.cues.length = 0;
+  fixture.recognizers.length = 0; fixture.outputs.length = 0; fixture.cues.length = 0; fixture.cueCancellations = 0;
   const track = { enabled: true, stop: vi.fn(), getSettings: () => ({ sampleRate: 48000, channelCount: 1 }), onended: null, onmute: null };
   microphone = vi.fn(async () => ({ getTracks: () => [track], getAudioTracks: () => [track] }));
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: microphone } });
@@ -565,6 +565,30 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     await run.engine.start({ ...preferences, audioCues: true }, 'same-conversation');
     expect(fixture.cues).toEqual(['on', 'on']);
     run.engine.stop(); expect(fixture.cues).toEqual(['on', 'on']);
+  });
+
+  it.each([false, true])('plays a separate sleep sound for explicit End after stopping capture (messenger=%s)', async messenger => {
+    const run = setup(); run.engine.setCuesSuppressed(messenger);
+    await run.engine.start({ ...preferences, audioCues: true }, 'same-conversation');
+    const track = (await microphone.mock.results[0]!.value).getAudioTracks()[0];
+    run.engine.endSession();
+    expect(track.stop).toHaveBeenCalledOnce(); expect(run.phases.at(-1)).toBe('off');
+    expect(fixture.cues).toEqual(messenger ? ['sleep'] : ['on', 'sleep']);
+    expect(run.turns).toEqual([]);
+    const stopped = fixture.cueCancellations;
+    await run.engine.start({ ...preferences, audioCues: true }, 'same-conversation');
+    expect(fixture.cueCancellations).toBeGreaterThan(stopped);
+    run.engine.endSession();
+    const ended = fixture.cueCancellations;
+    run.engine.prepareSpeech(preferences, 'same-conversation');
+    expect(fixture.cueCancellations).toBeGreaterThan(ended);
+  });
+
+  it('keeps sleep silent when cues are disabled or there is no active session', async () => {
+    const run = setup(); run.engine.endSession();
+    await run.engine.start({ ...preferences, audioCues: false }, 'same-conversation');
+    run.engine.endSession(); run.engine.endSession();
+    expect(fixture.cues).toEqual([]);
   });
 
   it('suppresses messenger cues without restarting capture, silencing speech, or replaying missed cues', async () => {

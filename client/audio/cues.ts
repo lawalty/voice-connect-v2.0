@@ -1,7 +1,9 @@
 import listeningURL from '../assets/cues/vc-cue-listening.wav?url';
 import sentURL from '../assets/cues/vc-cue-sent.wav?url';
+import sleepURL from '../assets/cues/vc-cue-sleep.wav?url';
 
 export type ListeningCue = 'on' | 'off';
+export type VoiceCue = ListeningCue | 'sleep';
 export interface CueReference { samples: Float32Array; sampleRate: number; startTime: number; }
 export interface CueSchedule { startTime: number; endTime: number; }
 
@@ -20,7 +22,7 @@ export class CueTransitions {
 export class ListeningCues {
   private source?: AudioBufferSourceNode;
   private disposed = false;
-  private buffers?: Record<ListeningCue, AudioBuffer>;
+  private buffers?: Record<VoiceCue, AudioBuffer>;
   private preparation?: Promise<void>;
   private loading = new AbortController();
   constructor(private context: AudioContext | undefined, private onReference?: (reference: CueReference) => void) {}
@@ -34,7 +36,7 @@ export class ListeningCues {
     if (this.disposed || !context || context.state === 'closed') return;
     const timeout = setTimeout(() => this.loading.abort(), 1500);
     try {
-      const [on, off] = await Promise.all([listeningURL, sentURL].map(async url => {
+      const [on, off, sleep] = await Promise.all([listeningURL, sentURL, sleepURL].map(async url => {
         const response = await fetch(url, { signal: this.loading.signal });
         if (!response.ok) throw new Error('Cue unavailable');
         const buffer = await context.decodeAudioData(await response.arrayBuffer());
@@ -42,12 +44,12 @@ export class ListeningCues {
         if (buffer.numberOfChannels !== 1 || buffer.duration <= 0 || buffer.duration > 2) throw new Error('Invalid cue');
         return buffer;
       }));
-      if (!this.disposed && !this.loading.signal.aborted) this.buffers = { on: on!, off: off! };
+      if (!this.disposed && !this.loading.signal.aborted) this.buffers = { on: on!, off: off!, sleep: sleep! };
     } catch { this.loading.abort(); /* Optional cues must never fail voice startup or play late. */ }
     finally { clearTimeout(timeout); }
   }
 
-  play(kind: ListeningCue): CueSchedule | undefined {
+  play(kind: VoiceCue): CueSchedule | undefined {
     this.cancel();
     const context = this.context;
     const buffer = this.buffers?.[kind];

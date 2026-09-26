@@ -75,6 +75,7 @@ export class VoiceEngine {
   /** A typed send unlocks the selected output without requesting a microphone. */
   prepareSpeech(preferences: SpeechPreferences, conversationId: string) {
     if (this.disposed) return;
+    this.cues?.cancel();
     this.preferences = { ...preferences }; this.conversationId = conversationId;
     this.warmContext();
   }
@@ -429,6 +430,15 @@ export class VoiceEngine {
   private captureFailure(message: string) {
     if (!this.active || this.gap) return;
     this.gap = true; this.callbacks.onNotice(message); this.stop(); this.setPhase('paused');
+  }
+  /** A deliberate End has its own sound. Shut capture/output first; never wait
+   * for a sound to load, and never play it for a failure or cancelled startup. */
+  endSession() {
+    const wasReady = this.active && this.ready;
+    this.interrupt('manual', false); this.stop();
+    // Messenger suppresses turn cues; the explicit End action still gets its
+    // sleep confirmation. The saved audio-cues preference silences both kinds.
+    if (wasReady && this.preferences?.audioCues !== false) this.cues?.play('sleep');
   }
   stop() {
     ++this.generation; this.active = false; this.ready = false; this.finishing = false;
