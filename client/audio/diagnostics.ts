@@ -1,13 +1,13 @@
 import type { VoicePhase } from '../../contract/types';
 
 export type AudioDiagnosticEvent =
-  | 'phase' | 'capture-settings' | 'provider-starting' | 'provider-ready'
+  | 'phase' | 'capture-settings' | 'provider-starting' | 'provider-ready' | 'provider-reconnecting' | 'provider-restored' | 'connection-retry'
   | 'endpoint-request' | 'endpoint-ready' | 'output-start' | 'output-end'
   | 'output-interrupt' | 'output-request' | 'output-error' | 'capture-gap' | 'backpressure' | 'barge-in' | 'barge-in-blocked';
 
 export type AudioDiagnosticReason =
   | 'mic-ended' | 'mic-muted' | 'capture-gap' | 'vad-backlog' | 'capture-backlog'
-  | 'suspended' | 'provider-error' | 'manual' | 'speech-onset' | 'playback-echo' | 'background' | 'low-confidence';
+  | 'suspended' | 'provider-error' | 'manual' | 'speech-onset' | 'playback-echo' | 'background' | 'low-confidence' | 'reply-timeout' | 'reply-close';
 
 export interface AudioDiagnosticValues {
   provider?: 'browser' | 'vosk' | 'deepgram' | 'fish';
@@ -20,6 +20,8 @@ export interface AudioDiagnosticValues {
   autoGainControl?: boolean;
   bufferedMs?: number;
   pendingFrames?: number;
+  attempt?: number;
+  closeCode?: number;
   reason?: AudioDiagnosticReason;
 }
 
@@ -30,7 +32,7 @@ export interface AudioDiagnosticEntry {
 }
 
 const EVENTS = new Set<AudioDiagnosticEvent>([
-  'phase', 'capture-settings', 'provider-starting', 'provider-ready',
+  'phase', 'capture-settings', 'provider-starting', 'provider-ready', 'provider-reconnecting', 'provider-restored', 'connection-retry',
   'endpoint-request', 'endpoint-ready', 'output-start', 'output-end',
   'output-interrupt', 'output-request', 'output-error', 'capture-gap', 'backpressure', 'barge-in', 'barge-in-blocked',
 ]);
@@ -40,7 +42,7 @@ const PHASES = new Set<VoicePhase>([
 ]);
 const REASONS = new Set<AudioDiagnosticReason>([
   'mic-ended', 'mic-muted', 'capture-gap', 'vad-backlog', 'capture-backlog',
-  'suspended', 'provider-error', 'manual', 'speech-onset', 'playback-echo', 'background', 'low-confidence',
+  'suspended', 'provider-error', 'manual', 'speech-onset', 'playback-echo', 'background', 'low-confidence', 'reply-timeout', 'reply-close',
 ]);
 const NUMERIC_LIMITS = {
   durationMs: 86_400_000,
@@ -48,6 +50,8 @@ const NUMERIC_LIMITS = {
   channelCount: 32,
   bufferedMs: 86_400_000,
   pendingFrames: 1_000_000,
+  attempt: 100,
+  closeCode: 4999,
 } as const;
 
 function safeValues(values: AudioDiagnosticValues): AudioDiagnosticValues {

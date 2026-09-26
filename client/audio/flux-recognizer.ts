@@ -20,21 +20,38 @@ export class FluxRecognizer implements SpeechRecognizer {
   private startReject?: (error: Error) => void;
   private startTimer?: ReturnType<typeof setTimeout>;
   private finishTimer?: ReturnType<typeof setTimeout>;
+  private startResolve?: () => void;
+  private active = false;
+  private started = false;
+  private recovering = false;
+  private attempts = 0;
+  private retryTimer?: ReturnType<typeof setTimeout>;
+  private recoveryTimer?: ReturnType<typeof setTimeout>;
   constructor(private conversationId: string, private events: RecognizerEvents) {}
   get running() { return this.ready; }
   start(): Promise<void> {
-    this.stop(); const generation = ++this.generation;
+    this.stop(); this.active = true;
     return new Promise((resolve, reject) => {
+      this.startResolve = resolve; this.startReject = reject;
+      this.connect();
+    });
+  }
+  private connect() {
+      if (!this.active) return;
+      const generation = ++this.generation;
       const socket = this.socket = new WebSocket(audioURL('stt', this.conversationId));
-      this.startReject = reject;
-      this.startTimer = setTimeout(() => this.fail('Premium recognition did not become ready.'), 15000);
+      this.startTimer = setTimeout(() => this.disconnected('Premium recognition did not become ready.', true), 12000);
       socket.onmessage = (message) => {
         if (generation !== this.generation) return;
         let event: AudioEvent; try { event = JSON.parse(String(message.data)); } catch { return; }
         if (event.type === 'ready') {
           if (event.sampleRate !== 16000) { this.fail('Premium recognition requested an unsupported audio rate.'); return; }
-          clearTimeout(this.startTimer); this.startReject = undefined; this.ready = true; resolve();
-        } else if (event.type === 'error') this.fail(event.message);
+          clearTimeout(this.startTimer); clearTimeout(this.recoveryTimer);
+          this.ready = true; this.started = true; this.startResolve?.(); this.startResolve = undefined; this.startReject = undefined;
+          const recovered = this.recovering, attempts = this.attempts;
+          this.recovering = false; this.attempts = 0;
+          if (recovered) this.events.connection?.(false, attempts);
+        } else if (event.type === 'error') this.disconnected(event.message, event.retryable === true);
         else if (event.type === 'stt') {
           if (event.final && this.awaitingNextTurn && !event.started) return;
           this.awaitingNextTurn = event.final;
@@ -45,9 +62,31 @@ export class FluxRecognizer implements SpeechRecognizer {
           }
         }
       };
-      socket.onerror = () => { if (generation === this.generation) this.fail('Premium speech connection failed.'); };
-      socket.onclose = () => { if (generation === this.generation) this.fail('Premium recognition disconnected. Draft preserved; tap to restart.'); };
-    });
+      socket.onerror = () => { if (generation === this.generation) this.disconnected('Premium speech connection failed.', true, 1006); };
+      socket.onclose = event => {
+        if (generation === this.generation) this.disconnected('Premium recognition disconnected.', event?.code !== 1008, event?.code ?? 1006);
+      };
+  }
+  private disconnected(message: string, retryable: boolean, closeCode?: number) {
+    if (!this.active) return;
+    if (!retryable || !this.started || this.pendingFinish) { this.fail(message); return; }
+    this.ready = false; this.detachSocket();
+    // No microphone audio is replayed across a failed connection. The engine
+    // preserves any incomplete text and decides whether it is safe to resume.
+    this.samples = []; this.turnOpen = false; this.awaitingNextTurn = false;
+    if (!this.recovering) {
+      this.recovering = true;
+      this.recoveryTimer = setTimeout(() => this.fail('Voice could not reconnect. Your draft is preserved; tap to restart.'), 20000);
+    }
+    if (++this.attempts > 4) { this.fail('Voice could not reconnect. Your draft is preserved; tap to restart.'); return; }
+    this.events.connection?.(true, this.attempts, closeCode);
+    // The callback may deliberately stop recovery to protect an interrupted turn.
+    if (this.active) this.retryTimer = setTimeout(() => this.connect(), [250, 750, 1500, 3000][this.attempts - 1]);
+  }
+  private detachSocket() {
+    ++this.generation; clearTimeout(this.startTimer); clearTimeout(this.retryTimer);
+    const socket = this.socket; this.socket = undefined;
+    if (socket) { socket.onmessage = null; socket.onerror = null; socket.onclose = null; socket.close(); }
   }
   push(samples: Float32Array) {
     if (!this.ready || this.pendingFinish) return;
@@ -57,9 +96,10 @@ export class FluxRecognizer implements SpeechRecognizer {
     }
   }
   private sendSamples(samples: Float32Array): boolean {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) { this.fail('Premium speech connection is no longer open.'); return false; }
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) { this.disconnected('Premium speech connection is no longer open.', true); return false; }
     if (this.socket.bufferedAmount > 64000) { this.fail('Speech upload is too slow. Your unsent draft is preserved.', 'overload'); return false; }
-    this.socket.send(pcm16(samples)); return true;
+    try { this.socket.send(pcm16(samples)); return true; }
+    catch { this.disconnected('Premium speech connection failed.', true, 1006); return false; }
   }
   finish(): Promise<void> {
     if (this.pendingFinish) return this.pendingFinish;
@@ -82,10 +122,14 @@ export class FluxRecognizer implements SpeechRecognizer {
     this.stop(); this.events.error({ code, message, fatal: true }); this.events.ended(false);
   }
   stop() {
-    ++this.generation; clearTimeout(this.startTimer); clearTimeout(this.finishTimer); this.ready = false;
+    this.active = false; this.started = false; this.ready = false;
+    this.detachSocket(); clearTimeout(this.finishTimer); clearTimeout(this.recoveryTimer);
+    const recovering = this.recovering; this.recovering = false; this.attempts = 0;
+    if (recovering) this.events.connection?.(false, 0);
+    this.startResolve = undefined;
     this.startReject?.(new Error('Premium speech startup stopped.')); this.startReject = undefined;
     this.finishReject?.(new Error('Premium speech stopped before finalization.')); this.finishReject = undefined; this.finishResolve = undefined;
     this.pendingFinish = undefined;
-    this.socket?.close(); this.socket = undefined; this.samples = []; this.turnOpen = false; this.awaitingNextTurn = false;
+    this.samples = []; this.turnOpen = false; this.awaitingNextTurn = false;
   }
 }

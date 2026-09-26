@@ -37,6 +37,7 @@ export default function App() {
   const [phase, setPhase] = useState<VoicePhase>('off'), [signal, setSignal] = useState<AcousticSignal | null>(null), [preferences, setPreferences] = useState(readPreferences);
   const [voiceActive, setVoiceActive] = useState(false), [speakerMuted, setSpeakerMuted] = useState(readSpeakerMuted), [online, setOnline] = useState(navigator.onLine), [connected, setConnected] = useState(false), [sending, setSending] = useState(false);
   const [connectionIssue, setConnectionIssue] = useState('');
+  const [inputRecovering, setInputRecovering] = useState(false);
   const [creatingConversation, setCreatingConversation] = useState(false), [preparingVoice, setPreparingVoice] = useState(false);
   const [notice, setNotice] = useState(() => {
     try { if (JSON.parse(localStorage.getItem(preferenceKey) || '{}')?.output === 'deepgram') return 'Deepgram is now for speech recognition only. Playback uses device voices; you can select Fish Audio in Settings.'; } catch {}
@@ -137,13 +138,22 @@ export default function App() {
     });
     setActiveTurn(view.activeTurn || null); activeTurnRef.current = view.activeTurn || null;
     const terminal = new Set(view.messages.filter(message => message.turnId && ['complete', 'cancelled', 'failed'].includes(message.delivery || '')).map(message => message.turnId!));
-    let missedCompletion = false;
+    let missedCompletion = false, continuingSpeech = false;
     // Routine native reconciliation can precede the final speech event. Retire
     // speech ownership only during confirmed resume/connection recovery.
     for (const turnId of audibleTurns.current) if (recoverFinished && terminal.has(turnId)) {
       audibleTurns.current.delete(turnId); completed.current.add(turnId); missedCompletion = true;
+      const finishedNormally = view.messages.some(item => item.role === 'user' && item.turnId === turnId && item.delivery === 'complete');
+      if (finishedNormally && speakingTurn.current === turnId && engine.current?.hasSpeechOutput() && !cancelled.current.has(turnId)) {
+        const message = view.messages.filter(item => item.role === 'assistant' && item.turnId === turnId).at(-1);
+        const previous = spoken.current.get(turnId) || '';
+        if (message?.text.startsWith(previous)) { engine.current.speak(message.text.slice(previous.length), false); spoken.current.set(turnId, message.text); }
+        // Continue the existing queue, adding only a proven new suffix. A
+        // changed transcript can never undo or replay words already spoken.
+        engine.current.responseDone(); continuingSpeech = true;
+      }
     }
-    if (missedCompletion) {
+    if (missedCompletion && !continuingSpeech) {
       // Recovered history is silent; stop stale waiting/playback without
       // cancelling any OpenClaw run or replaying already-finished speech.
       suppressAbort.current = true; engine.current?.interrupt('manual', false); suppressAbort.current = false;
@@ -207,6 +217,7 @@ export default function App() {
       onTurn: text => { if (voiceRef.current && !shareOpen.current) { updateHeard(''); void submitRef.current(text); } }, onSignal: setSignal,
       onError: error => { voiceRef.current = false; setVoiceActive(false); setNotice(typeof error === 'string' ? error : messageFor(error)); },
       onInterrupt: () => { if (!suppressAbort.current) void abortRef.current(); }, onNotice: setNotice,
+      onInputConnection: setInputRecovering,
     }); instance.setSpeakerMuted(speakerMutedRef.current); instance.setCuesSuppressed(messengerRef.current); engine.current = instance;
     return () => { instance.dispose(); if (engine.current === instance) engine.current = null; };
   }, [updateHeard]);
@@ -236,21 +247,16 @@ export default function App() {
       if (probe) { probe.sync ||= sync; return; }
       if (socket?.readyState !== WebSocket.OPEN) { if (!socket) { clearTimeout(timer); void connect(); } return; }
       probe = { nonce: crypto.randomUUID(), sync }; const epoch = connectionEpoch;
-      probeTimer = setTimeout(() => { if (alive && epoch === connectionEpoch) reconnect('Reply connection stalled. Reconnecting…'); }, 4000);
+      probeTimer = setTimeout(() => {
+        if (!alive || epoch !== connectionEpoch) return;
+        if (document.visibilityState === 'hidden') { probe = undefined; return; }
+        engine.current?.connectionRetry('reply-timeout'); reconnect('Reply connection stalled. Reconnecting…');
+      }, 4000);
       try { socket.send(JSON.stringify({ type: 'ping', nonce: probe.nonce })); }
       catch { reconnect('Reply connection interrupted. Reconnecting…'); }
     }
     checkStream.current = () => probeStream();
     setMessages([]); updateHeard(''); setActiveTurn(null); setActivity(''); spoken.current.clear(); sequences.current.clear(); completed.current.clear(); cancelled.current.clear(); speakingTurn.current = ''; audibleTurns.current.clear();
-    function suspendVoice() {
-      cancelVoiceStart();
-      const hadVoice = voiceRef.current;
-      audibleTurns.current.clear();
-      voiceRef.current = false; suppressAbort.current = true;
-      engine.current?.interrupt(); engine.current?.stop(); suppressAbort.current = false;
-      setVoiceActive(false); setPhase('off');
-      if (hadVoice) setNotice('Voice paused during the connection loss. Your conversation is saved; tap the orb when connected.');
-    }
     function disconnect() {
       ++connectionEpoch; clearTimeout(timer); clearTimeout(probeTimer); clearTimeout(helloTimer); clearTimeout(syncTimer); probe = undefined; eventRevision = 0; hasHello = false; recoverOnSync = false; syncAgain = false;
       const previous = socket; socket = null;
@@ -258,10 +264,12 @@ export default function App() {
       setConnected(false);
     }
     function reconnect(reason = 'Connection interrupted. Retrying…') {
-      disconnect(); suspendVoice(); setConnectionIssue(reason);
+      // The control channel does not own capture or playback. Repair only this
+      // subscription; healthy microphone and TTS transports keep running.
+      disconnect(); setConnectionIssue(reason);
       timer = setTimeout(() => void connect(), Math.min(4000, 1000 * 2 ** Math.min(retries++, 2)));
     }
-    const offline = () => { disconnect(); suspendVoice(); };
+    const offline = () => { disconnect(); };
     const online = () => { if (!alive) return; disconnect(); retries = 0; void connect(); };
     async function connect() {
       if (!alive || !navigator.onLine) return;
@@ -275,10 +283,6 @@ export default function App() {
         // The socket opening alone does not confirm the conversation subscription.
         function confirmConnection() {
           retries = 0; setConnected(true); setConnectionIssue('');
-          setNotice(value => {
-            if (value.startsWith('Voice paused during the connection loss.')) return 'Connected again. Your conversation is restored; tap the orb to resume voice.';
-            return value;
-          });
         }
         socket.onmessage = message => {
           if (!alive || epoch !== connectionEpoch) return;
@@ -292,6 +296,9 @@ export default function App() {
             if (sync) void syncHistory(true);
             return;
           }
+          // A real reply/status frame also proves this page receives updates.
+          // Do not tear down a working stream just because one probe was delayed.
+          if (probe) { const sync = probe.sync; clearTimeout(probeTimer); probe = undefined; if (sync) void syncHistory(true); }
           if (typeof event.revision === 'number') {
             if (event.revision > eventRevision + 1) void syncHistory();
             eventRevision = Math.max(eventRevision, event.revision);
@@ -352,8 +359,9 @@ export default function App() {
             if (alive && epoch === connectionEpoch) reconnect('Unable to refresh your conversation. Retrying…');
           });
         };
-        socket.onclose = () => {
+        socket.onclose = event => {
           if (!alive || epoch !== connectionEpoch) return;
+          engine.current?.connectionRetry('reply-close', event.code);
           reconnect();
         };
         socket.onerror = () => currentSocket.close();
@@ -372,7 +380,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', foreground); document.removeEventListener('resume', foreground);
       disconnect();
     };
-  }, [conversationId, status?.authenticated, refreshHistory, updateHeard, cancelVoiceStart]);
+  }, [conversationId, status?.authenticated, refreshHistory, updateHeard]);
 
   useEffect(() => { if (conversationId) { try { localStorage.setItem(`vc2:draft:${conversationId}`, composerValue); } catch {} } }, [composerValue, conversationId]);
 
@@ -567,10 +575,10 @@ export default function App() {
   if (!status) return <div className="entry-page"><header className="site-header"><Brand /></header><main className="startup-state">{initialError ? <><p className="error-text" role="alert">{initialError}</p><button className="button secondary" onClick={() => window.location.reload()}>Retry connection</button></> : <p role="status">Connecting…</p>}</main></div>;
   if (!status.authenticated) return <Entry status={status} onAuthenticated={authenticate} initialError={initialError} />;
   const harnessConnected = settings?.harness.connected ?? false;
-  const fullyConnected = online && connected && harnessConnected && !connectionIssue;
-  const connectionLabel = !online ? 'Offline' : fullyConnected ? 'Connected' : connectionIssue || settings?.harness.reason ? 'Reconnecting' : 'Connecting';
-  const connectionDetail = !online ? 'Your draft is kept on this device.' : fullyConnected ? undefined : connectionIssue || settings?.harness.reason || 'Connecting to NorthPointe…';
-  const displayPhase: VoicePhase = !online || !connected || !harnessConnected ? 'reconnecting' : phase === 'off' && activeTurn !== null ? 'thinking' : phase;
+  const fullyConnected = online && connected && harnessConnected && !connectionIssue && !inputRecovering;
+  const connectionLabel = !online ? 'Offline' : inputRecovering && connected ? 'Reconnecting mic' : fullyConnected ? 'Connected' : connectionIssue || settings?.harness.reason ? 'Reconnecting' : 'Connecting';
+  const connectionDetail = !online ? 'Your draft is kept on this device.' : inputRecovering ? 'Reconnecting the microphone automatically.' : fullyConnected ? undefined : connectionIssue || settings?.harness.reason || 'Connecting to NorthPointe…';
+  const displayPhase: VoicePhase = phase === 'speaking' ? 'speaking' : !online || !connected || !harnessConnected ? 'reconnecting' : phase === 'off' && activeTurn !== null ? 'thinking' : phase;
   const busy = activeTurn !== null;
   const automaticTurns = preferences.recognition !== 'browser' && preferences.handsFree;
   const orbAsleep = !voiceActive && !busy && !preparingVoice && phase !== 'speaking';

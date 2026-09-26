@@ -66,20 +66,21 @@ export function verifyDeepgramKey(key:string,remoteFactory:RecognitionRemoteFact
 }
 export function bridgeRecognition(client:WebSocket,key:string,authorized:()=>boolean,remoteFactory:RecognitionRemoteFactory=(url,options)=>new WebSocket(url,options)):void {
   const remote=remoteFactory(...recognitionConnection(key));
-  let ready=false,ended=false,lastSequence=-1,bytes=0;
+  let ready=false,ended=false,lastSequence=-1,bytes=0,turnOpen=false,rotateDue=false;
   const send=(event:AudioEvent)=>{if(client.readyState===WebSocket.OPEN)client.send(JSON.stringify(event));};
   const cleanup=()=>{clearTimeout(timer);clearTimeout(limitTimer);};
-  const fail=(message:string)=>{if(ended)return;ended=true;cleanup();send({type:'error',message});remote.close();client.close(1011,'Speech connection ended');};
-  const timer=setTimeout(()=>fail('Deepgram recognition did not become ready. Try again or choose on-device recognition.'),12000);
-  const limitTimer=setTimeout(()=>fail('Deepgram recognition reached its time limit. Start a new voice session.'),30*60*1000);
+  const fail=(message:string,retryable=false)=>{if(ended)return;ended=true;cleanup();send({type:'error',message,...retryable?{retryable:true}:{}});remote.close();client.close(1011,'Speech connection ended');};
+  const timer=setTimeout(()=>fail('Deepgram recognition did not become ready. Try again or choose on-device recognition.',true),12000);
+  const rotate=()=>{if(rotateDue&&!turnOpen)fail('Refreshing the recognition connection.',true);};
+  const limitTimer=setTimeout(()=>{rotateDue=true;rotate();},30*60*1000);
   remote.on('unexpected-response',(_request,response)=>{
     // Classify only the HTTP status. Neither rejected response contents nor
     // request headers (which contain authorization) cross the browser boundary.
-    try {fail(handshakeFailure(response.statusCode));}
+    try {fail(handshakeFailure(response.statusCode),Boolean(response.statusCode&&response.statusCode>=500));}
     finally {response.resume();response.destroy();}
   });
-  remote.on('error',()=>fail('The server could not connect to Deepgram recognition. Retry or choose on-device recognition.'));
-  remote.on('close',()=>{cleanup();if(!ended)fail('Deepgram recognition disconnected. Your conversation is preserved.');});
+  remote.on('error',()=>fail('The server could not connect to Deepgram recognition. Retry or choose on-device recognition.',true));
+  remote.on('close',()=>{cleanup();if(!ended)fail('Deepgram recognition disconnected. Your conversation is preserved.',true);});
   remote.on('message',(data,binary)=>{
     if(ended||!authorized()){fail('Your sign-in expired. Sign in again.');return;}
     if(binary)return;
@@ -90,7 +91,11 @@ export function bridgeRecognition(client:WebSocket,key:string,authorized:()=>boo
     else if(p.type==='TurnInfo'){
       if(typeof p.sequence_id==='number'&&p.sequence_id<=lastSequence)return;
       lastSequence=typeof p.sequence_id==='number'?p.sequence_id:lastSequence;
-      if(['StartOfTurn','Update','EndOfTurn'].includes(p.event)&&typeof p.transcript==='string')send({type:'stt',text:p.transcript.slice(0,20000),final:p.event==='EndOfTurn',turnComplete:p.event==='EndOfTurn',started:p.event==='StartOfTurn'});
+      if(['StartOfTurn','Update','EndOfTurn'].includes(p.event)&&typeof p.transcript==='string'){
+        turnOpen=p.event!=='EndOfTurn';
+        send({type:'stt',text:p.transcript.slice(0,20000),final:p.event==='EndOfTurn',turnComplete:p.event==='EndOfTurn',started:p.event==='StartOfTurn'});
+        rotate();
+      }
     }
   });
   client.on('message',(data,binary)=>{

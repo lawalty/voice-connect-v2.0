@@ -4,7 +4,7 @@ import { BrowserRecognizer } from '../client/audio/browser-recognizer';
 import { FluxRecognizer } from '../client/audio/flux-recognizer';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
-function events(): RecognizerEvents { return { result: vi.fn(), ended: vi.fn(), error: vi.fn() }; }
+function events(): RecognizerEvents { return { result: vi.fn(), ended: vi.fn(), error: vi.fn(), connection: vi.fn() }; }
 function nativeFixture() {
   const instances: Native[] = [];
   class Native {
@@ -65,6 +65,40 @@ describe('independent browser recognition adapter', () => {
 });
 
 describe('independent Flux recognition adapter', () => {
+  it('reconnects a transient socket without replaying PCM or accepting late events',async()=>{
+    vi.useFakeTimers();const sockets=socketFixture(),callbacks=events(),recognizer=new FluxRecognizer('conversation',callbacks);
+    const started=recognizer.start();sockets[0]!.event({type:'ready',sampleRate:16000});await started;
+    recognizer.push(new Float32Array(1280));const stale=sockets[0]!.onmessage;
+    sockets[0]!.onclose?.();
+    expect(callbacks.connection).toHaveBeenCalledWith(true,1,1006);expect(callbacks.error).not.toHaveBeenCalled();
+    recognizer.push(new Float32Array(1280).fill(1));
+    await vi.advanceTimersByTimeAsync(250);expect(sockets).toHaveLength(2);
+    sockets[1]!.event({type:'ready',sampleRate:16000});
+    expect(callbacks.connection).toHaveBeenLastCalledWith(false,1);expect(recognizer.running).toBe(true);expect(sockets[1]!.send).not.toHaveBeenCalled();
+    stale?.({data:JSON.stringify({type:'stt',text:'stale words',final:true,turnComplete:true})});expect(callbacks.result).not.toHaveBeenCalled();
+    sockets[1]!.event({type:'stt',text:'Next complete thought.',final:true,turnComplete:true,started:true});
+    expect(callbacks.result).toHaveBeenCalledOnce();expect(callbacks.ended).not.toHaveBeenCalled();
+    recognizer.stop();expect(vi.getTimerCount()).toBe(0);
+  });
+  it('stops retries after explicit stop and never retries a rejected credential',async()=>{
+    vi.useFakeTimers();const sockets=socketFixture(),callbacks=events(),recognizer=new FluxRecognizer('conversation',callbacks);
+    const started=recognizer.start();sockets[0]!.event({type:'ready',sampleRate:16000});await started;
+    sockets[0]!.onclose?.();recognizer.stop();await vi.advanceTimersByTimeAsync(21000);expect(sockets).toHaveLength(1);
+    const again=recognizer.start();sockets[1]!.event({type:'ready',sampleRate:16000});await again;
+    sockets[1]!.event({type:'error',message:'Deepgram rejected authentication (HTTP 401).'});
+    await vi.advanceTimersByTimeAsync(21000);expect(sockets).toHaveLength(2);expect(callbacks.error).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
+  });
+  it('bounds a prolonged outage and preserves failed finalization as an error',async()=>{
+    vi.useFakeTimers();const sockets=socketFixture(),callbacks=events(),recognizer=new FluxRecognizer('conversation',callbacks);
+    const started=recognizer.start();sockets[0]!.event({type:'ready',sampleRate:16000});await started;
+    sockets[0]!.onclose?.();await vi.advanceTimersByTimeAsync(20000);
+    expect(callbacks.error).toHaveBeenCalledOnce();expect(recognizer.running).toBe(false);expect(vi.getTimerCount()).toBe(0);
+    const again=recognizer.start();sockets.at(-1)!.event({type:'ready',sampleRate:16000});await again;
+    sockets.at(-1)!.event({type:'stt',text:'Unfinished words',final:false,turnComplete:false,started:true});
+    const final=expect(recognizer.finish()).rejects.toThrow('disconnected');
+    sockets.at(-1)!.onclose?.();await final;
+    expect(callbacks.error).toHaveBeenCalledTimes(2);expect(vi.getTimerCount()).toBe(0);
+  });
   it('owns 80 ms PCM framing and waits for provider final acknowledgement', async () => {
     const sockets = socketFixture(), callbacks = events();
     const recognizer: SpeechRecognizer = new FluxRecognizer('conversation', callbacks);

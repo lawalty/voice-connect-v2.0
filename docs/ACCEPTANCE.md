@@ -1,5 +1,30 @@
 # Acceptance evidence
 
+## September 26: phone conversation interruptions
+
+The owner reported recognition and reply-channel disconnect notices about five
+minutes into an active phone conversation, including during Fish playback. The
+service had not restarted at the reported times. A six-minute synthetic-silence
+check against the deployed Deepgram and control connections (16:00–16:06 UTC,
+build `b466f4e`) recorded 23 control pongs and no errors or socket closures.
+This does not reproduce or establish the phone's network/browser failure cause.
+
+Recovery now treats control, microphone recognition, and output as separate
+lifecycles. A control retry leaves healthy capture/playback running. Deepgram
+retries temporary failures with bounded backoff and a 20-second deadline, using
+the same microphone stream. Recovery never replays buffered microphone audio.
+An interrupted utterance stays as a draft for review; authentication errors and
+exhausted retries remain visible. The 30-minute recognition connection rotation
+waits for the provider's complete-turn boundary and uses this recovery path.
+
+When final history confirms a reply that is already being spoken, recovery can
+append its verified missing suffix and finish the existing queue. It does not
+replay a spoken prefix or start playback of unrelated recovered history.
+Numeric close codes and retry events are included in bounded device diagnostics.
+Physical foreground phone testing past five minutes remains required.
+
+## Earlier acceptance record
+
 Measured September 24, 2026. This is a working release candidate, not a physically
 qualified Android/car release. All agent checks used clearly labeled synthetic turns.
 
@@ -167,8 +192,9 @@ improvement over old implementations without matched evidence.
   explicit Finish/tap-to-talk; no continuous Android claim.
 - Local VAD endpoints are based on speech and pauses, not semantic certainty that
   a thought is complete. Long natural pauses and speaker echo need device testing.
-- Returning from a connection loss restores text/history automatically; resuming the
-  microphone requires an explicit Start talking.
+- A brief reply-channel loss restores history without stopping a healthy voice
+  session. Temporary Deepgram failures recover automatically between turns;
+  interrupted utterances and prolonged failures preserve a draft for review.
 - Vosk's older browser binding remains a compatibility risk. Functional sample
   recognition is not a language/accent/noise accuracy evaluation.
 - Deepgram now passes live authentication and public-fixture transcription after

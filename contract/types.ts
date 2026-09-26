@@ -48,7 +48,7 @@ export type AudioEvent =
   | { type: 'stt'; text: string; final: boolean; turnComplete: boolean; started?: boolean }
   | { type: 'speech-done' }
   | { type: 'interrupted' }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; retryable?: boolean };
 export interface ModelManifest { id: string; url: string; sha256: string; bytes: number; license: string; sampleRate: number; }
 export interface HarnessAdapter {
   capabilities(): HarnessCapabilities;
@@ -76,6 +76,7 @@ export interface RecognizerEvents {
   result(result: RecognizerResult): void;
   ended(expected: boolean): void;
   error(error: RecognizerError): void;
+  connection?(recovering: boolean, attempt: number, closeCode?: number): void;
 }
 export interface SpeechRecognizer {
   readonly capabilities: RecognizerCapabilities;

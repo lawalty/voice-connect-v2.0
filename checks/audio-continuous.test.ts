@@ -116,6 +116,38 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it('reconnects premium recognition during playback without replacing the microphone or cancelling speech', async () => {
+    const sockets = installFluxSocket(), run = setup();
+    await run.engine.start({ ...preferences, recognition: 'deepgram' }, 'recovery');
+    const track = (await microphone.mock.results[0]!.value).getAudioTracks()[0];
+    sockets[0]!.event({ type: 'stt', text: 'First complete turn.', final: true, turnComplete: true });
+    run.engine.speak('Keep this reply playing.'); run.engine.responseDone();
+    const output = fixture.outputs[0]!, notices = [...run.notices];
+    vi.useFakeTimers(); sockets[0]!.onclose?.();
+    expect(run.phases.at(-1)).toBe('speaking');
+    await vi.advanceTimersByTimeAsync(250); await drain();
+    expect(sockets).toHaveLength(2); expect(microphone).toHaveBeenCalledOnce();
+    expect(track.stop).not.toHaveBeenCalled(); expect(track.enabled).toBe(true);
+    expect(output.cancel).not.toHaveBeenCalled(); expect(output.dispose).not.toHaveBeenCalled();
+    expect(run.callbacks.onInterrupt).not.toHaveBeenCalled(); expect(run.notices).toEqual(notices);
+    output.end(); await vi.advanceTimersByTimeAsync(2000);
+    sockets[1]!.event({ type: 'stt', text: 'Second complete turn.', started: true, final: true, turnComplete: true });
+    expect(run.turns).toEqual(['First complete turn.', 'Second complete turn.']);
+  });
+
+  it('preserves an interrupted utterance instead of automatically sending a partial turn on reconnect', async () => {
+    const sockets = installFluxSocket(), run = setup();
+    await run.engine.start({ ...preferences, recognition: 'deepgram' }, 'interrupted-turn');
+    await frame('start');
+    sockets[0]!.event({ type: 'stt', text: 'Keep these incomplete words', final: false, turnComplete: false });
+    vi.useFakeTimers(); sockets[0]!.onclose?.();
+    await vi.advanceTimersByTimeAsync(21000);
+    expect(sockets).toHaveLength(1); expect(run.turns).toEqual([]);
+    expect(run.drafts.at(-1)).toBe('Keep these incomplete words');
+    expect(run.notices.at(-1)).toContain('interrupted mid-turn');
+    expect(run.phases.at(-1)).toBe('paused');
+  });
+
   it('camera pause lets the current reply finish, then waits silently until input resumes', async () => {
     const run = setup(); await run.engine.start(preferences, 'camera');
     const recognizer = fixture.recognizers[0]!;

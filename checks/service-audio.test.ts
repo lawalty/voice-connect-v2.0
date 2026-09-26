@@ -140,13 +140,25 @@ describe('recognition-only Deepgram Flux transport',()=>{
   ])('maps rejected upgrade HTTP %s to a static actionable message',(statusCode,message)=>{
     const f=fixture(),response={statusCode,resume:vi.fn(),destroy:vi.fn(),headers:{'dg-error':'private provider detail'}};
     f.remote.emit('unexpected-response',{},response);
-    expect(f.client.frames()).toEqual([{type:'error',message}]);expect(response.destroy).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
+    expect(f.client.frames()).toEqual([{type:'error',message,...statusCode>=500?{retryable:true}:{}}]);expect(response.destroy).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
   });
 
   it('reports network failures without blaming the key and clears both timers immediately',()=>{
     const f=fixture();f.client.close.mockImplementation(()=>{f.client.readyState=WebSocket.CLOSING;});
     f.remote.emit('error',new Error('TLS failure with synthetic-recognition-secret in raw context'));
-    expect(f.client.frames()).toEqual([{type:'error',message:'The server could not connect to Deepgram recognition. Retry or choose on-device recognition.'}]);
+    expect(f.client.frames()).toEqual([{type:'error',message:'The server could not connect to Deepgram recognition. Retry or choose on-device recognition.',retryable:true}]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('rotates a long recognition connection after its completed turn, never through the middle of it',async()=>{
+    const f=fixture();f.remote.event({type:'Connected'});
+    f.remote.event({type:'TurnInfo',sequence_id:1,event:'StartOfTurn',transcript:'Keep this whole thought'});
+    await vi.advanceTimersByTimeAsync(30*60*1000);
+    expect(f.remote.close).not.toHaveBeenCalled();
+    f.remote.event({type:'TurnInfo',sequence_id:2,event:'EndOfTurn',transcript:'Keep this whole thought together.'});
+    expect(f.client.frames().slice(-2)).toEqual([
+      {type:'stt',text:'Keep this whole thought together.',final:true,turnComplete:true,started:false},
+      {type:'error',message:'Refreshing the recognition connection.',retryable:true},
+    ]);
     expect(vi.getTimerCount()).toBe(0);
   });
 });

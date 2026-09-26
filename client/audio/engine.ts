@@ -11,6 +11,7 @@ export interface VoiceCallbacks {
   onPhase(phase: VoicePhase): void; onDraft(text: string): void; onTurn(text: string): void;
   onSignal(signal: AcousticSignal): void; onError(message: string): void;
   onInterrupt(): void; onNotice(message: string): void;
+  onInputConnection?(recovering: boolean): void;
 }
 
 export class VoiceEngine {
@@ -73,6 +74,8 @@ export class VoiceEngine {
     window.addEventListener('offline', this.offline);
   }
   diagnostics(): AudioDiagnosticEntry[] { return this.trace.snapshot(); }
+  hasSpeechOutput(): boolean { return Boolean(this.output) && !this.outputFailed && !this.responseSilenced; }
+  connectionRetry(reason: 'reply-timeout' | 'reply-close', closeCode?: number) { this.trace.record('connection-retry', { reason, closeCode }); }
   capabilities(): RecognizerCapabilities | undefined { return this.lastCapabilities ? { ...this.lastCapabilities } : undefined; }
   /** A typed send unlocks the selected output without requesting a microphone. */
   prepareSpeech(preferences: SpeechPreferences, conversationId: string) {
@@ -341,6 +344,19 @@ export class VoiceEngine {
   private createRecognizer(generation: number): SpeechRecognizer {
     const inputEpoch = ++this.inputEpoch;
     const events: RecognizerEvents = {
+      connection: (recovering, attempt, closeCode) => {
+        if (generation !== this.generation || inputEpoch !== this.inputEpoch || !this.active) return;
+        this.callbacks.onInputConnection?.(recovering);
+        this.trace.record(recovering ? 'provider-reconnecting' : 'provider-restored', { provider: this.preferences?.recognition, attempt, closeCode });
+        if (!recovering && attempt === 0) return;
+        if (recovering && (this.turnAudio || this.transcript.text || this.finishing)) {
+          this.captureFailure('The microphone connection was interrupted mid-turn. Your words are kept in the draft; review them before continuing.'); return;
+        }
+        this.ready = !recovering && Boolean(this.recognizer?.running); this.lastCaptureAt = 0;
+        this.prebuffer = []; this.prebufferSamples = 0; this.vadIgnoreBefore = this.vadSequence;
+        if (!recovering) this.vad?.postMessage({ type: 'reset' });
+        this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : this.ready ? 'listening' : 'reconnecting');
+      },
       result: (result) => {
         if (generation !== this.generation || inputEpoch !== this.inputEpoch || this.inputPaused || !this.active || this.gap || this.muted) return;
         // A remote onset/result cannot bypass the local playback-aware decision.
@@ -365,7 +381,7 @@ export class VoiceEngine {
         if (generation !== this.generation || inputEpoch !== this.inputEpoch) return;
         if (error.code === 'capture' && this.recognizer?.capabilities.input === 'browser-managed') { this.browserMeterSupported = false; this.closeCapture(); }
         this.trace.record(error.code === 'overload' ? 'backpressure' : 'capture-gap', { provider: this.preferences?.recognition, reason: 'provider-error' });
-        if (this.ready && error.fatal) this.captureFailure(error.message);
+        if (error.fatal && (this.ready || this.preferences?.recognition === 'deepgram' && this.phase !== 'starting')) this.captureFailure(error.message);
         else if (!error.fatal) this.callbacks.onNotice(error.message);
       },
     };
@@ -470,7 +486,7 @@ export class VoiceEngine {
   }
   private captureFailure(message: string) {
     if (!this.active || this.gap) return;
-    this.gap = true; this.callbacks.onNotice(message); this.stop(); this.setPhase('paused');
+    this.gap = true; this.callbacks.onNotice(message); this.stop(); this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : 'paused');
   }
   /** A deliberate End has its own sound. Shut capture/output first; never wait
    * for a sound to load, and never play it for a failure or cancelled startup. */
@@ -483,6 +499,7 @@ export class VoiceEngine {
   }
   stop() {
     ++this.generation; ++this.inputEpoch; this.inputPaused = false; this.active = false; this.ready = false; this.finishing = false;
+    this.callbacks.onInputConnection?.(false);
     this.cues?.cancel();
     clearTimeout(this.maxTurnTimer); this.recognizer?.stop(); this.recognizer = undefined;
     this.closeCapture();
@@ -557,7 +574,9 @@ export class VoiceEngine {
     if (document.visibilityState === 'hidden' && this.active) this.captureFailure('Voice paused because the page was hidden. Reopen it and tap the microphone to resume.');
   };
   private offline = () => {
-    if (this.active && this.recognizer?.capabilities.processing !== 'local') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.');
+    // Flux owns transient transport retries; an unrelated connection event must
+    // not destroy the microphone route or healthy speech output.
+    if (this.active && this.recognizer?.capabilities.processing !== 'local' && this.preferences?.recognition !== 'deepgram') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.');
   };
   dispose() {
     this.disposed = true; ++this.playbackGeneration; this.stop(); this.output?.dispose(); this.output = undefined; this.cues?.dispose(); this.cues = undefined;
