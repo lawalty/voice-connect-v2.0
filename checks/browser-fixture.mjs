@@ -28,7 +28,14 @@ gateway.on('connection',ws=>{
     if(f.method==='agents.list')return res({defaultId:'northpointe',agents:[{id:'northpointe',name:'NorthPointe'}]});
     if(f.method==='models.list')return res({models:[{id:'gpt-6-astra',provider:'openai',input:['text','image']}]});
     if(f.method==='sessions.messages.subscribe')return res({ok:true});
-    if(f.method==='chat.history')return res({sessionId:p.sessionKey,messages:sessions.get(p.sessionKey)||[],sessionInfo:{modelProvider:'openai',model:'gpt-6-astra'}});
+    if(f.method==='chat.history'){
+      const messages=sessions.get(p.sessionKey)||[];
+      // History reconciliation needs the same active-run evidence as the native
+      // gateway. Omitting it falsely makes an acknowledged, still-running turn
+      // uncertain when a lost-ack retry beats the fixture's final response.
+      const activeRunIds=messages.filter(message=>message.role==='user'&&timers.has(message.runId)).map(message=>message.runId);
+      return res({sessionId:p.sessionKey,messages,sessionInfo:{modelProvider:'openai',model:'gpt-6-astra',hasActiveRun:activeRunIds.length>0,activeRunIds}});
+    }
     if(f.method==='chat.send'){
       if(receipts.has(p.idempotencyKey))return res(receipts.get(p.idempotencyKey));
       const runId=p.idempotencyKey, receipt={runId,status:'started'};

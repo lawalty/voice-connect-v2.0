@@ -64,7 +64,8 @@ test('Orb clipboard button previews text and caption, pauses input, and retries 
   await page.getByRole('button', { name: 'Paste from clipboard' }).click();
   await expect(page.getByLabel('Copied text')).toHaveText('Copied project notes.\nSecond line.');
   expect((await p.state()).reads).toBe(1); expect((await p.state()).mic).toBe(0);
-  await page.getByLabel('Caption (optional)').fill('Summarize these notes.');
+  // Keep the native run active through reconciliation and the immediate retry.
+  await page.getByLabel('Caption (optional)').fill('Summarize these notes (slow fixture).');
   expect(p.turns).toHaveLength(0);
   await page.route('**/turns', async route => { await route.fetch(); await route.abort('failed'); }, { times: 1 });
   await page.getByRole('button', { name: 'Send clipboard', exact: true }).click();
@@ -74,7 +75,7 @@ test('Orb clipboard button previews text and caption, pauses input, and retries 
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect.poll(async () => (await p.state()).mic).toBe(1);
   expect(p.turns).toHaveLength(2); expect(p.turns[0]).toEqual(p.turns[1]);
-  expect(p.turns[0]!.text).toBe('Summarize these notes.\n\nCopied project notes.\nSecond line.');
+  expect(p.turns[0]!.text).toBe('Summarize these notes (slow fixture).\n\nCopied project notes.\nSecond line.');
   expect(p.turns[0]!.attachments).toBeUndefined();
   await expect.poll(async () => (await p.state()).spoken).toBeGreaterThan(0);
   await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
