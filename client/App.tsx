@@ -71,6 +71,8 @@ export default function App() {
   const completed = useRef(new Set<string>()), cancelled = useRef(new Set<string>()), speakingTurn = useRef(''), sendingRef = useRef(false), aborting = useRef<Promise<void> | null>(null), suppressAbort = useRef(false);
   const audibleTurns = useRef(new Set<string>()), speakerMutedRef = useRef(speakerMuted);
   const shareAttempts = useRef(new Set<string>());
+  const conversationRevision = useRef(0), historyRead = useRef(0);
+  const checkStream = useRef<() => void>(() => {});
   activeTurnRef.current = activeTurn; conversationRef.current = conversationId; voiceRef.current = voiceActive;
 
   const updateDraft = useCallback((next: string | ((current: string) => string)) => {
@@ -119,15 +121,40 @@ export default function App() {
   }, [updateDraft, clearLiveDraft]);
   const refreshSettings = useCallback(async () => { setSettings(await api<AppSettings>('/api/settings')); }, []);
   const refreshHistory = useCallback(async (id: string, baseline = false) => {
+    const request = ++historyRead.current, revision = conversationRevision.current;
     const view = await api<ConversationView>(`/api/conversations/${encodeURIComponent(id)}`);
-    if (conversationRef.current !== id) return;
-    setMessages(view.messages); setActiveTurn(view.activeTurn || null);
+    // A slow history read must never overwrite a newer streamed update or send.
+    if (conversationRef.current !== id || request !== historyRead.current || revision !== conversationRevision.current) return false;
+    const previousTurn = activeTurnRef.current;
+    setMessages(current => {
+      // Native history may omit the unfinished assistant message. Preserve the
+      // live text for that active run while restoring the rest of the history.
+      const streaming = current.find(message => message.role === 'assistant' && message.turnId === view.activeTurn?.turnId);
+      if (!streaming) return view.messages;
+      return view.messages.some(message => message.role === 'assistant' && message.turnId === streaming.turnId)
+        ? view.messages.map(message => message.role === 'assistant' && message.turnId === streaming.turnId ? { ...message, text: streaming.text } : message)
+        : [...view.messages, streaming];
+    });
+    setActiveTurn(view.activeTurn || null); activeTurnRef.current = view.activeTurn || null;
+    const terminal = new Set(view.messages.filter(message => message.turnId && ['complete', 'cancelled', 'failed'].includes(message.delivery || '')).map(message => message.turnId!));
+    let missedCompletion = false;
+    for (const turnId of audibleTurns.current) if (terminal.has(turnId)) {
+      audibleTurns.current.delete(turnId); completed.current.add(turnId); missedCompletion = true;
+    }
+    if (missedCompletion) {
+      // Recovered history is silent; stop stale waiting/playback without
+      // cancelling any OpenClaw run or replaying already-finished speech.
+      suppressAbort.current = true; engine.current?.interrupt('manual', false); suppressAbort.current = false;
+      engine.current?.responseDone();
+    }
+    if (!view.activeTurn && (missedCompletion || previousTurn && terminal.has(previousTurn.turnId))) setActivity('');
     if (baseline) for (const message of view.messages) if (message.role === 'assistant' && message.turnId) {
       // Background reconciliation must not consume speech that the active voice
       // turn has not played. Initial/reconnected history still stays silent.
       const liveSpeechTurn = audibleTurns.current.has(message.turnId) && !completed.current.has(message.turnId) && !cancelled.current.has(message.turnId);
       if (!liveSpeechTurn) spoken.current.set(message.turnId, message.text);
     }
+    return true;
   }, []);
 
   useEffect(() => {
@@ -185,6 +212,32 @@ export default function App() {
   useEffect(() => {
     if (!conversationId || !status?.authenticated) return;
     let alive = true, socket: WebSocket | null = null, timer: ReturnType<typeof setTimeout>, retries = 0, connectionEpoch = 0;
+    let probe: { nonce: string; sync: boolean } | undefined, probeTimer: ReturnType<typeof setTimeout>, helloTimer: ReturnType<typeof setTimeout>;
+    let eventRevision = 0, hasHello = false, syncing = false, syncAgain = false, syncTimer: ReturnType<typeof setTimeout>;
+    async function syncHistory() {
+      if (!alive || !navigator.onLine || document.visibilityState === 'hidden') return;
+      if (syncing) { syncAgain = true; return; }
+      const epoch = connectionEpoch; syncing = true;
+      try {
+        // Coalesce resume/focus/probe events and retry a snapshot superseded by
+        // live traffic, without polling continuously while the agent streams.
+        for (let attempt = 0; attempt < 3 && alive && epoch === connectionEpoch; attempt++) {
+          syncAgain = false;
+          if (await refreshHistory(conversationId, true)) break;
+        }
+      } catch { if (alive && epoch === connectionEpoch) reconnect('Unable to refresh your conversation. Retrying…'); }
+      finally { syncing = false; if (syncAgain && alive && epoch === connectionEpoch) { clearTimeout(syncTimer); syncTimer = setTimeout(() => void syncHistory(), 500); } }
+    }
+    function probeStream(sync = false) {
+      if (!alive || !navigator.onLine || document.visibilityState === 'hidden') return;
+      if (probe) { probe.sync ||= sync; return; }
+      if (socket?.readyState !== WebSocket.OPEN) { if (!socket) { clearTimeout(timer); void connect(); } return; }
+      probe = { nonce: crypto.randomUUID(), sync }; const epoch = connectionEpoch;
+      probeTimer = setTimeout(() => { if (alive && epoch === connectionEpoch) reconnect('Reply connection stalled. Reconnecting…'); }, 4000);
+      try { socket.send(JSON.stringify({ type: 'ping', nonce: probe.nonce })); }
+      catch { reconnect('Reply connection interrupted. Reconnecting…'); }
+    }
+    checkStream.current = () => probeStream();
     setMessages([]); updateHeard(''); setActiveTurn(null); setActivity(''); spoken.current.clear(); sequences.current.clear(); completed.current.clear(); cancelled.current.clear(); speakingTurn.current = ''; audibleTurns.current.clear();
     function suspendVoice() {
       cancelVoiceStart();
@@ -196,7 +249,7 @@ export default function App() {
       if (hadVoice) setNotice('Voice paused during the connection loss. Your conversation is saved; tap the orb when connected.');
     }
     function disconnect() {
-      ++connectionEpoch; clearTimeout(timer);
+      ++connectionEpoch; clearTimeout(timer); clearTimeout(probeTimer); clearTimeout(helloTimer); clearTimeout(syncTimer); probe = undefined; eventRevision = 0; hasHello = false;
       const previous = socket; socket = null;
       if (previous) { previous.onclose = null; previous.onmessage = null; previous.onopen = null; previous.onerror = null; previous.close(); }
       setConnected(false);
@@ -215,6 +268,7 @@ export default function App() {
         await refreshHistory(conversationId, true); if (!alive || epoch !== connectionEpoch || !navigator.onLine) return;
         const currentSocket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/events?conversationId=${encodeURIComponent(conversationId)}`);
         socket = currentSocket;
+        helloTimer = setTimeout(() => { if (alive && epoch === connectionEpoch) reconnect('Reply connection did not respond. Retrying…'); }, 8000);
         // The socket opening alone does not confirm the conversation subscription.
         function confirmConnection() {
           retries = 0; setConnected(true); setConnectionIssue('');
@@ -227,7 +281,24 @@ export default function App() {
           if (!alive || epoch !== connectionEpoch) return;
           let event: ServerEvent; try { event = JSON.parse(message.data); } catch { return; }
           if ('conversationId' in event && event.conversationId !== conversationId) return;
-          if (event.type === 'hello') { setSettings(value => value ? { ...value, harness: event.capabilities } : value); confirmConnection(); }
+          if (event.type === 'pong') {
+            if (!probe || event.nonce !== probe.nonce) return;
+            const sync = probe.sync || (typeof event.revision === 'number' && event.revision > eventRevision);
+            clearTimeout(probeTimer); probe = undefined;
+            if (typeof event.revision === 'number') eventRevision = Math.max(eventRevision, event.revision);
+            if (sync) void syncHistory();
+            return;
+          }
+          if (typeof event.revision === 'number') {
+            if (event.revision > eventRevision + 1) void syncHistory();
+            eventRevision = Math.max(eventRevision, event.revision);
+          }
+          if (event.type === 'assistant' || event.type === 'complete' || event.type === 'turn') ++conversationRevision.current;
+          if (event.type === 'hello') {
+            clearTimeout(helloTimer); setSettings(value => value ? { ...value, harness: event.capabilities } : value); confirmConnection();
+            // Close the gap between the initial history read and subscription.
+            if (!hasHello) { hasHello = true; void syncHistory(); }
+          }
           if (event.type === 'connection') { setSettings(value => value ? { ...value, harness: { ...value.harness, connected: event.connected, reason: event.connected ? undefined : event.reason } } : value); }
           if (event.type === 'turn') {
             setMessages(items => items.map(item => item.role === 'user' && item.turnId === event.turnId ? { ...item, delivery: event.delivery } : item));
@@ -285,9 +356,19 @@ export default function App() {
         socket.onerror = () => currentSocket.close();
       } catch { if (!alive || epoch !== connectionEpoch) return; reconnect('Unable to refresh your conversation. Retrying…'); }
     }
+    const foreground = () => probeStream(true);
+    const heartbeat = setInterval(() => probeStream(), 15000);
     window.addEventListener('offline', offline); window.addEventListener('online', online);
+    window.addEventListener('focus', foreground); window.addEventListener('pageshow', foreground);
+    document.addEventListener('visibilitychange', foreground); document.addEventListener('resume', foreground);
     void connect();
-    return () => { alive = false; window.removeEventListener('offline', offline); window.removeEventListener('online', online); disconnect(); };
+    return () => {
+      alive = false; checkStream.current = () => {}; clearInterval(heartbeat);
+      window.removeEventListener('offline', offline); window.removeEventListener('online', online);
+      window.removeEventListener('focus', foreground); window.removeEventListener('pageshow', foreground);
+      document.removeEventListener('visibilitychange', foreground); document.removeEventListener('resume', foreground);
+      disconnect();
+    };
   }, [conversationId, status?.authenticated, refreshHistory, updateHeard, cancelVoiceStart]);
 
   useEffect(() => { if (conversationId) { try { localStorage.setItem(`vc2:draft:${conversationId}`, composerValue); } catch {} } }, [composerValue, conversationId]);
@@ -320,6 +401,7 @@ export default function App() {
     }
     if (!navigator.onLine && source === 'share') throw new Error('You’re offline. Your content and caption are kept here.');
     if (!navigator.onLine) { updateDraft(trimmed); setNotice('You’re offline. Your words are kept in the composer.'); return; }
+    ++conversationRevision.current; checkStream.current();
     sendingRef.current = true; setSending(true); setNotice('');
     const turnId = imageTurn?.turnId ?? crypto.randomUUID(), submittedRevision = draftRevision.current;
     const checkingShare = source === 'share' && shareAttempts.current.has(turnId);
@@ -339,6 +421,7 @@ export default function App() {
       if (source === 'share') shareAttempts.current.add(turnId);
       const receipt = await api<TurnReceipt>(`/api/conversations/${encodeURIComponent(id)}/turns`, { method: 'POST', body: JSON.stringify({ id: turnId, text: trimmed, ...(photo ? { attachments: [photo.id] } : {}) }) });
       if (conversationRef.current !== id) return;
+      ++conversationRevision.current;
       setMessages(items => items.some(item => item.turnId === receipt.turnId && item.role === 'user') ? items : [...items, { id: turnId, role: 'user', text: trimmed, createdAt: Date.now(), turnId: receipt.turnId, delivery: receipt.delivery, attachments: photo ? [photo] : undefined }]);
       if (!completed.current.has(receipt.turnId) && ['pending', 'accepted', 'uncertain'].includes(receipt.delivery)) { setActiveTurn(receipt); activeTurnRef.current = receipt; }
       if (receipt.delivery === 'failed' || receipt.delivery === 'cancelled' || receipt.delivery === 'uncertain') {

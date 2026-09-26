@@ -33,14 +33,14 @@ function securityPath(req:FastifyRequest):string {
 export async function buildApp(options:AppOptions={}) {
   const cfg=loadConfig(options.config),store=new Store(cfg.stateDir,cfg.masterKey);
   const app=Fastify({logger:false,bodyLimit:128*1024,trustProxy:false,requestTimeout:30000});
-  const sockets=new Map<WebSocket,{conversationId:string;token:string;events:boolean;alive:boolean;provider?:'fish'|'deepgram'}>();
+  const sockets=new Map<WebSocket,{conversationId:string;token:string;events:boolean;alive:boolean;revision:number;provider?:'fish'|'deepgram'}>();
   const heartbeat=setInterval(()=>{for(const [socket,binding] of sockets){if(!store.session(binding.token)){socket.close(1008,'Sign in again');continue;}if(!binding.alive){socket.terminate();continue;}binding.alive=false;if(socket.readyState===1)socket.ping();}},20000);heartbeat.unref();
   const publish=(event:ServerEvent)=>{
     for(const [socket,binding] of sockets){
       if(!store.session(binding.token)){socket.close(1008,'Sign in again');continue;}
       if(!binding.events)continue;
       if('conversationId'in event&&event.conversationId!==binding.conversationId)continue;
-      if(socket.readyState===1){if(socket.bufferedAmount>1024*1024){socket.close(1013,'Reconnect to restore your conversation');continue;}socket.send(JSON.stringify(event));}
+      if(socket.readyState===1){if(socket.bufferedAmount>1024*1024){socket.close(1013,'Reconnect to restore your conversation');continue;}socket.send(JSON.stringify({...event,revision:++binding.revision}));}
     }
   };
   const gateway=options.gatewayFactory?.(cfg,store,publish)??new Gateway(cfg,store,publish);
@@ -163,9 +163,25 @@ export async function buildApp(options:AppOptions={}) {
   app.post('/api/questions/:id',async(req,reply)=>{const p=z.object({id}).parse(req.params),b=z.object({answer:z.string().min(1).max(4000)}).strict().parse(req.body);try{await gateway.answer(p.id,b.answer);return {ok:true};}catch{return reply.code(409).send({error:'This question is no longer available.'});}});
   function bindSocket(socket:WebSocket,req:FastifyRequest):string|undefined {
     const q=z.object({conversationId:id}).passthrough().safeParse(req.query);if(!q.success||!store.conversation(q.data.conversationId)||sockets.size>=12){socket.close(1008,'Conversation unavailable');return;}
-    sockets.set(socket,{conversationId:q.data.conversationId,token:req.cookies.vc_session!,events:req.routeOptions.url==='/api/events',alive:true});socket.on('pong',()=>{const binding=sockets.get(socket);if(binding)binding.alive=true;});socket.on('close',()=>sockets.delete(socket));socket.on('error',()=>{});return q.data.conversationId;
+    sockets.set(socket,{conversationId:q.data.conversationId,token:req.cookies.vc_session!,events:req.routeOptions.url==='/api/events',alive:true,revision:0});socket.on('pong',()=>{const binding=sockets.get(socket);if(binding)binding.alive=true;});socket.on('close',()=>sockets.delete(socket));socket.on('error',()=>{});return q.data.conversationId;
   }
-  app.get('/api/events',{websocket:true},(socket,req)=>{const conversationId=bindSocket(socket,req);if(!conversationId)return;socket.send(JSON.stringify({type:'hello',conversationId,capabilities:gateway.capabilities()}));});
+  app.get('/api/events',{websocket:true},(socket,req)=>{
+    const conversationId=bindSocket(socket,req);if(!conversationId)return;
+    socket.send(JSON.stringify({type:'hello',conversationId,capabilities:gateway.capabilities(),revision:0}));
+    // Native WebSocket pong proves the browser transport is alive, not that page
+    // JavaScript is receiving conversation events. Echo a page-level probe and
+    // its last sent event revision without storing any message or device data.
+    let probeWindow=Date.now(),probeCount=0;
+    socket.on('message',raw=>{
+      const binding=sockets.get(socket),text=raw.toString();if(!binding||!store.session(binding.token)||text.length>256)return;
+      let message:unknown;try{message=JSON.parse(text);}catch{return;}
+      const ping=z.object({type:z.literal('ping'),nonce:z.string().min(1).max(64)}).strict().safeParse(message);
+      if(!ping.success||socket.readyState!==1)return;
+      if(Date.now()-probeWindow>=60000){probeWindow=Date.now();probeCount=0;}
+      if(++probeCount>120){socket.close(1008,'Too many connection checks');return;}
+      socket.send(JSON.stringify({type:'pong',nonce:ping.data.nonce,revision:binding.revision}));
+    });
+  });
   app.get('/api/audio',{websocket:true},(socket,req)=>{
     const conversationId=bindSocket(socket,req);if(!conversationId)return;
     const q=z.object({kind:z.enum(['stt','tts']),provider:z.enum(['deepgram','fish']).default('deepgram'),voice:id.optional(),conversationId:id}).strict().safeParse(req.query);

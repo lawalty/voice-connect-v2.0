@@ -30,7 +30,8 @@ export interface Message { id: string; role: 'user' | 'assistant'; text: string;
 export interface TurnRequest { id: string; text: string; attachments?: string[]; }
 export interface TurnReceipt { turnId: string; delivery: Delivery; runId?: string; }
 export interface ConversationView { conversation: Conversation; messages: Message[]; activeTurn?: TurnReceipt; }
-export type ServerEvent =
+export type ServerEvent = (
+  | { type: 'pong'; nonce: string }
   | { type: 'hello'; conversationId: string; capabilities: HarnessCapabilities }
   | { type: 'turn'; conversationId: string; turnId: string; delivery: Delivery; runId?: string; error?: string }
   | { type: 'assistant'; conversationId: string; turnId: string; runId: string; seq: number; text: string; replace: boolean }
@@ -40,7 +41,8 @@ export type ServerEvent =
   | { type: 'question'; conversationId: string; id: string; text: string; options?: string[] }
   | { type: 'connection'; connected: boolean; reason?: string }
   | { type: 'reconcile'; conversationId: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+) & { revision?: number };
 export type AudioEvent =
   | { type: 'ready'; sampleRate: number; playbackWindowBytes?: number }
   | { type: 'stt'; text: string; final: boolean; turnComplete: boolean; started?: boolean }

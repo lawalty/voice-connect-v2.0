@@ -77,6 +77,35 @@ async function fixture(unremovableBootstrap=false) {
   return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
 }
 describe('owner boundary',()=>{
+  it('probes authenticated event delivery with independent revisions on both device connections',async()=>{
+    const f=await fixture(),address=await f.app.listen({host:'127.0.0.1',port:0});
+    const open=()=>{
+      const received:ServerEvent[]=[];
+      const socket=new WebSocket(`${address.replace('http:','ws:')}/api/events?conversationId=${f.conversation.id}`,{headers:{origin,cookie:f.cookie}});
+      socket.on('message',raw=>received.push(JSON.parse(raw.toString())));
+      return {socket,received};
+    };
+    const first=open(),second=open();
+    try {
+      for(const client of [first,second])await expect.poll(()=>client.received[0]).toMatchObject({type:'hello',revision:0});
+      first.socket.send(JSON.stringify({type:'ping',nonce:'before-send'}));
+      await expect.poll(()=>first.received.at(-1)).toEqual({type:'pong',nonce:'before-send',revision:0});
+      expect((await f.app.inject({method:'POST',url:`/api/conversations/${f.conversation.id}/turns`,headers:f.headers,payload:{id:'two-device-turn',text:'Synthetic device delivery check'}})).statusCode).toBe(200);
+      for(const client of [first,second]){
+        await expect.poll(()=>client.received.some(e=>e.type==='turn'&&e.turnId==='two-device-turn'&&e.delivery==='accepted')).toBe(true);
+        const events=client.received.filter(e=>e.type!=='pong'&&(e.revision??0)>0);
+        expect(events.map(e=>e.revision)).toEqual(events.map((_,index)=>index+1));
+        client.socket.send(JSON.stringify({type:'ping',nonce:'after-send'}));
+        await expect.poll(()=>client.received.at(-1)).toEqual({type:'pong',nonce:'after-send',revision:events.length});
+      }
+      // Invalid control payloads cannot become stored conversation text.
+      first.socket.send(JSON.stringify({type:'ping',nonce:'not-accepted',text:'must not be stored'}));
+      first.socket.send(JSON.stringify({type:'ping',nonce:'valid-barrier'}));
+      await expect.poll(()=>first.received.at(-1)).toMatchObject({type:'pong',nonce:'valid-barrier'});
+      expect(first.received.some(e=>e.type==='pong'&&e.nonce==='not-accepted')).toBe(false);
+      expect(f.calls.filter(call=>call.method==='chat.send')).toHaveLength(1);
+    } finally {first.socket.terminate();second.socket.terminate();}
+  });
   it('preserves HTTP 429 for the twelve-attempt authentication limit',async()=>{
     const f=await fixture();
     for(let attempt=0;attempt<12;attempt++)expect((await f.app.inject({method:'POST',url:'/api/auth/login',headers:{origin},payload:{password:'an incorrect test password'}})).statusCode).toBe(401);
