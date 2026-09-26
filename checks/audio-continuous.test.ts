@@ -114,6 +114,58 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it('opens Android playback after capture and replaces the route when voice restarts', async () => {
+    Object.assign(navigator, { userAgent: 'Mozilla/5.0 (Linux; Android 16)' });
+    let captureReady = false;
+    const contexts: RoutedContext[] = [];
+    class RoutedContext {
+      readonly route = captureReady ? 'call' : 'media';
+      state = 'running'; sampleRate = 48000; destination = {}; audioWorklet = { addModule: async () => {} };
+      onstatechange: (() => void) | null = null;
+      close = vi.fn(async () => { this.state = 'closed'; });
+      async resume() {}
+      createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+      constructor() { contexts.push(this); }
+    }
+    vi.stubGlobal('AudioContext', RoutedContext);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); microphone.mockClear();
+    let allowCapture!: () => void;
+    microphone.mockImplementationOnce(() => new Promise(resolve => { allowCapture = () => { captureReady = true; resolve(stream); }; }));
+    const run = setup();
+    const starting = run.engine.start(preferences, 'one-conversation');
+    expect(contexts).toHaveLength(0); // Permission/route selection is still pending.
+    allowCapture(); await starting;
+    expect(contexts.map(context => context.route)).toEqual(['call']);
+    const lateOldEvent = contexts[0]!.onstatechange;
+    run.engine.speak('The reply uses this session clock.'); run.engine.responseDone();
+    fixture.outputs[0]!.end();
+    expect(contexts).toHaveLength(1); // No per-turn restart or extra playback delay.
+    run.engine.stop(); captureReady = false;
+    microphone.mockImplementationOnce(async () => { captureReady = true; return stream; });
+    await run.engine.start(preferences, 'one-conversation');
+    expect(contexts.map(context => context.route)).toEqual(['call', 'call']);
+    expect(contexts[0]!.close).toHaveBeenCalledOnce();
+    lateOldEvent?.(); // A retired output must not stop the new microphone session.
+    expect(run.phases.at(-1)).toBe('listening');
+    expect(run.callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it('does not open Android playback for denied or cancelled microphone requests', async () => {
+    Object.assign(navigator, { userAgent: 'Mozilla/5.0 (Linux; Android 16)' });
+    const createContext = vi.fn(); vi.stubGlobal('AudioContext', createContext);
+    const run = setup();
+    microphone.mockRejectedValueOnce(new Error('Permission denied'));
+    await run.engine.start(preferences, 'one-conversation');
+    expect(createContext).not.toHaveBeenCalled();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    let resolveCapture!: (value: typeof stream) => void;
+    microphone.mockImplementationOnce(() => new Promise(resolve => { resolveCapture = resolve; }));
+    const pending = run.engine.start(preferences, 'one-conversation');
+    run.engine.stop(); resolveCapture(stream); await pending;
+    expect(stream.getTracks()[0].stop).toHaveBeenCalled();
+    expect(createContext).not.toHaveBeenCalled();
+  });
+
   it('keeps a new recording alive when a cancelled browser microphone request rejects late', async () => {
     vi.stubGlobal('SpeechRecognition', class {});
     let rejectOld!: (reason: Error) => void;

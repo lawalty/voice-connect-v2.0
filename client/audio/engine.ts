@@ -90,13 +90,18 @@ export class VoiceEngine {
   };
   private warmContext(): AudioContext {
     if (!this.context || this.context.state === 'closed') {
-      this.context = new AudioContext({ latencyHint: 'interactive' });
-      this.context.onstatechange = () => {
-        if (this.active && this.ready && this.context?.state !== 'running') { this.trace.record('capture-gap', { reason: 'suspended' }); this.captureFailure('Browser audio was suspended. Review the draft before restarting.'); }
+      const context = this.context = new AudioContext({ latencyHint: 'interactive' });
+      context.onstatechange = () => {
+        if (this.context === context && this.active && this.ready && context.state !== 'running') { this.trace.record('capture-gap', { reason: 'suspended' }); this.captureFailure('Browser audio was suspended. Review the draft before restarting.'); }
       };
     }
     void this.context.resume().catch(() => this.callbacks.onNotice('Tap the microphone or speaker to allow audio playback.'));
     return this.context;
+  }
+  private releaseContext() {
+    this.cues?.dispose(); this.cues = undefined;
+    const context = this.context; this.context = undefined;
+    if (context) { context.onstatechange = null; void context.close().catch(() => {}); }
   }
   async start(preferences: SpeechPreferences, conversationId: string): Promise<void> {
     if (this.disposed) return;
@@ -107,8 +112,13 @@ export class VoiceEngine {
     this.preferences = { ...preferences }; this.conversationId = conversationId;
     this.active = true; this.muted = false; this.gap = false; this.transcript.clear();
     this.callbacks.onDraft(''); this.setPhase('starting');
-    const context = this.warmContext();
-    this.cues?.dispose(); this.cues = new ListeningCues(context, this.playbackReference);
+    // Android assigns low-latency output to the mode active when it opens.
+    // Opening it before processed capture leaves a media player in call mode:
+    // the hardware buttons then adjust a different volume stream. Acquire the
+    // mic first and use a fresh context on every Android voice start. Other
+    // browsers retain activation in the original tap (including Safari).
+    if (/Android/i.test(navigator.userAgent)) this.releaseContext();
+    else this.warmContext();
     try {
       if (!window.isSecureContext) throw new Error('Voice requires HTTPS or localhost.');
       const recognizer = this.recognizer = this.createRecognizer(generation);
@@ -118,14 +128,14 @@ export class VoiceEngine {
         if (preferences.handsFree) this.callbacks.onNotice('Browser speech uses tap-to-talk here. Choose local Vosk or premium recognition for hands-free turns.');
         this.callbacks.onNotice('Browser recognition may send microphone audio to your browser vendor. Availability and recording duration depend on your browser.');
         // Built-in recognition owns its capture. A separate meter is best effort only.
-        try { if (this.browserMeterSupported) await this.openCapture(context, generation, false); }
+        try { if (this.browserMeterSupported) await this.openCapture(generation, false); }
         catch {
           if (generation !== this.generation) return;
           this.closeCapture(); this.callbacks.onNotice('Live microphone visualization is unavailable with browser speech on this device.');
         }
         if (generation !== this.generation) return;
       } else {
-        await this.openCapture(context, generation, true);
+        await this.openCapture(generation, true);
         if (generation !== this.generation) return;
         if (recognizer.capabilities.processing === 'local') this.callbacks.onNotice('Loading the downloaded local Vosk model. Audio stays on this device.');
         if (preferences.handsFree && preferences.output === 'browser') this.callbacks.onNotice('Hands-free interruption with a browser voice depends on this device’s echo cancellation. Headphones can improve it.');
@@ -134,6 +144,7 @@ export class VoiceEngine {
       const startedAt = performance.now(); this.trace.record('provider-starting', { provider: preferences.recognition });
       await recognizer.start();
       if (generation !== this.generation) return;
+      this.cues?.dispose(); this.cues = new ListeningCues(this.warmContext(), this.playbackReference);
       this.trace.record('provider-ready', { provider: preferences.recognition, durationMs: performance.now() - startedAt });
       this.ready = recognizer.running; this.setPhase(this.ready ? 'listening' : 'paused');
       if (preferences.keepAwake) await this.requestWakeLock(generation);
@@ -143,11 +154,12 @@ export class VoiceEngine {
       this.stop(); this.setPhase('error'); this.callbacks.onError(message);
     }
   }
-  private async openCapture(context: AudioContext, generation: number, requireVad: boolean) {
+  private async openCapture(generation: number, requireVad: boolean) {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone capture is unavailable in this browser.');
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
     if (generation !== this.generation) { stream.getTracks().forEach((track) => track.stop()); return; }
     this.stream = stream;
+    const context = this.warmContext();
     const settings = stream.getAudioTracks()[0]?.getSettings();
     this.trace.record('capture-settings', { sampleRate: settings?.sampleRate ?? context.sampleRate, channelCount: settings?.channelCount,
       echoCancellation: typeof settings?.echoCancellation === 'boolean' ? settings.echoCancellation : undefined,
@@ -461,7 +473,7 @@ export class VoiceEngine {
   };
   dispose() {
     this.disposed = true; ++this.playbackGeneration; this.stop(); this.output?.dispose(); this.output = undefined; this.cues?.dispose(); this.cues = undefined;
-    void this.context?.close().catch(() => {}); this.context = undefined;
+    this.releaseContext();
     document.removeEventListener('visibilitychange', this.visibility); window.removeEventListener('offline', this.offline);
   }
 }
