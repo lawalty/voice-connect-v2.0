@@ -105,3 +105,6 @@
   .messenger-workspace .conversation-title { font-size: 15px; gap: 2px; }
   .messenger-workspace .voice-controls { gap: 0; }
 }
+
+.camera-caption { margin-top: 18px; }
+.camera-caption textarea { width: 100%; min-height: 90px; max-height: 180px; }

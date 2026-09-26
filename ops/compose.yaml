@@ -14,7 +14,7 @@ services:
       VC_STATE_DIR: /state
       VC_GATEWAY_URL: ws://127.0.0.1:18789
       VC_GATEWAY_MODEL: openai/gpt-6-astra
-      VC_IMAGE_MODEL_ALLOWLIST: openai/gpt-6-astra
+      VC_IMAGE_MODEL_ALLOWLIST: openai/gpt-6-astra,openai/gpt-6-luna
       VC_GATEWAY_TOKEN_FILE: /run/secrets/gateway-token
       VC_MASTER_KEY_FILE: /run/secrets/master-key
       VC_BOOTSTRAP_TOKEN_FILE: /run/secrets/bootstrap-token

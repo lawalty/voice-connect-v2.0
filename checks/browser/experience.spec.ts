@@ -42,51 +42,6 @@ test('private entry, continuous text conversation, and refresh preserve history'
   await page.screenshot({path:info.outputPath('conversation.png'),fullPage:true});
   expect(errors).toEqual([]);
 });
-test('awake orb camera captures deliberately and shares its attachment with messenger',async({page,context},info)=>{
-  await context.grantPermissions(['camera','microphone']);
-  await page.addInitScript(()=>{
-    localStorage.setItem('vc2:speech',JSON.stringify({recognition:'browser',output:'browser',handsFree:false,audioCues:false}));
-    class Recognition {
-      onstart?:()=>void; onend?:()=>void;
-      start(){queueMicrotask(()=>this.onstart?.());} stop(){this.onend?.();} abort(){}
-    }
-    Object.defineProperty(window,'SpeechRecognition',{configurable:true,value:Recognition});
-    const tracks:MediaStreamTrack[]=[];
-    Object.assign(window,{__vcTestTracks:tracks});
-    const capture=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-    navigator.mediaDevices.getUserMedia=async constraints=>{const stream=await capture(constraints);tracks.push(...stream.getTracks());return stream;};
-  });
-  await signIn(page);
-  const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
-  const uploads:string[]=[],turns:string[]=[];
-  page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/api/uploads'))uploads.push(request.url());if(request.method()==='POST'&&request.url().endsWith('/turns'))turns.push(request.postData()||'');});
-  await expect(page.getByRole('button',{name:'Attach a camera photo'})).toHaveCount(0);
-  await page.getByRole('button',{name:'Wake NorthPointe'}).click();
-  await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
-  await expect(page.locator('.composer-area')).toHaveCount(0);
-  await page.locator('.voice-controls').getByRole('button',{name:'Attach a camera photo'}).click();
-  await expect(page.getByRole('button',{name:'Take photo',exact:true})).toBeEnabled();
-  expect(uploads).toHaveLength(0);
-  await page.getByRole('button',{name:'Take photo',exact:true}).click();
-  await expect(page.getByAltText('Photo to attach to your next message')).toBeVisible();
-  expect(uploads).toHaveLength(0);
-  await page.getByRole('button',{name:'Attach photo',exact:true}).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  expect(await page.evaluate(()=>((window as unknown as {__vcTestTracks:MediaStreamTrack[]}).__vcTestTracks).filter(track=>track.kind==='video').every(track=>track.readyState==='ended'))).toBe(true);
-  expect(await page.evaluate(()=>((window as unknown as {__vcTestTracks:MediaStreamTrack[]}).__vcTestTracks).some(track=>track.kind==='audio'&&track.readyState==='live'))).toBe(true);
-  expect(uploads).toHaveLength(1);expect(turns).toHaveLength(0);
-  await expect(page.locator('.voice-bottom .attachment-chip')).toBeVisible();
-  await page.screenshot({path:info.outputPath('orb-camera.png'),fullPage:true});
-  await page.getByRole('button',{name:/Conversation\s*\d/}).click();
-  await expect(page.locator('.composer .attachment-chip')).toBeVisible();
-  await expect(page.getByRole('button',{name:'Attach a camera photo'})).toHaveCount(1);
-  await page.getByLabel('Message NorthPointe').fill('A deliberately captured test image.');
-  await page.getByRole('button',{name:'Send message',exact:true}).click();
-  await expect.poll(()=>turns.length).toBe(1);
-  expect(JSON.parse(turns[0]).attachments).toHaveLength(1);
-  expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(before);
-  await page.screenshot({path:info.outputPath('camera.png'),fullPage:true});
-});
 test('settings disclose speech processing and preserve the active conversation',async({page},info)=>{
   await signIn(page);
   const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));

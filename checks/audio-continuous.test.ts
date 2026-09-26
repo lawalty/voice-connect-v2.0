@@ -116,6 +116,58 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it('camera pause lets the current reply finish, then waits silently until input resumes', async () => {
+    const run = setup(); await run.engine.start(preferences, 'camera');
+    const recognizer = fixture.recognizers[0]!;
+    const track = (await microphone.mock.results[0]!.value).getAudioTracks()[0];
+    run.engine.awaitReply(); run.engine.speak('Finish this reply.');
+    const output = fixture.outputs[0]!, cues = [...fixture.cues];
+    run.engine.pauseInput();
+    expect(track.enabled).toBe(false); expect(track.stop).not.toHaveBeenCalled();
+    expect(output.cancel).not.toHaveBeenCalled(); expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
+    recognizer.events.result({ text: 'Do not submit during camera capture.', final: true, turnComplete: true });
+    await frame('start'); await run.engine.finish();
+    run.engine.responseDone(); output.end();
+    expect(run.turns).toEqual([]); expect(run.phases.at(-1)).toBe('paused'); expect(fixture.cues).toEqual(cues);
+    await run.engine.resumeInput();
+    expect(microphone).toHaveBeenCalledOnce(); expect(track.enabled).toBe(true); expect(run.phases.at(-1)).toBe('listening');
+    recognizer.events.result({ text: 'Old result after resuming.', final: true, turnComplete: true });
+    expect(run.turns).toEqual([]);
+    await frame('start'); fixture.recognizers.at(-1)!.finals.push('Continue after the photo.'); await frame('end');
+    expect(run.turns).toEqual(['Continue after the photo.']);
+  });
+
+  it('camera pause invalidates an in-flight finalization without ending the voice session', async () => {
+    const run = setup(); await run.engine.start(preferences, 'camera');
+    const recognizer = fixture.recognizers[0]!;
+    let release!: () => void; recognizer.barrier = new Promise<void>(resolve => { release = resolve; });
+    await frame('start'); recognizer.partial('Keep this unfinished thought');
+    recognizer.finals.push('Late finalization must not send.'); await frame('end');
+    run.engine.pauseInput(); await run.engine.resumeInput(); release(); await drain();
+    expect(run.turns).toEqual([]); expect(run.phases.at(-1)).toBe('listening'); expect(run.callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it('camera resume never interrupts the photo reply or revives a stopped session', async () => {
+    const run = setup(); await run.engine.start(preferences, 'camera'); run.engine.pauseInput();
+    run.engine.awaitReply(); run.engine.speak('The image shows a tree.');
+    await run.engine.resumeInput();
+    expect(run.phases.at(-1)).toBe('speaking'); expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
+    expect(fixture.outputs[0]!.cancel).not.toHaveBeenCalled();
+    run.engine.pauseInput(); run.engine.stop(); await run.engine.resumeInput();
+    expect(fixture.recognizers).toHaveLength(2);
+  });
+
+  it('camera pause closes premium recognition and rejects old turn events after reconnection', async () => {
+    const sockets = installFluxSocket(), run = setup();
+    await run.engine.start({ ...preferences, recognition: 'deepgram' }, 'camera');
+    const old = sockets[0]!; run.engine.pauseInput(); expect(old.close).toHaveBeenCalled();
+    await run.engine.resumeInput();
+    old.event({ type: 'stt', text: 'Stale endpoint.', final: true, turnComplete: true });
+    expect(run.turns).toEqual([]);
+    sockets[1]!.event({ type: 'stt', text: 'Fresh speech.', final: true, turnComplete: true });
+    expect(run.turns).toEqual(['Fresh speech.']);
+  });
+
   it('streams a typed reply through the selected output without opening the microphone', () => {
     const run = setup();
     run.engine.prepareSpeech({ recognition: 'vosk', output: 'fish', browserVoice: '', handsFree: true, keepAwake: false }, 'typed-conversation');

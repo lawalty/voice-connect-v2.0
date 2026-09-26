@@ -41,6 +41,8 @@ export class VoiceEngine {
   private generation = 0;
   private active = false;
   private ready = false;
+  private inputPaused = false;
+  private inputEpoch = 0;
   private muted = false;
   private turnAudio = false;
   private finishing = false;
@@ -107,6 +109,7 @@ export class VoiceEngine {
     this.setPhase(this.responseOpen ? 'thinking' : this.active && this.ready ? 'listening' : 'off');
   }
   private setPhase(phase: VoicePhase, turnSubmitted = false) {
+    if (this.inputPaused && (phase === 'listening' || phase === 'hearing' || phase === 'finalizing')) phase = 'paused';
     if (this.phase !== phase) { this.phase = phase; this.trace.record('phase', { phase }); this.callbacks.onPhase(phase); }
     // Listening/hearing are one continuous user turn. Barge-in availability during
     // a reply does not pretend the agent has finished and invited the next turn.
@@ -149,7 +152,7 @@ export class VoiceEngine {
     this.trace.clear();
     const generation = ++this.generation;
     this.preferences = { ...preferences }; this.conversationId = conversationId;
-    this.active = true; this.muted = false; this.gap = false; this.transcript.clear();
+    this.active = true; this.muted = false; this.inputPaused = false; this.gap = false; this.transcript.clear();
     this.callbacks.onDraft(''); this.setPhase('starting');
     // Android assigns low-latency output to the mode active when it opens.
     // Opening it before processed capture leaves a media player in call mode:
@@ -277,7 +280,7 @@ export class VoiceEngine {
       this.vadFence = { sequence, resolve, reject, timeout };
     });
   }
-  private acceptsInput() { return this.active && !this.gap && !this.muted && !this.finishing && (this.phase === 'listening' || this.phase === 'hearing' || Boolean(this.preferences?.handsFree && this.recognizer?.capabilities.handsFree)); }
+  private acceptsInput() { return this.active && !this.inputPaused && !this.gap && !this.muted && !this.finishing && (this.phase === 'listening' || this.phase === 'hearing' || Boolean(this.preferences?.handsFree && this.recognizer?.capabilities.handsFree)); }
   private process(samples: Float32Array, endTime: number) {
     if (!samples.length) return;
     if (!this.vad) this.callbacks.onSignal(acousticSignal(samples, 0, 0.008));
@@ -336,9 +339,10 @@ export class VoiceEngine {
     this.setPhase('hearing');
   }
   private createRecognizer(generation: number): SpeechRecognizer {
+    const inputEpoch = ++this.inputEpoch;
     const events: RecognizerEvents = {
       result: (result) => {
-        if (generation !== this.generation || !this.active || this.gap || this.muted) return;
+        if (generation !== this.generation || inputEpoch !== this.inputEpoch || this.inputPaused || !this.active || this.gap || this.muted) return;
         // A remote onset/result cannot bypass the local playback-aware decision.
         if (this.protectingReply) return;
         if (result.started && this.preferences?.handsFree) this.speechStarted();
@@ -349,7 +353,7 @@ export class VoiceEngine {
         }
       },
       ended: (expected) => {
-        if (generation !== this.generation || !this.active) return;
+        if (generation !== this.generation || inputEpoch !== this.inputEpoch || !this.active) return;
         this.ready = false;
         if (this.recognizer?.capabilities.input === 'browser-managed') this.closeCapture();
         if (!expected && !this.finishing) {
@@ -358,7 +362,7 @@ export class VoiceEngine {
         }
       },
       error: (error) => {
-        if (generation !== this.generation) return;
+        if (generation !== this.generation || inputEpoch !== this.inputEpoch) return;
         if (error.code === 'capture' && this.recognizer?.capabilities.input === 'browser-managed') { this.browserMeterSupported = false; this.closeCapture(); }
         this.trace.record(error.code === 'overload' ? 'backpressure' : 'capture-gap', { provider: this.preferences?.recognition, reason: 'provider-error' });
         if (this.ready && error.fatal) this.captureFailure(error.message);
@@ -370,8 +374,8 @@ export class VoiceEngine {
     return new FluxRecognizer(this.conversationId, events);
   }
   async finish(source: 'manual' | 'automatic' = 'manual'): Promise<void> {
-    if (this.finishing || !this.preferences || this.gap) { if (this.gap) this.callbacks.onNotice('Recording was interrupted. Review or edit the draft and send it as text.'); return; }
-    const generation = this.generation; this.finishing = true; this.setPhase('finalizing');
+    if (this.inputPaused || this.finishing || !this.preferences || this.gap) { if (this.gap) this.callbacks.onNotice('Recording was interrupted. Review or edit the draft and send it as text.'); return; }
+    const generation = this.generation, inputEpoch = this.inputEpoch; this.finishing = true; this.setPhase('finalizing');
     this.deferredAudio = []; this.deferredSamples = 0; this.deferredOnset = false; this.deferredEndpoint = false;
     const requestedAt = performance.now(); this.trace.record('endpoint-request', { provider: this.preferences.recognition });
     try {
@@ -379,8 +383,8 @@ export class VoiceEngine {
       // Recognition and VAD use different workers. Fence the VAD frames that
       // existed at the final ACK before deciding whether speech has resumed.
       // The fixed sequence prevents a continuously moving capture tail.
-      if (generation === this.generation && source === 'automatic' && this.recognizer?.capabilities.endpointing === 'local-vad') await this.waitForVad();
-      if (generation === this.generation && this.active && !this.gap && !this.muted) {
+      if (generation === this.generation && inputEpoch === this.inputEpoch && source === 'automatic' && this.recognizer?.capabilities.endpointing === 'local-vad') await this.waitForVad();
+      if (generation === this.generation && inputEpoch === this.inputEpoch && !this.inputPaused && this.active && !this.gap && !this.muted) {
         this.trace.record('endpoint-ready', { provider: this.preferences.recognition, durationMs: performance.now() - requestedAt });
         const continued = this.deferredOnset;
         const ended = this.deferredEndpoint;
@@ -401,8 +405,43 @@ export class VoiceEngine {
         }
       }
     } catch (error) {
-      if (generation === this.generation) this.captureFailure(error instanceof Error ? error.message : String(error));
-    } finally { if (generation === this.generation && this.phase !== 'finalizing') this.finishing = false; }
+      if (generation === this.generation && inputEpoch === this.inputEpoch) this.captureFailure(error instanceof Error ? error.message : String(error));
+    } finally { if (generation === this.generation && inputEpoch === this.inputEpoch && this.phase !== 'finalizing') this.finishing = false; }
+  }
+  /** Camera composition owns the next send. Fence recognition immediately while
+   * leaving the current reply and Android's existing audio route intact. */
+  pauseInput() {
+    if (!this.active || (this.inputPaused && !this.recognizer)) return;
+    this.inputPaused = true; ++this.inputEpoch; this.ready = false; this.finishing = false;
+    clearTimeout(this.maxTurnTimer);
+    this.recognizer?.stop(); this.recognizer = undefined;
+    this.stream?.getAudioTracks().forEach(track => { track.enabled = false; });
+    this.vadIgnoreBefore = this.vadSequence; this.lastCaptureAt = 0;
+    this.transcript.clear(); this.turnAudio = false;
+    this.prebuffer = []; this.prebufferSamples = 0; this.analysisBuffer = [];
+    this.deferredAudio = []; this.deferredSamples = 0; this.deferredOnset = false; this.deferredEndpoint = false;
+    this.cues?.cancel(); this.callbacks.onDraft('');
+    this.callbacks.onSignal({ energy: 0, speechProbability: 0, noiseFloor: 0, pitch: null, confidence: 0 });
+    this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : 'paused');
+  }
+  async resumeInput() {
+    if (!this.active || !this.inputPaused || !this.preferences || this.recognizer) return;
+    const generation = this.generation;
+    const recognizer = this.recognizer = this.createRecognizer(generation);
+    const inputEpoch = this.inputEpoch;
+    try {
+      if (recognizer.capabilities.input === 'browser-managed' && !this.stream && this.browserMeterSupported) await this.openCapture(generation, false);
+      if (generation !== this.generation || inputEpoch !== this.inputEpoch) return;
+      await recognizer.start();
+      if (generation !== this.generation || inputEpoch !== this.inputEpoch || !this.active) return;
+      this.inputPaused = false; this.ready = recognizer.running; this.lastCaptureAt = 0;
+      this.vadIgnoreBefore = this.vadSequence; this.vad?.postMessage({ type: 'reset' });
+      this.stream?.getAudioTracks().forEach(track => { track.enabled = true; });
+      this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : this.ready ? 'listening' : 'paused');
+    } catch (error) {
+      if (generation !== this.generation || inputEpoch !== this.inputEpoch) return;
+      this.stop(); this.setPhase('error'); this.callbacks.onError(error instanceof Error ? error.message : String(error));
+    }
   }
   private commit() {
     clearTimeout(this.maxTurnTimer); this.turnAudio = false; this.prebuffer = []; this.prebufferSamples = 0;
@@ -443,7 +482,7 @@ export class VoiceEngine {
     if (wasReady && this.preferences?.audioCues !== false) this.cues?.play('sleep');
   }
   stop() {
-    ++this.generation; this.active = false; this.ready = false; this.finishing = false;
+    ++this.generation; ++this.inputEpoch; this.inputPaused = false; this.active = false; this.ready = false; this.finishing = false;
     this.cues?.cancel();
     clearTimeout(this.maxTurnTimer); this.recognizer?.stop(); this.recognizer = undefined;
     this.closeCapture();

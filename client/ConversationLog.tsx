@@ -33,7 +33,7 @@ export default function ConversationLog({ messages, activity, onClose, onNew, cr
       {messages.length === 0 ? <div className="messenger-empty"><MessageSquare size={28} strokeWidth={1.25} /><p>Your conversation starts here.</p></div> : messages.map(message =>
         <article className={`message message-${message.role}`} key={message.id} aria-label={message.role === 'user' ? 'You' : 'NorthPointe'}>
           <div className="message-bubble">
-            {message.attachments?.map(photo => photo.previewUrl && <img className="message-photo" key={photo.id} src={photo.previewUrl} alt={photo.name || 'Shared photo'} />)}
+            {message.attachments?.map(photo => photo.previewUrl && <img className="message-photo" key={photo.id} src={photo.previewUrl} alt="Shared photo" onLoad={() => { if (follow.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; }} />)}
             {message.text && <p>{message.text}</p>}
           </div>
           <div className="message-meta"><span>{message.role === 'user' ? 'You' : 'NorthPointe'}</span><time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div>

@@ -28,9 +28,10 @@ parallel LLM context.
 
 Full Orb mode has voice controls and the Conversation link; its text composer and
 footer caption are not mounted. Waking voice reveals a camera control alongside
-Mute and End. A captured photo remains visible and removable until the next turn
-submits it. Messenger retains its composer and camera, sharing the same draft,
-attachment, conversation, capture, and playback across view switches.
+Mute and End. The camera dialog captures a photo, accepts an optional caption,
+and sends both as one turn. Messenger retains its composer and camera, sharing
+the same conversation, capture, and playback across view switches. Photo turns
+appear inline in Messenger even when sent from Orb mode.
 
 Vosk with hands-free mode is the default for fresh devices. Its approximately 40 MB
 local recognition download requires an explicit one-time setup action. The primary
@@ -84,6 +85,28 @@ The binding's generated JavaScript requires dynamic evaluation. It executes only
 inside an external broker Worker and its descendant Worker; the exact broker asset
 has a dedicated CSP response. Application documents retain their stricter CSP and
 never load the binding. Production-header and cached-offline tests cover this boundary.
+
+## Camera turns (2026-09-26)
+
+Opening Share a moment pauses recognition and automatic endpoints in Orb,
+Messenger, and Messenger Auto mode. An existing spoken reply can finish; its
+completion cannot reopen listening behind the dialog. Caption entry is optional.
+Send photo uploads and submits one image turn immediately, then returns to the
+same view and restores only previously active voice input. Cancelling sends
+nothing and restores that same input state. Separate text drafts remain intact.
+Recognition callbacks and pending finalization are invalidated at pause. The
+microphone track is disabled while composing and retained to preserve the Android
+audio route; STT restarts on resume, including reloading cached Vosk if selected.
+Lost acknowledgements reuse the same attachment and immutable turn ID. Submitted
+images and captions appear together in Messenger, including after refresh.
+
+GPT-6 Luna was visually qualified through the deployed OpenClaw 2026.9.6 Gateway
+on 2026-09-26 (run 9278d019-5fe0-48db-ad0d-69a2949963ba). It correctly identified
+a blue circle, an orange square, and three black dots whose values were supplied
+only in the image. Native history confirmed openai/gpt-6-luna. The Gateway model
+catalog omitted input modalities, so the explicit VC image allowlist now includes
+that exact model. This proves the native image path, not general visual accuracy
+or physical Android camera/audio behavior. The user's selected model is unchanged.
 
 ## Security and operational limits
 
