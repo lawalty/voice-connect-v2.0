@@ -33,6 +33,7 @@ vi.doMock('../client/audio/output', () => ({ BrowserOutput: FakeOutput, PremiumO
 vi.doMock('../client/audio/cues', async () => ({
   ...await vi.importActual<typeof import('../client/audio/cues')>('../client/audio/cues'),
   ListeningCues: class {
+    async prepare() {}
     play(kind: 'on' | 'off') { fixture.cues.push(kind); }
     dispose() {}
   },

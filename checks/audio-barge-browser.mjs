@@ -50,7 +50,7 @@ const server = await createServer({
 let browser;
 try {
   await server.listen();
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
   const context = await browser.newContext();
   const unexpectedRequests = [], pageErrors = [];
   await context.route('**/*', route => {
@@ -69,6 +69,31 @@ try {
     body: '<!doctype html><title>Recorded barge-in worker checks</title>',
   }));
   await page.goto(origin + '/barge-harness');
+  const cues = await page.evaluate(async () => {
+    const { ListeningCues } = await import('/audio/cues.ts');
+    const audio = new AudioContext({ sampleRate: 48000 }); await audio.resume();
+    const references = [];
+    const player = new ListeningCues(audio, reference => references.push(reference));
+    try {
+      await player.prepare();
+      return ['on', 'off'].map(kind => {
+        const clock = audio.currentTime, schedule = player.play(kind), reference = references.at(-1);
+        if (!schedule || !reference) throw new Error(`Recording did not play: ${kind}`);
+        return { kind, duration: schedule.endTime - schedule.startTime, startDelay: schedule.startTime - clock,
+          sampleRate: reference.sampleRate, samples: reference.samples.length,
+          peak: reference.samples.reduce((peak, value) => Math.max(peak, Math.abs(value)), 0) };
+      });
+    } finally { player.dispose(); await audio.close(); }
+  });
+  for (const [index, cue] of cues.entries()) {
+    const duration = index === 0 ? 0.48 : 0.26;
+    assert.ok(Math.abs(cue.duration - duration) < 0.001, 'native decoder preserves recording duration');
+    assert.equal(cue.sampleRate, 48000, 'native decoder follows the shared audio context');
+    assert.equal(cue.samples, Math.round(duration * 48000));
+    assert.ok(cue.startDelay >= 0.005 - 1e-9 && cue.startDelay < 0.025, 'no turn-boundary loading delay');
+    assert.ok(cue.peak > 0.1 && cue.peak < 0.14, 'original recording level retained');
+  }
+  console.log('Supplied listening/sent recordings decode, schedule, and publish PCM references:', JSON.stringify(cues));
   const results = await page.evaluate(async recorded => {
     const { default: workerURL } = await import('/audio/vad.worker.ts?worker&url');
     const { PlaybackReference } = await import('/audio/interruption.ts');
@@ -183,7 +208,7 @@ try {
     }
     return all;
   }, samples);
-  const evidence = { fixtureSha256: fixtureHash, runtime: 'Chromium + real Silero WASM worker', results,
+  const evidence = { fixtureSha256: fixtureHash, runtime: 'Chromium + real Silero WASM worker', cues, results,
     limits: 'Prerecorded and synthetic PCM; accelerated frame delivery. Processing times exclude physical microphone, AEC, speaker, browser capture, provider transport and audible-stop latency. No Android or car qualification.' };
   await writeFile(resolve('.local/audio-check/barge-browser-results.json'), JSON.stringify(evidence, null, 2) + '\n');
   await mkdir(resolve('test-results'), { recursive: true });

@@ -142,9 +142,9 @@ export class VoiceEngine {
       }
       if (generation !== this.generation) return;
       const startedAt = performance.now(); this.trace.record('provider-starting', { provider: preferences.recognition });
-      await recognizer.start();
-      if (generation !== this.generation) return;
       this.cues?.dispose(); this.cues = new ListeningCues(this.warmContext(), this.playbackReference);
+      await Promise.all([recognizer.start(), preferences.audioCues !== false ? this.cues.prepare() : Promise.resolve()]);
+      if (generation !== this.generation) return;
       this.trace.record('provider-ready', { provider: preferences.recognition, durationMs: performance.now() - startedAt });
       this.ready = recognizer.running; this.setPhase(this.ready ? 'listening' : 'paused');
       if (preferences.keepAwake) await this.requestWakeLock(generation);

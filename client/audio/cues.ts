@@ -1,3 +1,6 @@
+import listeningURL from '../assets/cues/vc-cue-listening.wav?url';
+import sentURL from '../assets/cues/vc-cue-sent.wav?url';
+
 export type ListeningCue = 'on' | 'off';
 export interface CueReference { samples: Float32Array; sampleRate: number; startTime: number; }
 export interface CueSchedule { startTime: number; endTime: number; }
@@ -16,29 +19,42 @@ export class CueTransitions {
 export class ListeningCues {
   private source?: AudioBufferSourceNode;
   private disposed = false;
+  private buffers?: Record<ListeningCue, AudioBuffer>;
+  private preparation?: Promise<void>;
+  private loading = new AbortController();
   constructor(private context: AudioContext | undefined, private onReference?: (reference: CueReference) => void) {}
+
+  /** Decode once alongside recognizer startup, never at a turn boundary. */
+  prepare(): Promise<void> {
+    return this.preparation ??= this.load();
+  }
+  private async load() {
+    const context = this.context;
+    if (this.disposed || !context || context.state === 'closed') return;
+    const timeout = setTimeout(() => this.loading.abort(), 1500);
+    try {
+      const [on, off] = await Promise.all([listeningURL, sentURL].map(async url => {
+        const response = await fetch(url, { signal: this.loading.signal });
+        if (!response.ok) throw new Error('Cue unavailable');
+        const buffer = await context.decodeAudioData(await response.arrayBuffer());
+        // The supplied recordings are short mono PCM; keep the reference exact.
+        if (buffer.numberOfChannels !== 1 || buffer.duration <= 0 || buffer.duration > 2) throw new Error('Invalid cue');
+        return buffer;
+      }));
+      if (!this.disposed && !this.loading.signal.aborted) this.buffers = { on: on!, off: off! };
+    } catch { this.loading.abort(); /* Optional cues must never fail voice startup or play late. */ }
+    finally { clearTimeout(timeout); }
+  }
 
   play(kind: ListeningCue): CueSchedule | undefined {
     this.cancel();
     const context = this.context;
+    const buffer = this.buffers?.[kind];
     if (this.disposed || !context || context.state !== 'running' || !Number.isFinite(context.currentTime)
-      || !Number.isFinite(context.sampleRate) || context.sampleRate < 8000 || context.sampleRate > 192000) return;
+      || !buffer) return;
     let source: AudioBufferSourceNode | undefined;
     try {
-      const duration = kind === 'on' ? 0.085 : 0.075;
-      const length = Math.round(context.sampleRate * duration);
-      const buffer = context.createBuffer(1, length, context.sampleRate);
       const samples = buffer.getChannelData(0);
-      const firstHz = kind === 'on' ? 660 : 440;
-      const lastHz = kind === 'on' ? 880 : 330;
-      const amplitude = kind === 'on' ? 0.028 : 0.022;
-      for (let index = 0; index < length; index++) {
-        const position = index / (length - 1), time = index / context.sampleRate;
-        const envelope = Math.sin(Math.PI * position) ** 2;
-        const phase = 2 * Math.PI * (firstHz * time + (lastHz - firstHz) * time * time / (2 * duration));
-        samples[index] = amplitude * envelope * Math.sin(phase);
-      }
-      samples[0] = 0; samples[length - 1] = 0;
       source = context.createBufferSource(); source.buffer = buffer;
       source.connect(context.destination);
       const scheduled = source;
@@ -49,8 +65,8 @@ export class ListeningCues {
       const startTime = context.currentTime + 0.005;
       this.source = source; source.start(startTime);
       // An observer must not turn a harmless cue into a failed microphone session.
-      try { this.onReference?.({ samples, sampleRate: context.sampleRate, startTime }); } catch { /* optional acoustic reference */ }
-      return { startTime, endTime: startTime + length / context.sampleRate };
+      try { this.onReference?.({ samples, sampleRate: buffer.sampleRate, startTime }); } catch { /* optional acoustic reference */ }
+      return { startTime, endTime: startTime + buffer.duration };
     } catch {
       if (this.source === source) this.source = undefined;
       if (source) {
@@ -69,5 +85,5 @@ export class ListeningCues {
     try { source.stop(); } catch { /* already ended */ }
     try { source.disconnect(); } catch { /* audio may be unavailable */ }
   }
-  dispose() { this.disposed = true; this.cancel(); }
+  dispose() { this.disposed = true; this.loading.abort(); this.buffers = undefined; this.cancel(); }
 }

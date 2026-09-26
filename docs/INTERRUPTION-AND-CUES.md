@@ -10,8 +10,9 @@ are preserved.
   required (128 ms). The extremes require 224 ms and 96 ms respectively. Lower
   values also require higher model speech confidence and speech-to-background
   energy. These windows are not measured microphone-to-speaker stop latency.
-- **Subtle Audio Cues**: enabled by default. A quiet rising cue marks a ready user
-  turn; a different falling cue marks finalization, mute, end, or loss of input.
+- **Subtle Audio Cues**: enabled by default. The supplied `vc-cue-listening.wav`
+  marks a ready green listening turn; `vc-cue-sent.wav` marks the end of listening
+  at finalization, mute, end, or loss of input.
   Listening → hearing does not play another cue. Hands-free capture remains
   available for interruption during a reply; an off cue does not mean the
   microphone has been released. Disabling cues does not alter microphone policy.
@@ -36,7 +37,7 @@ additional echo guard, not voice identification or a replacement for browser AEC
 Nonlinear loudspeakers, acoustic filtering, long Bluetooth delays and very quiet
 speech near the noise floor remain physical qualification limits. Browser-native
 voices provide no PCM reference and receive confidence/noise/sensitivity gating
-only; the generated cues still provide a reference.
+only; the recorded cues still provide a reference.
 
 The VAD worker qualifies interruptions locally. A Deepgram StartOfTurn event
 cannot bypass that gate, and neither provider acknowledgement nor a network
@@ -46,10 +47,14 @@ On approval, that prefix and already-captured continuation frames are delivered
 once; reference-matched echo is excluded. Deepgram's EndOfTurn still owns premium
 turn completion. Local Vosk still uses the existing automatic silence endpoint.
 
-Cues use short, ramped sine sweeps synthesized locally on the existing context:
-85 ms rising at peak amplitude 0.028 and 75 ms falling at 0.022. They do not wait
-for the server or block recording. Their exact PCM participates in the same echo
-check. Unsupported/suspended audio fails silently for cues without failing speech.
+Cues use the owner's unmodified mono 44.1 kHz WAV recordings: 480 ms listening
+and 260 ms sent. Vite publishes versioned assets that the service worker caches.
+They decode once on the existing audio context alongside recognizer startup;
+there is no fetch, decoding, or server acknowledgement to wait for at each turn.
+Disabled cues skip loading. Unavailable files time out after 1.5 seconds without
+failing voice startup, and late loads never replay an old state transition.
+Their exact decoded PCM participates in the same echo check. Cue playback does
+not pause capture; unsupported/suspended audio fails silently for cues.
 
 ## Evidence and remaining qualification
 
