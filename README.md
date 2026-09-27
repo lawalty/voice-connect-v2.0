@@ -40,6 +40,15 @@ Recognition and speech output are independent, per-device preferences:
   returned to the browser; testing sends a short fixed sentence to Fish.
 - **Browser speech:** default output, with local voices preferred when available.
 
+During an active voice session, NorthPointe's public progress commentary is spoken
+as it arrives, including while Messenger is open. Commentary is audio only: it
+does not appear in final replies or the Messenger history. Pure text Messenger
+does not speak progress updates. The orb blends yellow/purple while thinking and
+orange/purple while working during these updates, then returns to the underlying
+state. Mute, End and interruption stop the audio; the final answer takes priority
+over any remaining commentary. Tasks without model/runtime commentary remain
+quiet. See [progress commentary](docs/PROGRESS-COMMENTARY.md) for verification.
+
 Local acoustic measurements move the orb; they do not establish emotions or enter
 agent memory. The app requests echo cancellation/noise suppression. A Silero model
 and recognition progress inform local turn detection; loudness alone cannot commit

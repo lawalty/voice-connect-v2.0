@@ -43,6 +43,26 @@ gateway.on('connection',ws=>{
       const history=sessions.get(p.sessionKey)||[];
       history.push({id:randomUUID(),role:'user',content:[{type:'text',text:p.message}],timestamp:Date.now(),runId});sessions.set(p.sessionKey,history);
       res(receipt);
+      if(p.message.includes('Progress commentary fixture')){
+        const base={sessionKey:p.sessionKey,runId};
+        const progress=(seq,itemId,text)=>event('agent',{...base,seq,stream:'assistant',data:{phase:'commentary',itemId,text,replace:true}});
+        const work=(seq,phase)=>event('agent',{...base,seq,stream:'tool',data:{phase,toolCallId:'fixture-tool'}});
+        const schedule=(delay,callback)=>setTimeout(callback,delay);
+        const group=[
+          schedule(100,()=>progress(1,'first','I will check the configuration.')),
+          schedule(400,()=>work(2,'start')),
+          schedule(1600,()=>progress(3,'second','I found the setting.')),
+          schedule(1650,()=>progress(4,'second','I found the setting.')),
+          schedule(3100,()=>work(5,'result')),
+          schedule(4200,()=>event('chat',{...base,seq:1,state:'delta',deltaText:'The configuration is correct.'})),
+          schedule(4400,()=>{
+            history.push({id:randomUUID(),role:'assistant',phase:'commentary',content:[{type:'text',text:'I will check the configuration.'}],timestamp:Date.now(),runId});
+            const message={id:randomUUID(),role:'assistant',content:[{type:'text',text:'The configuration is correct.',textSignature:JSON.stringify({v:1,phase:'final_answer',id:'answer'})}],timestamp:Date.now(),runId};
+            history.push(message);event('chat',{...base,seq:2,state:'final',message});timers.delete(runId);
+          }),
+        ];
+        timers.set(runId,group);return;
+      }
       const answer=p.message.includes('Markdown speech fixture')?'**Your first sentence.** A *second* thought.':p.message.includes('second')?'Your second message is in the same conversation.':'Your conversation stays together. I’m here with you.';
       const slow=p.message.includes('slow');
       event('chat',{sessionKey:p.sessionKey,runId,seq:0,state:'status'});

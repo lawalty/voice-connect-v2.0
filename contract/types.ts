@@ -1,6 +1,6 @@
 export type RecognizerKind = 'browser' | 'vosk' | 'deepgram';
 export type OutputKind = 'browser' | 'fish';
-export type VoicePhase = 'off' | 'starting' | 'listening' | 'hearing' | 'finalizing' | 'thinking' | 'speaking' | 'reconnecting' | 'paused' | 'error';
+export type VoicePhase = 'off' | 'starting' | 'listening' | 'hearing' | 'finalizing' | 'thinking' | 'working' | 'thinking-commentary' | 'working-commentary' | 'speaking' | 'reconnecting' | 'paused' | 'error';
 export interface SpeechPreferences {
   recognition: RecognizerKind;
   output: OutputKind;
@@ -35,8 +35,9 @@ export type ServerEvent = (
   | { type: 'hello'; conversationId: string; capabilities: HarnessCapabilities }
   | { type: 'turn'; conversationId: string; turnId: string; delivery: Delivery; runId?: string; error?: string }
   | { type: 'assistant'; conversationId: string; turnId: string; runId: string; seq: number; text: string; replace: boolean }
+  | { type: 'commentary'; conversationId: string; turnId: string; runId: string; itemId: string; seq: number; text: string; done: boolean }
   | { type: 'complete'; conversationId: string; turnId: string; runId: string; text?: string; cancelled?: boolean; failed?: boolean }
-  | { type: 'activity'; conversationId: string; turnId?: string; label: string }
+  | { type: 'activity'; conversationId: string; turnId?: string; label: string; stage?: 'thinking' | 'working' }
   | { type: 'approval'; conversationId: string; id: string; label: string; detail?: string; expiresAt?: number }
   | { type: 'question'; conversationId: string; id: string; text: string; options?: string[] }
   | { type: 'connection'; connected: boolean; reason?: string }

@@ -34,6 +34,11 @@ export class VoiceEngine {
   private outputRequestedAt = 0;
   private outputStartedAt = 0;
   private output?: SpeechOutput;
+  private outputKind: 'answer' | 'commentary' = 'answer';
+  private commentary = new Map<string, SentenceStream>();
+  private commentaryQueue: string[] = [];
+  private answerStarted = false;
+  private workStage: 'thinking' | 'working' = 'thinking';
   private sentences = new SentenceStream();
   private transcript = new Transcript();
   private preferences?: SpeechPreferences;
@@ -74,7 +79,7 @@ export class VoiceEngine {
     window.addEventListener('offline', this.offline);
   }
   diagnostics(): AudioDiagnosticEntry[] { return this.trace.snapshot(); }
-  hasSpeechOutput(): boolean { return Boolean(this.output) && !this.outputFailed && !this.responseSilenced; }
+  hasSpeechOutput(): boolean { return this.outputKind === 'answer' && Boolean(this.output) && !this.outputFailed && !this.responseSilenced; }
   connectionRetry(reason: 'reply-timeout' | 'reply-close', closeCode?: number) { this.trace.record('connection-retry', { reason, closeCode }); }
   capabilities(): RecognizerCapabilities | undefined { return this.lastCapabilities ? { ...this.lastCapabilities } : undefined; }
   /** A typed send unlocks the selected output without requesting a microphone. */
@@ -93,6 +98,7 @@ export class VoiceEngine {
   }
   /** The input is committed; wait for its reply without inviting another turn. */
   awaitReply() {
+    this.commentary.clear(); this.commentaryQueue = []; this.answerStarted = false; this.workStage = 'thinking';
     this.sentences.reset(); this.outputFailed = false; this.responseOpen = true;
     this.responseSilenced = this.speakerMuted;
     // A typed send may happen mid-utterance. Keep collecting that spoken turn;
@@ -109,7 +115,40 @@ export class VoiceEngine {
     ++this.playbackGeneration;
     this.output?.dispose(); this.output = undefined; this.outputActive = false;
     this.protectReply(false);
-    this.setPhase(this.responseOpen ? 'thinking' : this.active && this.ready ? 'listening' : 'off');
+    this.commentaryQueue = [];
+    this.setPhase(this.responseOpen ? this.workStage : this.active && this.ready ? 'listening' : 'off');
+  }
+  setWorkStage(stage: 'thinking' | 'working') {
+    this.workStage = stage;
+    if (this.outputActive && this.outputKind === 'commentary') this.setPhase(this.replyPhase());
+    else if (this.responseOpen && !this.outputActive && !this.turnAudio && !this.transcript.text) this.setPhase(stage);
+  }
+  private replyPhase(): VoicePhase {
+    return this.outputActive ? this.outputKind === 'commentary' ? `${this.workStage}-commentary` : 'speaking' : this.workStage;
+  }
+  /** Ephemeral public commentary has its own sentence buffer and bounded queue.
+   * Finishing it never finishes the agent turn or invites the next user turn. */
+  speakCommentary(itemId: string, text: string, done = false) {
+    if (!this.active || !this.preferences || !this.responseOpen || this.answerStarted || this.disposed || this.speakerMuted || this.responseSilenced) return;
+    let stream = this.commentary.get(itemId);
+    if (!stream) { if (this.commentary.size >= 100) return; stream = new SentenceStream(); this.commentary.set(itemId, stream); }
+    const pieces = stream.append(text, true);
+    if (done) pieces.push(...stream.finish());
+    for (const piece of pieces) { if (this.commentaryQueue.length >= 3) this.commentaryQueue.shift(); this.commentaryQueue.push(piece); }
+    this.pumpCommentary();
+  }
+  private pumpCommentary() {
+    if (this.output || !this.commentaryQueue.length || this.answerStarted || !this.responseOpen) return;
+    const text = this.commentaryQueue.shift()!;
+    this.outputKind = 'commentary'; this.outputFailed = false;
+    this.enqueue(text); (this.output as SpeechOutput | undefined)?.finish();
+  }
+  private stopCommentary() {
+    this.commentaryQueue = [];
+    if (this.outputKind !== 'commentary') return;
+    ++this.playbackGeneration; this.output?.cancel(); this.output?.dispose(); this.output = undefined;
+    this.outputActive = false; this.outputFailed = false; this.outputKind = 'answer';
+    if (this.responseOpen) this.setPhase(this.workStage);
   }
   private setPhase(phase: VoicePhase, turnSubmitted = false) {
     if (this.inputPaused && (phase === 'listening' || phase === 'hearing' || phase === 'finalizing')) phase = 'paused';
@@ -356,7 +395,7 @@ export class VoiceEngine {
         this.ready = !recovering && Boolean(this.recognizer?.running); this.lastCaptureAt = 0;
         this.prebuffer = []; this.prebufferSamples = 0; this.vadIgnoreBefore = this.vadSequence;
         if (!recovering) this.vad?.postMessage({ type: 'reset' });
-        this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : this.ready ? 'listening' : 'reconnecting');
+        this.setPhase(this.outputActive || this.responseOpen ? this.replyPhase() : this.ready ? 'listening' : 'reconnecting');
       },
       result: (result) => {
         if (generation !== this.generation || inputEpoch !== this.inputEpoch || this.inputPaused || !this.active || this.gap || this.muted) return;
@@ -439,7 +478,7 @@ export class VoiceEngine {
     this.deferredAudio = []; this.deferredSamples = 0; this.deferredOnset = false; this.deferredEndpoint = false;
     this.cues?.cancel(); this.callbacks.onDraft('');
     this.callbacks.onSignal({ energy: 0, speechProbability: 0, noiseFloor: 0, pitch: null, confidence: 0 });
-    this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : 'paused');
+    this.setPhase(this.outputActive || this.responseOpen ? this.replyPhase() : 'paused');
   }
   async resumeInput() {
     if (!this.active || !this.inputPaused || !this.preferences || this.recognizer) return;
@@ -454,7 +493,7 @@ export class VoiceEngine {
       this.inputPaused = false; this.ready = recognizer.running; this.lastCaptureAt = 0;
       this.vadIgnoreBefore = this.vadSequence; this.vad?.postMessage({ type: 'reset' });
       this.stream?.getAudioTracks().forEach(track => { track.enabled = true; });
-      this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : this.ready ? 'listening' : 'paused');
+      this.setPhase(this.outputActive || this.responseOpen ? this.replyPhase() : this.ready ? 'listening' : 'paused');
     } catch (error) {
       if (generation !== this.generation || inputEpoch !== this.inputEpoch) return;
       this.trace.record('input-failure', { reason: 'resume-error', phase: this.phase });
@@ -482,14 +521,14 @@ export class VoiceEngine {
       this.prebuffer = []; this.prebufferSamples = 0;
       this.callbacks.onSignal({ energy: 0, speechProbability: 0, noiseFloor: 0, pitch: null, confidence: 0 });
       if (this.turnAudio || this.transcript.text) { this.gap = true; this.callbacks.onNotice('Recording paused. Review the unsent draft before continuing.'); }
-      this.setPhase('paused');
+      this.setPhase(this.outputActive || this.responseOpen ? this.replyPhase() : 'paused');
     } else if (this.recognizer?.capabilities.input === 'browser-managed' || this.gap) this.callbacks.onNotice('Tap the microphone to start a new recording. Your draft is preserved.');
-    else if (this.active && this.ready) { this.vad?.postMessage({ type: 'reset' }); this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : 'listening'); }
+    else if (this.active && this.ready) { this.vad?.postMessage({ type: 'reset' }); this.setPhase(this.outputActive || this.responseOpen ? this.replyPhase() : 'listening'); }
   }
   private captureFailure(message: string, reason: AudioDiagnosticReason) {
     if (!this.active || this.gap) return;
     this.trace.record('input-failure', { reason, phase: this.phase, provider: this.preferences?.recognition });
-    this.gap = true; this.callbacks.onNotice(message); this.stop('capture-error'); this.setPhase(this.outputActive ? 'speaking' : this.responseOpen ? 'thinking' : 'paused');
+    this.gap = true; this.callbacks.onNotice(message); this.stop('capture-error'); this.setPhase(this.outputActive || this.responseOpen ? this.replyPhase() : 'paused');
   }
   /** A deliberate End has its own sound. Shut capture/output first; never wait
    * for a sound to load, and never play it for a failure or cancelled startup. */
@@ -501,6 +540,7 @@ export class VoiceEngine {
     if (wasReady && this.preferences?.audioCues !== false) this.cues?.play('sleep');
   }
   stop(reason: VoiceStopReason = 'manual') {
+    this.stopCommentary();
     if (this.active || this.stream) this.trace.record('voice-stop', { reason, phase: this.phase, provider: this.preferences?.recognition });
     ++this.generation; ++this.inputEpoch; this.inputPaused = false; this.active = false; this.ready = false; this.finishing = false;
     this.callbacks.onInputConnection?.(false);
@@ -523,6 +563,7 @@ export class VoiceEngine {
   }
   speak(text: string, replace = false) {
     if (!this.preferences || !text || this.disposed) return;
+    this.stopCommentary(); this.answerStarted = true;
     if (!this.responseOpen) { this.sentences.reset(); this.outputFailed = false; this.responseOpen = true; this.responseSilenced = this.speakerMuted; this.protectReply(!this.responseSilenced); }
     const pieces = this.sentences.append(text, replace);
     for (const piece of pieces) this.enqueue(piece);
@@ -533,11 +574,18 @@ export class VoiceEngine {
       const playbackGeneration = ++this.playbackGeneration;
       this.outputRequestedAt = performance.now();
       const events = {
-        started: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = true; this.outputStartedAt = performance.now(); this.trace.record('output-start', { provider: this.preferences?.output, durationMs: this.outputStartedAt - this.outputRequestedAt }); this.setPhase('speaking'); },
-        ended: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = false; this.trace.record('output-end', { provider: this.preferences?.output, durationMs: this.outputStartedAt ? performance.now() - this.outputStartedAt : 0 }); if (!this.responseOpen) { this.output?.dispose(); this.output = undefined; this.protectReply(false); this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); } },
+        started: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = true; this.outputStartedAt = performance.now(); this.trace.record('output-start', { provider: this.preferences?.output, durationMs: this.outputStartedAt - this.outputRequestedAt }); this.setPhase(this.replyPhase()); },
+        ended: () => {
+          if (playbackGeneration !== this.playbackGeneration) return;
+          this.outputActive = false; this.trace.record('output-end', { provider: this.preferences?.output, durationMs: this.outputStartedAt ? performance.now() - this.outputStartedAt : 0 });
+          if (this.outputKind === 'commentary') {
+            ++this.playbackGeneration; this.output?.dispose(); this.output = undefined;
+            this.setPhase(this.workStage); this.pumpCommentary();
+          } else if (!this.responseOpen) { this.output?.dispose(); this.output = undefined; this.protectReply(false); this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); }
+        },
         reference: this.playbackReference,
         cancelled: (atTime: number) => this.vad?.postMessage({ type: 'cancel-reference', atTime }),
-        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); } },
+        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); if (this.outputKind === 'commentary') this.stopCommentary(); } },
       };
       this.output = this.preferences!.output !== 'browser'
         ? new PremiumOutput(this.warmContext(), this.conversationId, this.preferences!.fishVoice || '', events)
@@ -547,6 +595,7 @@ export class VoiceEngine {
     this.output.enqueue(text);
   }
   responseDone() {
+    this.stopCommentary(); this.answerStarted = true;
     for (const piece of this.sentences.finish()) this.enqueue(piece);
     this.responseOpen = false;
     if (this.outputFailed) { ++this.playbackGeneration; this.output?.dispose(); this.output = undefined; this.outputActive = false; this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
@@ -559,6 +608,7 @@ export class VoiceEngine {
     const requestedAt = performance.now();
     this.output?.cancel(); this.output?.dispose(); this.output = undefined;
     this.outputActive = false; this.responseOpen = false; this.sentences.reset();
+    this.commentary.clear(); this.commentaryQueue = []; this.answerStarted = false; this.outputKind = 'answer'; this.workStage = 'thinking';
     this.protectReply(false);
     if (pending) this.trace.record('output-interrupt', { provider: this.preferences?.output, durationMs: performance.now() - requestedAt, reason });
     if (pending) this.callbacks.onInterrupt();

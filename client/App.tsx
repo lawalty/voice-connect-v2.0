@@ -19,7 +19,11 @@ import { VoiceMessageDraft } from './voice-message-draft';
 
 const preferenceKey = 'vc2:speech';
 const labels: Partial<Record<VoicePhase, string>> = { starting: 'Opening your microphone', listening: 'Listening to you', hearing: 'I’m hearing you', finalizing: 'Finishing your thought', thinking: 'NorthPointe is thinking', speaking: 'NorthPointe is speaking', paused: 'Voice input paused', error: 'Voice needs attention' };
+labels.working = 'NorthPointe is working';
+labels['thinking-commentary'] = labels['working-commentary'] = 'NorthPointe is giving an update';
 const hints: Partial<Record<VoicePhase, string>> = { starting: 'Allow microphone access if your browser asks.', listening: 'Take your time. There’s room to think.', hearing: 'Your words are becoming one complete thought.', finalizing: 'Collecting the complete transcript.', thinking: 'Your message has reached the conversation.', speaking: 'You can interrupt whenever you need.', paused: 'Typing is still available.', error: 'You can keep the conversation going by typing.' };
+hints.working = 'Your request is in progress.';
+hints['thinking-commentary'] = hints['working-commentary'] = 'You can interrupt whenever you need.';
 function readPreferences(): SpeechPreferences { try { return restoreSpeechPreferences(localStorage.getItem(preferenceKey)); } catch { return restoreSpeechPreferences(null); } }
 function readSpeakerMuted() { try { return localStorage.getItem('vc2:speaker-muted') === 'true'; } catch { return false; } }
 function messageFor(error: unknown) { return error instanceof Error ? error.message : 'Something interrupted the request. Please try again.'; }
@@ -319,6 +323,15 @@ export default function App() {
             else if (activeTurnRef.current?.turnId === event.turnId) setActiveTurn(null);
             if (event.error) setNotice(event.error);
           }
+          if (event.type === 'commentary') {
+            const key = `commentary:${event.runId}:${event.turnId}:${event.itemId}`;
+            if (event.seq <= (sequences.current.get(key) ?? -1)) return;
+            sequences.current.set(key, event.seq);
+            if (voiceRef.current && audibleTurns.current.has(event.turnId) && !cancelled.current.has(event.turnId) && !completed.current.has(event.turnId)) {
+              speakingTurn.current = event.turnId;
+              engine.current?.speakCommentary(event.itemId, event.text, event.done);
+            }
+          }
           if (event.type === 'assistant') {
             const key = `${event.runId}:${event.turnId}`;
             if (event.seq <= (sequences.current.get(key) ?? -1)) return;
@@ -354,7 +367,10 @@ export default function App() {
             audibleTurns.current.delete(event.turnId);
             if (activeTurnRef.current?.turnId === event.turnId) setActiveTurn(null); setActivity('');
           }
-          if (event.type === 'activity') setActivity(event.label);
+          if (event.type === 'activity' && (!event.turnId || !cancelled.current.has(event.turnId) && !completed.current.has(event.turnId))) {
+            setActivity(event.label);
+            if (event.stage && event.turnId && audibleTurns.current.has(event.turnId)) engine.current?.setWorkStage(event.stage);
+          }
           if (event.type === 'approval') { setApproval(event); setApprovalHidden(false); }
           if (event.type === 'question') { setQuestion(event); setQuestionHidden(false); setAnswer(''); }
           if (event.type === 'error') setNotice(event.message);
@@ -581,10 +597,11 @@ export default function App() {
   const fullyConnected = online && connected && harnessConnected && !connectionIssue && !inputRecovering;
   const connectionLabel = !online ? 'Offline' : inputRecovering && connected ? 'Reconnecting mic' : fullyConnected ? 'Connected' : connectionIssue || settings?.harness.reason ? 'Reconnecting' : 'Connecting';
   const connectionDetail = !online ? 'Your draft is kept on this device.' : inputRecovering ? 'Reconnecting the microphone automatically.' : fullyConnected ? undefined : connectionIssue || settings?.harness.reason || 'Connecting to NorthPointe…';
-  const displayPhase: VoicePhase = phase === 'speaking' ? 'speaking' : !online || !connected || !harnessConnected ? 'reconnecting' : phase === 'off' && activeTurn !== null ? 'thinking' : phase;
+  const outputSpeaking = phase === 'speaking' || phase === 'thinking-commentary' || phase === 'working-commentary';
+  const displayPhase: VoicePhase = outputSpeaking ? phase : !online || !connected || !harnessConnected ? 'reconnecting' : phase === 'off' && activeTurn !== null ? 'thinking' : phase;
   const busy = activeTurn !== null;
   const automaticTurns = preferences.recognition !== 'browser' && preferences.handsFree;
-  const orbAsleep = !voiceActive && !busy && !preparingVoice && phase !== 'speaking';
+  const orbAsleep = !voiceActive && !busy && !preparingVoice && !outputSpeaking;
   const wakeDisabled = preparingVoice || creatingConversation || !conversationId || !online || !connected || !harnessConnected;
   return <div className={`app-shell ${showTranscript ? 'messenger-open' : 'orb-open'}`}><header className="site-header"><Brand /><div className="header-center"><LockKeyhole size={11} />PRIVATE CONVERSATION</div><div className="header-actions"><button className="text-button library-launch" aria-label="Open library" disabled={Boolean(clipboard)} onClick={() => { enterTextMode('library'); setLibraryOpen(true); }}><BookOpen size={18}/><span>Library</span></button><span className={`connection-pill ${fullyConnected ? 'is-connected' : ''}`} role="status" aria-live="polite" title={connectionDetail}><span className="status-dot" />{connectionLabel}</span><button className="icon-button" onClick={() => { enterTextMode('settings'); setModal('settings'); }} aria-label="Open settings" disabled={!settings || Boolean(clipboard)}><Settings2 size={20} /></button></div></header>{libraryOpen && <Library onClose={() => setLibraryOpen(false)} />}<main className={`workspace ${showTranscript ? 'messenger-workspace' : 'orb-workspace'}`}><section className="voice-space" aria-label="Voice conversation"><div className="conversation-heading"><button className="conversation-title" disabled={Boolean(clipboard)} onClick={() => setModal('conversations')}><span>NorthPointe</span><ChevronDown size={16} /></button></div><div className="voice-center"><Orb phase={displayPhase} signal={signal} asleep={orbAsleep} waking={preparingVoice || phase === 'starting'} onWake={!voiceActive ? () => void startVoice() : undefined} wakeDisabled={wakeDisabled} /><div className="voice-state" role="status" aria-live="polite">{labels[displayPhase] && <><div className={`state-label state-${displayPhase}`}><span className="state-light" />{labels[displayPhase]}</div><p>{activity || hints[displayPhase]}</p></>}</div>{!orbAsleep && <div className="acoustic-caption"><span className="acoustic-line" /><span>{signal && voiceActive ? 'RESPONDING TO YOUR SOUND' : 'A LITTLE ROOM TO BREATHE'}</span><span className="acoustic-line" /></div>}</div><div className="voice-bottom">{heard && !showTranscript && <div className="heard-draft"><span>HEARING</span><p>{heard}</p><small>Not sent yet</small><button className="text-button edit-heard" onClick={() => { enterTextMode(); changeView(true); requestAnimationFrame(() => textarea.current?.focus()); }}>Edit as text</button></div>}<div className="voice-controls">
           <button className={`control-button speaker-button ${speakerMuted ? 'is-active' : ''}`} onClick={toggleSpeaker} aria-label={speakerMuted ? 'Unmute agent' : 'Mute agent'} aria-pressed={speakerMuted} title={speakerMuted ? 'Turn agent sound on for the next reply' : 'Silence agent replies; keep listening'}>{speakerMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}<span>{speakerMuted ? 'Agent muted' : 'Mute agent'}</span></button>

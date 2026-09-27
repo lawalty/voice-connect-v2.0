@@ -5,6 +5,8 @@ import type { ServiceConfig } from './config.js';
 import { Store } from './store.js';
 import { signGatewayChallenge } from './identity.js';
 import { Timings, type TimingSample } from './telemetry.js';
+import { assistantPhase, displayText, publicCommentary } from './assistant-text.js';
+export { displayText } from './assistant-text.js';
 
 type Json = Record<string, any>;
 class RejectedRequest extends Error {constructor(readonly code?:string){super('OpenClaw declined the request');}}
@@ -13,12 +15,6 @@ const terminal=new Set(['complete','failed','cancelled']);
 export interface GatewayPort extends HarnessAdapter {
   approval(id:string,decision:string):Promise<void>; answer(id:string,answer:string):Promise<void>; diagnostics?():TimingSample[];
 }
-export function displayText(message:unknown):string {
-  if(!message || typeof message!=='object')return '';
-  const m=message as Json;if(m.isReasoning===true)return '';
-  const text=typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter((v:Json)=>v.type==='text'&&typeof v.text==='string').map((v:Json)=>v.text).join('\n'):typeof m.text==='string'?m.text:'';
-  return text.trim()==='NO_REPLY'?'':text;
-}
 export class Gateway implements GatewayPort {
   private timings=new Timings();
   private socket?:WebSocket; private ready=false; private stopped=false; private timer?:NodeJS.Timeout;
@@ -26,6 +22,7 @@ export class Gateway implements GatewayPort {
   private disconnectedReason?:string;
   private pending=new Map<string,{resolve:(v:Json)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout}>();
   private sequence=new Map<string,number>(); private text=new Map<string,string>(); private modelImages=new Set<string>();
+  private progress=new Map<string,{seq:number;items:Map<string,string>;tools:Set<string>;fallback:number}>();
   private images=false; private approvals=false; private subscribed=new Set<string>();
   private prompts=new Map<string,{kind:'approval'|'question';conversationId:string;expiresAt:number;allow?:boolean;requestId?:string;questionId?:string;event?:ServerEvent}>();
   private questionGroups=new Map<string,{ids:string[];answers:Record<string,string[]>;expiresAt:number}>();
@@ -41,7 +38,7 @@ export class Gateway implements GatewayPort {
     ws.on('error',()=>{});
     ws.on('message',(data,isBinary)=>{if(isBinary)return;try{this.frame(JSON.parse(data.toString()),ws);}catch{/* malformed remote frames are not exposed */}});
     ws.on('close',()=>{
-      if(ws!==this.socket)return;clearTimeout(this.connectingTimer);this.ready=false;this.approvals=false;this.subscribed.clear();this.prompts.clear();this.questionGroups.clear();this.sequence.clear();this.text.clear();
+      if(ws!==this.socket)return;clearTimeout(this.connectingTimer);this.ready=false;this.approvals=false;this.subscribed.clear();this.prompts.clear();this.questionGroups.clear();this.sequence.clear();this.text.clear();this.progress.clear();
       for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('Gateway connection lost'));}this.pending.clear();
       for(const row of this.store.outstanding())if(row.delivery==='pending'||row.delivery==='accepted')this.store.updateTurn(row.id,'uncertain');
       this.publish({type:'connection',connected:false,reason:this.capabilities().reason});
@@ -179,7 +176,7 @@ export class Gateway implements GatewayPort {
   }
   async abort(id:string,turnId:string):Promise<void> {
     const row=this.store.turn(turnId);if(!row||row.conversationId!==id)throw new Error('Turn not found');
-    this.store.cancelTurn(turnId);this.clearPrompts(id);this.text.delete(row.runId??row.id);this.sequence.delete(row.runId??row.id);this.publish({type:'turn',conversationId:id,turnId,delivery:'cancelled',runId:row.runId});
+    this.store.cancelTurn(turnId);this.clearPrompts(id);this.text.delete(row.runId??row.id);this.sequence.delete(row.runId??row.id);this.progress.delete(row.runId??row.id);this.publish({type:'turn',conversationId:id,turnId,delivery:'cancelled',runId:row.runId});
     const startedAt=Date.now();this.timings.record(turnId,'cancel-requested',startedAt);
     try {
       const result=await this.request('chat.abort',{...this.target(id),runId:row.runId??row.id});
@@ -199,6 +196,7 @@ export class Gateway implements GatewayPort {
     if(priorSeq!==undefined&&p.seq>priorSeq+1)this.publish({type:'reconcile',conversationId:row.conversationId});
     this.store.updateTurn(row.id,'accepted',p.runId);
     if(p.state==='delta'){
+      if(p.message?.isReasoning===true||assistantPhase(p.message)==='commentary'||['analysis','reasoning','thinking','commentary'].includes(p.phase))return;
       const delta=typeof p.deltaText==='string'?p.deltaText:displayText(p.message);
       const replace=p.replace===true||typeof p.deltaText!=='string';
       const accumulated=replace?delta:(this.text.get(p.runId)??'')+delta;
@@ -212,13 +210,35 @@ export class Gateway implements GatewayPort {
       this.timings.record(row.id,p.state==='error'?'failed':'completed',row.createdAt);
       this.publish({type:'turn',conversationId:row.conversationId,turnId:row.id,runId:p.runId,delivery,...p.state==='error'?{error:'OpenClaw could not finish this turn. Your message is retained.'}:{}});
       this.publish({type:'complete',conversationId:row.conversationId,turnId:row.id,runId:p.runId,...p.state==='error'?{failed:true}:{text:displayText(p.message)||this.text.get(p.runId)||''},cancelled});
-      this.text.delete(p.runId);this.sequence.delete(p.runId);this.clearPrompts(row.conversationId);
+      this.text.delete(p.runId);this.sequence.delete(p.runId);this.progress.delete(p.runId);this.clearPrompts(row.conversationId);
     }else if(p.state==='status')this.publish({type:'activity',conversationId:row.conversationId,turnId:row.id,label:'Preparing your response'});
   }
   private activity(p:Json):void {
-    const row=this.store.findRun(p.runId);if(!row||row.cancelRequested||['complete','failed'].includes(row.delivery))return;
-    if(p.stream==='tool')this.publish({type:'activity',conversationId:row.conversationId,turnId:row.id,label:'Using a tool'});
-    else if(p.stream==='lifecycle'&&p.data?.phase==='start')this.publish({type:'activity',conversationId:row.conversationId,turnId:row.id,label:'Working on your request'});
+    const row=this.store.findRun(p.runId);if(!row||row.cancelRequested||terminal.has(row.delivery))return;
+    if(p.sessionKey!==this.store.mapping(row.conversationId).sessionKey)return;
+    const state=this.progress.get(p.runId)??{seq:-1,items:new Map<string,string>(),tools:new Set<string>(),fallback:0};
+    if(p.seq!==undefined){if(!Number.isSafeInteger(p.seq)||p.seq<=state.seq)return;state.seq=p.seq;}
+    this.progress.set(p.runId,state);this.boundState();
+    const data=p.data??{},base={conversationId:row.conversationId,turnId:row.id,runId:p.runId};
+    const preamble=p.stream==='item'&&data.kind==='preamble';
+    if((p.stream==='assistant'&&assistantPhase(data)==='commentary'||preamble)&&data.isReasoning!==true&&data.hideFromChannelProgress!==true){
+      // Current OpenClaw emits both cumulative assistant snapshots and keyed
+      // preamble items. They share itemId and must never be spoken twice.
+      if(!Number.isSafeInteger(p.seq))return;
+      const itemId=typeof data.itemId==='string'&&data.itemId.length<=256?data.itemId:`commentary-${state.fallback}`;
+      const text=preamble?data.progressText:data.text;
+      if(!publicCommentary(text)||(!state.items.has(itemId)&&state.items.size>=100))return;
+      const previous=state.items.get(itemId),done=preamble&&data.phase==='end';
+      if(previous===text&&!done)return;
+      state.items.set(itemId,text);
+      this.publish({type:'commentary',...base,itemId,seq:p.seq,text,done});
+    }else if(p.stream==='tool'){
+      if(Number.isSafeInteger(p.seq))for(const [itemId,text] of state.items)this.publish({type:'commentary',...base,itemId,seq:p.seq,text,done:true});
+      state.fallback++;
+      const key=typeof data.toolCallId==='string'?data.toolCallId:'tool';
+      if(data.phase==='result'||data.phase==='end')state.tools.delete(key);else if(state.tools.size<100)state.tools.add(key);
+      this.publish({type:'activity',...base,label:state.tools.size?'Using a tool':'Preparing your response',stage:state.tools.size?'working':'thinking'});
+    }else if(p.stream==='lifecycle'&&data.phase==='start')this.publish({type:'activity',...base,label:'Working on your request',stage:'thinking'});
   }
   private prompt(event:string,p:Json):void {
     this.boundState();
@@ -254,7 +274,7 @@ export class Gateway implements GatewayPort {
   private boundState():void {
     for(const [id,p] of this.prompts)if(p.expiresAt<Date.now())this.prompts.delete(id);
     for(const [id,p] of this.questionGroups)if(p.expiresAt<Date.now())this.questionGroups.delete(id);
-    for(const map of [this.sequence,this.text])while(map.size>100)map.delete(map.keys().next().value!);
+    for(const map of [this.sequence,this.text,this.progress])while(map.size>100)map.delete(map.keys().next().value!);
   }
   async approval(id:string,decision:string):Promise<void> {
     const p=this.prompts.get(id);if(!p||p.kind!=='approval'||p.expiresAt<Date.now())throw new Error('Approval is no longer available');

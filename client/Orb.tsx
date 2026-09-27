@@ -4,7 +4,8 @@ import { OrbAcousticMotion, orbMotionShape } from './orb-acoustics';
 
 const palette: Record<VoicePhase, [number, number, number]> = {
   off: [97, 180, 179], starting: [111, 188, 191], listening: [118, 215, 198], hearing: [111, 231, 205],
-  finalizing: [222, 183, 122], thinking: [223, 182, 123], speaking: [167, 150, 245],
+  finalizing: [222, 183, 122], thinking: [223, 182, 123], working: [235, 151, 86], speaking: [167, 150, 245],
+  'thinking-commentary': [223, 182, 123], 'working-commentary': [235, 151, 86],
   reconnecting: [222, 177, 113], paused: [125, 148, 164], error: [225, 134, 125],
 };
 
@@ -87,6 +88,15 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
       const rgb = color.map(value => Math.round(value + (255 - value) * wakeBloom * .3)).join(',');
       const light = 1 - sleepBlend * .42 + wakeBloom * 1.7 + voice * 1.5 + sleepExhale * .35;
       const alpha = (opacity: number) => `rgba(${rgb},${Math.min(1, opacity * light)})`;
+      const commentary = current.phase === 'thinking-commentary' || current.phase === 'working-commentary';
+      const purple = (opacity: number) => `rgba(167,150,245,${Math.min(1, opacity * light)})`;
+      const surface = (opacity: number) => {
+        if (!commentary) return alpha(opacity);
+        const gradient = ctx.createLinearGradient(-radius, -radius * .55, radius, radius * .55);
+        gradient.addColorStop(0, alpha(opacity)); gradient.addColorStop(.35, alpha(opacity));
+        gradient.addColorStop(.68, purple(opacity)); gradient.addColorStop(1, purple(opacity));
+        return gradient;
+      };
       const r = radius * (1 - sleepBlend * .12 + Math.sin(t * 1.2) * (.019 - sleepBlend * .007) + shape.expansion * (1 - sleepBlend) + wakeBloom * .18 + sleepExhale * .055);
       ctx.clearRect(0, 0, size, size);
       ctx.save(); ctx.translate(size / 2, size / 2);
@@ -138,6 +148,7 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
       const body = ctx.createRadialGradient(-r * .28, -r * .35, 0, 0, 0, r);
       body.addColorStop(0, alpha(.19)); body.addColorStop(.54, alpha(.085)); body.addColorStop(.89, alpha(.14)); body.addColorStop(1, alpha(.025));
       ctx.fillStyle = body; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+      if (commentary) { ctx.fillStyle = surface(.12); ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill(); }
       ctx.globalCompositeOperation = 'screen';
       for (let line = 0; line < 58; line++) {
         const latitude = (line / 57 - .5) * Math.PI;
@@ -152,7 +163,7 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
           const py = y + front * width * .28 + wave * .75;
           if (step === 0) ctx.moveTo(x, py); else ctx.lineTo(x, py);
         }
-        ctx.strokeStyle = alpha(.085 + Math.pow(Math.cos(latitude), 2) * .13);
+        ctx.strokeStyle = surface(.085 + Math.pow(Math.cos(latitude), 2) * .13);
         ctx.lineWidth = .65; ctx.stroke();
       }
       for (let i = 0; i < 90; i++) {
@@ -160,12 +171,12 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
         const z = Math.sin(angle) * latitudeRadius;
         if (z < -.15) continue;
         const x = Math.cos(angle) * latitudeRadius * r;
-        ctx.fillStyle = alpha(.15 + Math.max(0, z) * .55);
+        ctx.fillStyle = commentary && x > 0 ? purple(.15 + Math.max(0, z) * .55) : alpha(.15 + Math.max(0, z) * .55);
         ctx.beginPath(); ctx.arc(x, y * r, (.7 + Math.max(0, z) * .55) * (1 + wakeBloom * .4), 0, Math.PI * 2); ctx.fill();
       }
       ctx.globalCompositeOperation = 'source-over';
       const edge = ctx.createLinearGradient(-r, -r, r, r);
-      edge.addColorStop(0, alpha(.42)); edge.addColorStop(.48, alpha(.015)); edge.addColorStop(1, alpha(.2));
+      edge.addColorStop(0, alpha(.42)); edge.addColorStop(.48, alpha(.015)); edge.addColorStop(1, commentary ? purple(.42) : alpha(.2));
       ctx.strokeStyle = edge; ctx.lineWidth = .8 + wakeBloom * .9; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
       ctx.restore();
       if (!motion.matches) schedule();

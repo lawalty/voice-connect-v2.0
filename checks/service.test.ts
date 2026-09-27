@@ -224,6 +224,37 @@ describe('owner boundary',()=>{
   });
 });
 describe('native OpenClaw lifecycle',()=>{
+  it('routes native commentary separately, excludes reasoning and stale events, and keeps history final-only',async()=>{
+    const f=await fixture(),url=`/api/conversations/${f.conversation.id}`;
+    await f.app.inject({method:'POST',url:`${url}/turns`,headers:f.headers,payload:{id:'progress-turn',text:'Synthetic commentary test'}});
+    const base={runId:'progress-turn',sessionKey:`agent:northpointe:vc2:${f.conversation.id}`};
+    const data={phase:'commentary',itemId:'preamble-one',text:'I will check the configuration.',replace:true};
+    f.emit('agent',{...base,seq:1,stream:'assistant',data});
+    f.emit('agent',{...base,seq:1,stream:'assistant',data});
+    f.emit('agent',{...base,seq:2,stream:'thinking',data:{text:'Private reasoning.'}});
+    f.emit('agent',{...base,seq:3,stream:'assistant',data:{...data,text:'token=not-for-output'}});
+    f.emit('agent',{...base,sessionKey:'another-session',seq:4,stream:'assistant',data:{...data,text:'Wrong session.'}});
+    f.emit('agent',{...base,seq:4,stream:'tool',data:{phase:'start',toolCallId:'tool-a',args:{secret:'raw tool payload'}}});
+    f.emit('agent',{...base,seq:5,stream:'tool',data:{phase:'result',toolCallId:'tool-a'}});
+    f.emit('agent',{...base,seq:6,stream:'item',data:{kind:'preamble',phase:'end',itemId:'preamble-two',progressText:'I found the setting'}});
+    await expect.poll(()=>f.events.filter(e=>e.type==='commentary').length).toBe(4);
+    const progress=f.events.filter(e=>e.type==='commentary');
+    expect(progress[0]).toMatchObject({itemId:'preamble-one',text:data.text,done:false});
+    expect(progress.at(-1)).toMatchObject({itemId:'preamble-two',text:'I found the setting',done:true});
+    expect(f.events.filter(e=>e.type==='activity').map(e=>e.stage)).toEqual(['working','thinking']);
+    expect(JSON.stringify(f.events)).not.toMatch(/Private reasoning|not-for-output|Wrong session|raw tool payload/);
+    f.emit('chat',{...base,seq:1,state:'delta',deltaText:'The answer is ready.'});
+    const signed=(text:string,phase:string)=>({type:'text',text,textSignature:JSON.stringify({v:1,phase,id:phase})});
+    const message={role:'assistant',runId:base.runId,content:[signed(data.text,'commentary'),signed('The answer is ready.','final_answer')]};
+    f.emit('chat',{...base,seq:2,state:'final',message});
+    await expect.poll(()=>f.events.find(e=>e.type==='complete')).toMatchObject({text:'The answer is ready.'});
+    f.emit('agent',{...base,seq:7,stream:'assistant',data:{...data,text:'Too late.'}});
+    f.setHistory({messages:[{role:'assistant',phase:'commentary',content:data.text},{role:'assistant',content:data.text,__openclaw:{mirrorOrigin:'codex-app-server',mirrorIdentity:'native-turn:commentary:message-one'}},message]});
+    const view=(await f.app.inject({url,headers:f.headers})).json();
+    expect(view.messages.filter((m:any)=>m.role==='assistant').map((m:any)=>m.text)).toEqual(['The answer is ready.']);
+    expect(f.events.filter(e=>e.type==='commentary')).toHaveLength(4);
+  });
+
   it('restores only local owner image metadata to user history, including an image-only turn',async()=>{
     const f=await fixture(),url=`/api/conversations/${f.conversation.id}`,store=(f.app as any).vc.store;
     const meta={id:'local-photo',name:'image-local.png',mimeType:'image/png',width:2,height:2,previewUrl:'/api/attachments/local-photo'};

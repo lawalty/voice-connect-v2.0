@@ -45,7 +45,7 @@ const EVENTS = new Set<AudioDiagnosticEvent>([
   'output-interrupt', 'output-request', 'output-error', 'capture-gap', 'backpressure', 'barge-in', 'barge-in-blocked',
 ]);
 const PHASES = new Set<VoicePhase>([
-  'off', 'starting', 'listening', 'hearing', 'finalizing', 'thinking',
+  'off', 'starting', 'listening', 'hearing', 'finalizing', 'thinking', 'working', 'thinking-commentary', 'working-commentary',
   'speaking', 'reconnecting', 'paused', 'error',
 ]);
 const REASONS = new Set<AudioDiagnosticReason>([

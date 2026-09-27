@@ -116,6 +116,72 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it.each(['browser', 'fish'] as const)('speaks ephemeral commentary with %s, returns to work, and gives the answer priority', async output => {
+    const run = setup(); await run.engine.start({ ...preferences, output }, 'commentary');
+    run.engine.awaitReply();
+    run.engine.speakCommentary('first', 'I will check'); expect(fixture.outputs).toHaveLength(0);
+    run.engine.speakCommentary('first', 'I will check the configuration.');
+    expect(fixture.outputs[0]!.words).toEqual(['I will check the configuration.']);
+    expect(fixture.outputs[0]!.finished).toBe(true); expect(run.phases.at(-1)).toBe('thinking-commentary');
+    run.engine.setWorkStage('working'); expect(run.phases.at(-1)).toBe('working-commentary');
+    run.engine.speakCommentary('first', 'I will check the configuration.', true);
+    fixture.outputs[0]!.end(); expect(fixture.outputs).toHaveLength(1); expect(run.phases.at(-1)).toBe('working');
+    expect(fixture.cues).toEqual(['on', 'off']);
+    run.engine.speakCommentary('second', 'I found the issue.');
+    run.engine.speakCommentary('third', 'Now I will check the result.');
+    run.engine.speak('The configuration is correct.');
+    expect(fixture.outputs[1]!.cancel).toHaveBeenCalledOnce();
+    expect(fixture.outputs[2]!.words).toEqual(['The configuration is correct.']);
+    fixture.outputs[1]!.events.started(); fixture.outputs[1]!.end();
+    expect(run.phases.at(-1)).toBe('speaking');
+    run.engine.speakCommentary('late', 'This must stay silent.', true); expect(fixture.outputs).toHaveLength(3);
+    run.engine.responseDone(); fixture.outputs[2]!.end(); expect(run.phases.at(-1)).toBe('listening');
+    expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
+  });
+
+  it('keeps pure text commentary silent and fences muted, interrupted, and completed updates', async () => {
+    const run = setup(); run.engine.prepareSpeech(preferences, 'text'); run.engine.awaitReply();
+    run.engine.speakCommentary('text-only', 'Do not speak in pure text Messenger.', true);
+    expect(fixture.outputs).toHaveLength(0);
+    await run.engine.start(preferences, 'voice'); run.engine.awaitReply();
+    run.engine.speakCommentary('a', 'A short update.');
+    const stale = fixture.outputs[0]!;
+    run.engine.setSpeakerMuted(true); run.engine.setSpeakerMuted(false);
+    run.engine.speakCommentary('b', 'Unmute must not replay the turn.', true);
+    stale.events.started(); stale.end(); expect(fixture.outputs).toHaveLength(1);
+    run.engine.interrupt(); run.engine.awaitReply();
+    run.engine.speakCommentary('c', 'New turn works.');
+    run.engine.interrupt(); run.engine.speakCommentary('d', 'Cancelled update.', true);
+    expect(fixture.outputs).toHaveLength(2); expect(run.phases.at(-1)).toBe('listening');
+    run.engine.awaitReply(); run.engine.speakCommentary('e', 'Commentary without a final answer.');
+    run.engine.responseDone(); fixture.outputs[2]!.end();
+    expect(run.phases.at(-1)).toBe('listening');
+  });
+
+  it('recovers final speech after commentary output fails and flushes unpunctuated updates at item end', async () => {
+    const run = setup(); await run.engine.start(preferences, 'voice'); run.engine.awaitReply();
+    run.engine.speakCommentary('a', 'Checking the result'); expect(fixture.outputs).toHaveLength(0);
+    run.engine.speakCommentary('a', 'Checking the result', true); expect(fixture.outputs[0]!.words).toEqual(['Checking the result']);
+    fixture.outputs[0]!.events.error('Fixture output failure');
+    expect(run.phases.at(-1)).toBe('thinking');
+    run.engine.speak('The answer is ready.'); run.engine.responseDone();
+    expect(fixture.outputs[1]!.words).toEqual(['The answer is ready.']); fixture.outputs[1]!.end();
+    expect(run.phases.at(-1)).toBe('listening');
+  });
+
+  it('keeps commentary playback truthful through mic mute and accepts a qualified spoken interruption', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, output: 'fish' }, 'voice'); run.engine.awaitReply();
+    run.engine.setWorkStage('working'); run.engine.speakCommentary('a', 'I will check the result.');
+    run.engine.mute(true); expect(run.phases.at(-1)).toBe('working-commentary');
+    run.engine.mute(false); expect(run.phases.at(-1)).toBe('working-commentary');
+    await frame('start', 0.1); expect(fixture.outputs[0]!.cancel).not.toHaveBeenCalled();
+    await frame('start', 0.4, true);
+    expect(fixture.outputs[0]!.cancel).toHaveBeenCalledOnce(); expect(run.callbacks.onInterrupt).toHaveBeenCalledOnce();
+    expect(run.phases.at(-1)).toBe('hearing');
+    run.engine.speakCommentary('late', 'Do not interrupt the user.', true);
+    expect(fixture.outputs).toHaveLength(1);
+  });
+
   it('retains the exact input failure during playback across a restart and settings stop', async () => {
     const run = setup(); await run.engine.start(preferences, 'same-conversation');
     run.engine.speak('An answer continues after the input fails.'); run.engine.responseDone();
