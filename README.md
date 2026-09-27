@@ -10,35 +10,31 @@ requirements and failure lessons only. See [architecture decisions](docs/DECISIO
 
 ## Speech
 
-The primary flow is continuous conversation: complete the one-time local recognition
-setup, press **Start** once, speak, and pause. Voice activity detection closes the
-utterance automatically, the assistant replies, and listening resumes for your next
-turn. Automatic mode has no **Finish** button. Finish appears only for explicitly
-selected manual turns or browser tap-to-talk fallback.
+The primary flow is continuous conversation: choose providers during onboarding,
+tap the orb once, speak, and pause. VC waits for complete recognition results,
+the assistant replies, and listening resumes. Automatic mode has no Finish button.
+Browser fallback and explicitly selected manual turns retain Finish.
 
-Fresh devices default to Vosk with hands-free conversation enabled. The approximately
-40 MB recognition download requires an explicit setup action. Previously saved
-provider and manual-mode preferences remain in effect; the visible local setup
-action lets you opt into the continuous flow without discarding those preferences.
+Recognition and output are independently selectable after setup. Provider selections
+and the Fish voice ID live in the installation's server-side preferences.json, shared
+by all its devices. Browser voice, interruption sensitivity, audio cues, screen wake
+and manual/automatic rhythm remain device preferences.
 
-Recognition and speech output are independent, per-device preferences:
+- **Vosk lgraph:** optional 128 MB English model downloaded separately onto the VC
+  host. Recognition runs in a private Python service, never on your phone. Microphone
+  audio travels to your VC host over authenticated HTTPS/WebSocket; it is not stored.
+  VC's Silero VAD and playback-aware interruption guard remain in the browser.
+- **Deepgram Flux:** optional premium streaming recognition. Uses its confirmed
+  turn-end events. Switch to/from Vosk without removing the installed host model.
+  An explicitly configured key is required; no silent paid fallback.
+- **Browser recognition:** manual fallback where supported. The browser may send
+  audio to its vendor; continuous capture and echo cancellation vary by device.
+- **Fish Audio:** optional streaming speech output with an encrypted server-side
+  API key and installation-persistent voice ID. This selection is independent of STT.
+- **Browser speech:** default output, preferring local voices when available.
 
-- **Vosk:** default recognition for continuous conversation, with downloadable,
-  hash-verified English recognition on your device.
-  Approximately 40 MB download; runtime memory is substantially larger. No raw
-  microphone audio goes to the application server in this mode.
-- **Browser recognition:** a manual fallback where supported, with explicit Finish
-  available. The browser may use an online speech service; continuous recognition
-  and interruption vary with the browser and audio route.
-- **Deepgram Flux:** optional paid speech recognition through the authenticated
-  server. Switch between Deepgram and Vosk in Settings; the Vosk download remains
-  cached until explicitly removed. Requires a credential. No silent paid fallback.
-- **Fish Audio:** optional streaming speech output using your Fish voice ID and
-  API key. Select Fish Audio under NorthPointe's voice, save the key in Settings,
-  enter your voice ID, and use Test speaker before saving preferences. Recognition
-  stays on your selected provider. The key is encrypted on the VPS and never
-  returned to the browser; testing sends a short fixed sentence to Fish.
-- **Browser speech:** default output, with local voices preferred when available.
+See [host speech setup](docs/HOST-SPEECH.md) for installation, migration, and provider
+capability boundaries. Vosk still needs connectivity to the VC host.
 
 During an active voice session, NorthPointe's public progress commentary is spoken
 as it arrives, including while Messenger is open. Commentary is audio only: it

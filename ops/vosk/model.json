@@ -1,0 +1,8 @@
+{
+  "id": "vosk-model-en-us-0.22-lgraph",
+  "url": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip",
+  "sha256": "d9838b4aaa82a75c4a17f5aca300eaca129aaab2a7cbf951bafbb500eb9c4334",
+  "bytes": 130557655,
+  "license": "Apache-2.0",
+  "sampleRate": 16000
+}

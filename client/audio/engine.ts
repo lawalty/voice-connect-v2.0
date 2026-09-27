@@ -2,7 +2,7 @@ import type { AcousticSignal, RecognizerCapabilities, RecognizerEvents, SpeechOu
 import { acousticSignal, SentenceStream, Transcript } from './dsp';
 import { BrowserOutput, PremiumOutput, type PlaybackSamples } from './output';
 import { CueTransitions, ListeningCues } from './cues';
-import { LocalRecognizer } from './vosk';
+import { HostRecognizer } from './vosk';
 import { BrowserRecognizer } from './browser-recognizer';
 import { FluxRecognizer } from './flux-recognizer';
 import { AudioDiagnostics, type AudioDiagnosticEntry, type AudioDiagnosticReason, type VoiceStopReason } from './diagnostics';
@@ -221,7 +221,6 @@ export class VoiceEngine {
       } else {
         await this.openCapture(generation, true);
         if (generation !== this.generation) return;
-        if (recognizer.capabilities.processing === 'local') this.callbacks.onNotice('Loading the downloaded local Vosk model. Audio stays on this device.');
         if (preferences.handsFree && preferences.output === 'browser') this.callbacks.onNotice('Hands-free interruption with a browser voice depends on this device’s echo cancellation. Headphones can improve it.');
       }
       if (generation !== this.generation) return;
@@ -426,7 +425,7 @@ export class VoiceEngine {
       },
     };
     if (this.preferences!.recognition === 'browser') return new BrowserRecognizer(events);
-    if (this.preferences!.recognition === 'vosk') return new LocalRecognizer(events);
+    if (this.preferences!.recognition === 'vosk') return new HostRecognizer(this.conversationId, events);
     return new FluxRecognizer(this.conversationId, events);
   }
   async finish(source: 'manual' | 'automatic' = 'manual'): Promise<void> {

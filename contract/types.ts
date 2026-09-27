@@ -22,7 +22,15 @@ export const DEFAULT_SPEECH: SpeechPreferences = {
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }
 export interface HarnessCapabilities { connected: boolean; images: boolean; cancellation: boolean; approvals: boolean; version: string; reason?: string; }
 export interface AppStatus { ownerConfigured: boolean; authenticated: boolean; build: string; csrfToken?: string; }
-export interface AppSettings { deepgramConfigured: boolean; fishConfigured: boolean; harness: HarnessCapabilities; }
+export interface InstallationSpeech {
+  version: 1; revision: number; setupComplete: boolean;
+  recognition: RecognizerKind; output: OutputKind; fishVoice: string;
+}
+export interface HostModelStatus {
+  id: string; installed: boolean; state: 'missing' | 'downloading' | 'extracting' | 'loading' | 'ready' | 'error' | 'unavailable';
+  bytes: number; received: number; error?: string | null;
+}
+export interface AppSettings { deepgramConfigured: boolean; fishConfigured: boolean; harness: HarnessCapabilities; speech: InstallationSpeech; vosk: HostModelStatus; }
 export interface Conversation { id: string; title: string; createdAt: number; updatedAt: number; }
 export interface Attachment { id: string; mimeType: string; name: string; width: number; height: number; previewUrl?: string; }
 export type Delivery = 'pending' | 'accepted' | 'complete' | 'cancelled' | 'uncertain' | 'failed';

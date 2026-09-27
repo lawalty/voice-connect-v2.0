@@ -16,23 +16,14 @@ import * as recognition from '../service/audio.js';
 const cleanup:(()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const fn of cleanup.reverse())await fn();cleanup.length=0;});
 const origin='http://127.0.0.1:5173',bootstrap='test-bootstrap-token-that-is-long-enough';
-describe('isolated local recognition worker policy',()=>{
-  it('allows generated JS only on the exact worker asset, including cache validation, never HTML fallback',async()=>{
-    const dir=mkdtempSync(join(tmpdir(),'vc2-worker-policy-')),staticDir=join(dir,'public');
-    mkdirSync(join(staticDir,'audio'),{recursive:true});mkdirSync(join(staticDir,'runtime'));
-    writeFileSync(join(staticDir,'index.html'),'<!doctype html><title>Strict document</title>');
-    writeFileSync(join(staticDir,'audio','vosk.worker.js'),'self.onmessage = () => {};');
-    writeFileSync(join(staticDir,'audio','other.js'),'void 0;');writeFileSync(join(staticDir,'runtime','vosk.js'),'void 0;');
+describe('retired browser recognition policy',()=>{
+  it('never grants unsafe eval, including obsolete worker paths and escaped APIs',async()=>{
+    const dir=mkdtempSync(join(tmpdir(),'vc2-policy-')),staticDir=join(dir,'public');
+    mkdirSync(staticDir);writeFileSync(join(staticDir,'index.html'),'<!doctype html><title>Strict document</title>');
     const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),gatewayToken:'',gatewayEnabled:false,staticDir,origin}});
     cleanup.push(async()=>{await app.close();rmSync(dir,{recursive:true,force:true});});
-    const header=(r:{headers:Record<string,unknown>})=>String(r.headers['content-security-policy']);
-    const worker=await app.inject({url:'/audio/vosk.worker.js'});expect(worker.statusCode).toBe(200);expect(header(worker)).toContain("'unsafe-eval'");expect(header(worker)).toContain("worker-src 'self' blob:");expect(header(worker)).toContain("connect-src 'self' blob:");
-    expect(header(await app.inject({method:'HEAD',url:'/audio/vosk.worker.js?v=test'}))).toContain("'unsafe-eval'");
-    const cached=await app.inject({url:'/audio/vosk.worker.js',headers:{'if-none-match':String(worker.headers.etag)}});expect(cached.statusCode).toBe(304);expect(header(cached)).toContain("'unsafe-eval'");
-    for(const url of ['/','/index.html','/audio/other.js','/runtime/vosk.js','/audio/vosk.worker.js.map','/audio/vosk.worker.js/anything','/audio/%76osk.worker.js'])expect(header(await app.inject({url}))).not.toContain("'unsafe-eval'");
-    for(const url of ['/%61pi/settings','/%61pi/no-such-endpoint','/a%70i/conversations?next=/api/status']){const protectedResponse=await app.inject({url});expect(protectedResponse.statusCode).toBe(401);expect(String(protectedResponse.headers['content-type'])).toContain('application/json');expect(header(protectedResponse)).not.toContain("'unsafe-eval'");}
-    unlinkSync(join(staticDir,'audio','vosk.worker.js'));
-    const missing=await app.inject({url:'/audio/vosk.worker.js'});expect(String(missing.headers['content-type'])).toContain('text/html');expect(header(missing)).not.toContain("'unsafe-eval'");
+    for(const url of ['/','/audio/vosk.worker.js','/runtime/vosk.js','/audio/%76osk.worker.js'])expect(String((await app.inject({url})).headers['content-security-policy'])).not.toContain("'unsafe-eval'");
+    for(const url of ['/%61pi/settings','/%61pi/no-such-endpoint','/a%70i/conversations?next=/api/status'])expect((await app.inject({url})).statusCode).toBe(401);
   });
 });
 async function fixture(unremovableBootstrap=false) {

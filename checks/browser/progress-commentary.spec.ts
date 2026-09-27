@@ -1,3 +1,4 @@
+import { installationFixture } from './installation-fixture';
 import { test, expect } from '@playwright/test';
 import { enterFixtureSession } from './fixture-session';
 import { waitForFixtureBudget } from './fixture-budget';
@@ -7,6 +8,7 @@ test.beforeEach(waitForFixtureBudget);
 for (const [mode, output] of [['voice-orb', 'browser'], ['voice-messenger', 'browser'], ['text-messenger', 'browser'], ['voice-messenger', 'fish']] as const) {
   test(`${output} ${mode} keeps progress audio ephemeral and shows its speaking gradient`, async ({ page, context }, info) => {
     await context.grantPermissions(['microphone']);
+    await installationFixture(page, { output, fishVoice: 'fixture' });
     await page.addInitScript(provider => {
       localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output: provider, fishVoice: 'fixture', handsFree: false, audioCues: false }));
       localStorage.setItem('vc2:speaker-muted', 'false');

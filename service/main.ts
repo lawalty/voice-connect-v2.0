@@ -20,6 +20,8 @@ import { bridgeFishAudio } from './fish.js';
 import { normalizeImage } from './images.js';
 import { LibraryClient } from './library.js';
 import { registerLibraryRoutes } from './library-routes.js';
+import { SpeechSettings, speechSelection } from './speech-settings.js';
+import { VoskHost } from './vosk.js';
 
 const password=z.string().min(12).max(256);
 const id=z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
@@ -34,6 +36,7 @@ function securityPath(req:FastifyRequest):string {
 }
 export async function buildApp(options:AppOptions={}) {
   const cfg=loadConfig(options.config),store=new Store(cfg.stateDir,cfg.masterKey);
+  const speechSettings=new SpeechSettings(cfg.stateDir),vosk=new VoskHost(cfg.voskUrl,cfg.voskToken);
   const app=Fastify({logger:false,bodyLimit:128*1024,trustProxy:false,requestTimeout:30000});
   const sockets=new Map<WebSocket,{conversationId:string;token:string;events:boolean;alive:boolean;revision:number;provider?:'fish'|'deepgram'}>();
   const heartbeat=setInterval(()=>{for(const [socket,binding] of sockets){if(!store.session(binding.token)){socket.close(1008,'Sign in again');continue;}if(!binding.alive){socket.terminate();continue;}binding.alive=false;if(socket.readyState===1)socket.ping();}},20000);heartbeat.unref();
@@ -69,16 +72,6 @@ export async function buildApp(options:AppOptions={}) {
     if(path==='/api/status'||authEntry)return;
     const s=session(req);if(!s)return reply.code(401).send({error:'Sign in to continue.'});
     if(mutating&&!equal(String(req.headers['x-csrf-token']??''),s.csrf))return reply.code(403).send({error:'Refresh Voice Connect and try again.'});
-  });
-  app.addHook('onSend',async(req,reply,payload)=>{
-    // The legacy Vosk binding evaluates generated JS only inside this external worker.
-    // Exact asset + script response checks prevent the SPA fallback or other files
-    // from inheriting its exception; the application document remains strict.
-    const workerPath=req.url.split('?')[0]==='/audio/vosk.worker.js';
-    const scriptType=/^(?:application|text)\/(?:java|ecma)script(?:;|$)/i.test(String(reply.getHeader('content-type')??''));
-    const cachedWorker=reply.statusCode===304&&existsSync(join(cfg.staticDir,'audio','vosk.worker.js'));
-    if(workerPath&&['GET','HEAD'].includes(req.method)&&((reply.statusCode===200&&scriptType)||cachedWorker))reply.header('Content-Security-Policy',"default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
-    return payload;
   });
   app.setErrorHandler((error,req,reply)=>{
     const validation=error instanceof z.ZodError;
@@ -116,7 +109,19 @@ export async function buildApp(options:AppOptions={}) {
     for(const [s,b] of sockets)if(!store.session(b.token))s.close(1008,'Sign in again');return status(req);
   });
   app.post('/api/auth/logout',async(req,reply)=>{const token=req.cookies.vc_session??'';store.logout(token);closeToken(token);reply.clearCookie('vc_session',{path:'/'});return {ok:true};});
-  app.get('/api/settings',async():Promise<AppSettings>=>({deepgramConfigured:Boolean(store.get('deepgram')),fishConfigured:Boolean(store.get('fish')),harness:gateway.capabilities()}));
+  app.get('/api/settings',async():Promise<AppSettings>=>({deepgramConfigured:Boolean(store.get('deepgram')),fishConfigured:Boolean(store.get('fish')),harness:gateway.capabilities(),speech:speechSettings.read(),vosk:await vosk.status()}));
+  app.get('/api/settings/speech',async()=>speechSettings.read());
+  app.get('/api/settings/vosk',async()=>vosk.status());
+  app.post('/api/settings/vosk',async(_req,reply)=>{try{return await vosk.request('/install','POST');}catch{return reply.code(503).send({error:'The host speech service is unavailable. Check its installation.'});}});
+  app.delete('/api/settings/vosk',async(_req,reply)=>{try{return await vosk.request('/model','DELETE');}catch(error){return reply.code((error as {statusCode?:number}).statusCode===409?409:503).send({error:'Stop voice on all devices and wait for installation to finish before removing the host model.'});}});
+  app.put('/api/settings/speech',async(req,reply)=>{
+    const {revision,...selection}=speechSelection.extend({revision:z.number().int().nonnegative()}).strict().parse(req.body);
+    if(selection.recognition==='deepgram'&&!store.deepgramKey())return reply.code(400).send({error:'Save a Deepgram credential first.'});
+    if(selection.output==='fish'&&(!store.fishKey()||!selection.fishVoice))return reply.code(400).send({error:'Save a Fish Audio credential and voice ID first.'});
+    if(selection.recognition==='vosk'&&!(await vosk.status()).installed)return reply.code(409).send({error:'Install Vosk lgraph on the host before selecting it.'});
+    if(revision!==speechSettings.read().revision)return reply.code(409).send({error:'Settings changed elsewhere. Close and reopen Settings before saving.'});
+    return speechSettings.save(selection,revision);
+  });
   // Reuse one limiter instance so saves and saved-key checks share six attempts.
   // Auth/origin/CSRF run in onRequest before this preHandler can start a probe.
   const deepgramRate=app.rateLimit({max:6,timeWindow:60000});
@@ -187,9 +192,14 @@ export async function buildApp(options:AppOptions={}) {
   });
   app.get('/api/audio',{websocket:true},(socket,req)=>{
     const conversationId=bindSocket(socket,req);if(!conversationId)return;
-    const q=z.object({kind:z.enum(['stt','tts']),provider:z.enum(['deepgram','fish']).default('deepgram'),voice:id.optional(),conversationId:id}).strict().safeParse(req.query);
+    const q=z.object({kind:z.enum(['stt','tts']),provider:z.enum(['deepgram','fish','vosk']).default('deepgram'),voice:id.optional(),conversationId:id}).strict().safeParse(req.query);
     const unavailable=(message:string)=>{socket.send(JSON.stringify({type:'error',message}));socket.close(1008,'Speech unavailable');};
     if(!q.success){unavailable('Choose a supported speech provider and voice in Settings.');return;}
+    if(q.data.provider==='vosk'){
+      if(q.data.kind!=='stt'||q.data.voice){unavailable('Vosk supports recognition only.');return;}
+      if(!cfg.voskToken){unavailable('The host Vosk service is not configured.');return;}
+      vosk.bridge(socket,()=>Boolean(session(req)));return;
+    }
     if(q.data.provider==='fish'){
       if(q.data.kind!=='tts'||!q.data.voice){unavailable('Fish Audio needs a voice ID and supports speech output only.');return;}
       const key=store.fishKey();if(!key){unavailable('Save your Fish Audio API key in Settings before testing or using this voice.');return;}

@@ -13,6 +13,7 @@ const origin=`http://127.0.0.1:${appPort}`;
 const dir=await mkdtemp(join(tmpdir(),'vc2-browser-'));
 const token=randomBytes(24).toString('hex');
 await mkdir(join(dir,'state'));
+await writeFile(join(dir,'state','preferences.json'),JSON.stringify({version:1,revision:1,setupComplete:true,recognition:'browser',output:'browser',fishVoice:''}));
 await writeFile(join(dir,'master'),randomBytes(32).toString('hex'));
 await writeFile(join(dir,'bootstrap'),token);
 await writeFile(join(dir,'gateway'),'fixture-token');

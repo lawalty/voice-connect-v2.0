@@ -1,10 +1,49 @@
-// Real WASM acceptance without contacting OpenClaw or a paid speech service.
+// Real host Vosk + browser VAD acceptance without contacting OpenClaw or a paid speech service.
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import react from '@vitejs/plugin-react';
+import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { WebSocketServer, WebSocket } from 'ws';
+
+const modelRoot = resolve('.local/vosk-acceptance-models');
+await mkdir(modelRoot, { recursive: true });
+const token = randomBytes(32).toString('hex'), tokenPath = resolve('.local/audio-check/vosk-token');
+await mkdir(resolve('.local/audio-check'), { recursive: true }); await writeFile(tokenPath, token);
+const worker = spawn(process.env.VC_TEST_PYTHON || 'python3', ['ops/vosk/server.py'], {
+  windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'],
+  env: { ...process.env, VC_VOSK_MODEL_DIR: modelRoot, VC_VOSK_TOKEN_FILE: tokenPath, VC_VOSK_PORT: '27019' },
+});
+let workerError;
+worker.on('error', error => { workerError = error; });
+const hostRequest = async (path, method = 'GET') => fetch('http://127.0.0.1:27019' + path, { method, headers: { Authorization: 'Bearer ' + token } });
+for (let n = 0; ; n++) {
+  if (workerError || n > 100) { worker.kill(); throw workerError || new Error('Vosk fixture startup timed out'); }
+  try { if ((await hostRequest('/health')).ok) break; } catch {}
+  await new Promise(resolve => setTimeout(resolve, 100));
+}
+assert.equal((await fetch('http://127.0.0.1:27019/status')).status, 401, 'host model requires authorization');
+await hostRequest('/install', 'POST');
+for (let n = 0; ; n++) {
+  const status = await (await hostRequest('/status')).json();
+  if (status.installed) break;
+  if (status.state === 'error' || n > 400) { worker.kill(); throw new Error('Host installation failed: ' + JSON.stringify(status)); }
+  await new Promise(resolve => setTimeout(resolve, 1000));
+}
+console.log('Host lgraph installed and ready.');
+const relay = new WebSocketServer({ host: '127.0.0.1', port: 27020 });
+relay.on('connection', client => {
+  const remote = new WebSocket('ws://127.0.0.1:27019/recognize', { headers: { Authorization: 'Bearer ' + token } });
+  client.on('message', (data, binary) => remote.send(data, { binary }));
+  remote.on('message', (data, binary) => client.send(data, { binary }));
+  remote.on('error', () => client.close()); client.on('error', () => remote.close());
+  client.on('close', () => remote.close()); remote.on('close', () => client.close());
+});
+
 
 const fixturePath = resolve('.local/audio-check/test.wav');
 await mkdir(resolve('.local/audio-check'), { recursive: true });
@@ -18,16 +57,16 @@ const fixture = await readFile(fixturePath);
 console.log(`Vosk official WAV fixture: ${fixture.length} bytes; SHA256 ${createHash('sha256').update(fixture).digest('hex')}`);
 // These match service/main.ts; backend tests separately assert exact-route scoping.
 const DOCUMENT_CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
-const BROKER_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
-const server = await createServer({
-  server: { host: '127.0.0.1', port: 5192, strictPort: true }, logLevel: 'error',
-  plugins: [{ name: 'audio-production-csp', configureServer(server) {
+const server = await createServer({ configFile: false, root: 'client',
+  server: { host: '127.0.0.1', port: 5192, strictPort: true, proxy: { '/api/': { target: 'http://127.0.0.1:27020', ws: true } } }, logLevel: 'error',
+  plugins: [react(), { name: 'audio-production-csp', configureServer(server) {
     server.middlewares.use((request, response, next) => {
       const path = request.url?.split('?')[0];
-      response.setHeader('Content-Security-Policy', path === '/audio/vosk.worker.js' ? BROKER_CSP : DOCUMENT_CSP);
+      response.setHeader('Content-Security-Policy', DOCUMENT_CSP);
       response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
       response.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-      if (path === '/audio-csp-probe.js') {
+      if (path === '/audio-harness') { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><title>Audio runtime acceptance</title>'); }
+      else if (path === '/audio-csp-probe.js') {
         response.setHeader('Content-Type', 'text/javascript');
         response.end("try { Function('return 1')(); window.__documentEvalBlocked = false; } catch { window.__documentEvalBlocked = true; }");
       } else next();
@@ -41,31 +80,19 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  page.on('console', (message) => { if (message.text().startsWith('AUDIO-CHECK')) console.log(message.text()); });
-  await page.route('**/audio-harness', (route) => route.fulfill({ contentType: 'text/html',
-    headers: { 'Content-Security-Policy': DOCUMENT_CSP, 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' },
-    body: '<!doctype html><title>Audio runtime acceptance</title>' }));
+  page.on('console', (message) => { if (message.type() === 'error' || message.text().startsWith('AUDIO-CHECK')) console.log(message.text()); });
   await page.goto('http://127.0.0.1:5192/audio-harness');
   const policy = await page.evaluate(async () => {
     await new Promise((resolve, reject) => { const probe = document.createElement('script'); probe.src = '/audio-csp-probe.js'; probe.onload = resolve; probe.onerror = reject; document.head.append(probe); });
-    const broker = await fetch('/audio/vosk.worker.js');
     await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready;
     if (!navigator.serviceWorker.controller) await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Service worker did not claim the audio test.')), 5000);
       navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(timeout); resolve(); }, { once: true });
     });
-    return { blocked: window.__documentEvalBlocked, brokerCsp: broker.headers.get('content-security-policy') };
+    return { blocked: window.__documentEvalBlocked };
   });
   assert.equal(policy.blocked, true, 'application document still blocks JavaScript string evaluation');
-  assert.equal(policy.brokerCsp, BROKER_CSP);
-  console.log('Production CSP: document eval blocked; exception confined to external Vosk broker.');
-  const download = await page.evaluate(async () => {
-    const model = await import('/audio/model.ts');
-    await model.downloadModel();
-    return model.modelStatus();
-  });
-  assert.equal(download.installed, true);
-  console.log(`Verified model cached: ${download.bytes} bytes`);
+  console.log('Production CSP: document eval blocked; browser model binding retired.');
   const startup = await page.evaluate(async () => {
     const { VoiceEngine } = await import('/audio/engine.ts');
     const phases = [], errors = [], turns = []; let signals = 0;
@@ -140,15 +167,14 @@ try {
 
   // The runtime has already been loaded; prove recognizer reinitialization uses cached
   // archive bytes without downloading audio or depending on a network speech API.
-  await context.setOffline(true);
   const recognized = await page.evaluate(async (bytes) => {
-    const { LocalRecognizer } = await import('/audio/vosk.ts');
+    const { HostRecognizer } = await import('/audio/vosk.ts');
     const { Transcript, Resampler } = await import('/audio/dsp.ts');
     const audio = new AudioContext();
     const buffer = await audio.decodeAudioData(Uint8Array.from(bytes).buffer);
     const samples = new Resampler(buffer.sampleRate).push(buffer.getChannelData(0));
     const transcript = new Transcript(), errors = [];
-    const recognizer = new LocalRecognizer({ result: ({ text, final }) => transcript.update(text, final), error: (error) => errors.push(error.message), ended() {} });
+    const recognizer = new HostRecognizer('full-wav', { result: ({ text, final }) => transcript.update(text, final), error: (error) => errors.push(error.message), ended() {} });
     await recognizer.start();
     for (let offset = 0; offset < samples.length; offset += 1600) {
       recognizer.push(samples.subarray(offset, offset + 1600));
@@ -163,9 +189,8 @@ try {
   assert.match(recognized.result, /^one zero zero zero one\b/);
   assert.match(recognized.result, /zero one eight zero three$/);
   assert.deepEqual(errors, []);
-  console.log('Offline WAV recognition passed:', recognized.result);
-  await context.setOffline(false);
-  const removed = await page.evaluate(async () => { const model = await import('/audio/model.ts'); await model.removeModel(); return model.modelStatus(); });
-  assert.equal(removed.installed, false);
-  console.log('Cached archive and extracted IDB removal passed.');
-} finally { await browser.close(); await server.close(); }
+  console.log('Host WAV recognition passed:', recognized.result);
+  assert.equal((await hostRequest('/model', 'DELETE')).ok, true);
+  assert.equal((await (await hostRequest('/status')).json()).installed, false);
+  console.log('Host model removal passed.');
+} finally { await browser.close(); await server.close(); relay.close(); worker.kill(); }

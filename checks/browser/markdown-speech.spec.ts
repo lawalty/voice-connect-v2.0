@@ -1,3 +1,4 @@
+import { installationFixture } from './installation-fixture';
 import { test, expect } from '@playwright/test';
 import { enterFixtureSession } from './fixture-session';
 import { waitForFixtureBudget } from './fixture-budget';
@@ -7,6 +8,7 @@ test.beforeEach(waitForFixtureBudget);
 for (const output of ['browser', 'fish'] as const) {
   test(`${output} streams clean speech while retaining the original Markdown in history`, async ({ page, context }) => {
     await context.grantPermissions(['microphone']);
+    await installationFixture(page, { output, fishVoice: 'fixture' });
     await page.addInitScript(provider => {
       localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output: provider, fishVoice: 'fixture', handsFree: false, audioCues: false }));
       const probe = { spoken: [] as string[], emit: (_text: string) => {} };

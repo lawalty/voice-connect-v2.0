@@ -1,3 +1,4 @@
+import { installationFixture } from './installation-fixture';
 import { test, expect, type WebSocketRoute } from '@playwright/test';
 import { enterFixtureSession } from './fixture-session';
 import { waitForFixtureBudget } from './fixture-budget';
@@ -7,7 +8,8 @@ for (const mode of ['orb-auto', 'messenger', 'messenger-auto'] as const) {
   test(`${mode}: pause for a captioned photo, send once, and retain it across views and refresh`, async ({ page, context }, info) => {
     const auto = mode !== 'messenger';
     await context.grantPermissions(['camera', 'microphone']);
-    await page.addInitScript(() => {
+    await installationFixture(page, { recognition: 'deepgram' });
+  await page.addInitScript(() => {
       localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'deepgram', output: 'browser', handsFree: true, audioCues: false, keepAwake: false }));
       const probe = { tracks: [] as MediaStreamTrack[], spoken: [] as string[], end: () => {}, cancels: 0 };
       Object.assign(window, { cameraProbe: probe });

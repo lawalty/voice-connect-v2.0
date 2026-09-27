@@ -1,9 +1,8 @@
 Voice Connect speech assets
 
-Vosk small US English 0.15: Alpha Cephei, Apache License 2.0.
+Vosk US English 0.22 lgraph: Alpha Cephei, Apache License 2.0.
 Source and model information: https://alphacephei.com/vosk/models
 Vosk API: https://github.com/alphacep/vosk-api
-Vosk browser binding: https://github.com/ccoreilly/vosk-browser (Apache License 2.0).
 
 Silero VAD: Silero Team, MIT License.
 https://github.com/snakers4/silero-vad
@@ -11,7 +10,7 @@ https://github.com/snakers4/silero-vad
 ONNX Runtime Web: Microsoft Corporation, MIT License.
 https://github.com/microsoft/onnxruntime
 
-Model files are fetched from their original publishers. The Vosk model is
-repacked, without changing its parameters, into the browser binding's format.
-Source artifact hashes and URLs are recorded in ops/asset-lock.json.
+Model files are fetched from their original publishers. Vosk lgraph is an
+optional, separate host download recorded in ops/vosk/model.json. The browser
+ships only VAD and ONNX assets, whose hashes are in ops/asset-lock.json.
 Full license texts accompany the runtime assets and source repository.

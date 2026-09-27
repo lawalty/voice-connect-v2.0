@@ -5,7 +5,7 @@ const fixture = vi.hoisted(() => ({ recognizers: [] as FakeRecognizer[], outputs
 class FakeRecognizer {
   readonly capabilities: RecognizerCapabilities = { provider: 'vosk', available: true, input: 'pcm16k', processing: 'local', handsFree: true, endpointing: 'local-vad' };
   running = false; frames: Float32Array[] = []; finals: string[] = []; barrier?: Promise<void>;
-  constructor(readonly events: RecognizerEvents) { fixture.recognizers.push(this); }
+  constructor(_conversationId: string, readonly events: RecognizerEvents) { fixture.recognizers.push(this); }
   async start() { this.running = true; }
   push(frame: Float32Array) { this.frames.push(frame.slice()); }
   finish = vi.fn(async () => {
@@ -28,7 +28,7 @@ class FakeOutput {
   cancel = vi.fn(); dispose = vi.fn();
   end() { this.events.ended(); }
 }
-vi.doMock('../client/audio/vosk', () => ({ LocalRecognizer: FakeRecognizer }));
+vi.doMock('../client/audio/vosk', () => ({ HostRecognizer: FakeRecognizer }));
 vi.doMock('../client/audio/output', () => ({ BrowserOutput: FakeOutput, PremiumOutput: FakeOutput, audioURL: () => 'wss://voice.test/audio' }));
 vi.doMock('../client/audio/cues', async () => ({
   ...await vi.importActual<typeof import('../client/audio/cues')>('../client/audio/cues'),

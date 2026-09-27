@@ -1,3 +1,4 @@
+import { installationFixture } from './installation-fixture';
 import { test, expect, type WebSocketRoute } from '@playwright/test';
 import { enterFixtureSession } from './fixture-session';
 import { waitForFixtureBudget } from './fixture-budget';
@@ -5,6 +6,7 @@ import { waitForFixtureBudget } from './fixture-budget';
 test.beforeEach(waitForFixtureBudget);
 test('automatic turns keep cue order and one capture session across orb, messenger, and typing', async ({ page, context }, info) => {
   await context.grantPermissions(['microphone']);
+  await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
     localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'deepgram', output: 'browser', handsFree: true, turnMode: 'automatic', audioCues: true }));
     const probe = { cues: [] as string[], captures: 0, tracks: [] as MediaStreamTrack[], spoken: [] as string[], pending: [] as SpeechSynthesisUtterance[], cancellations: 0, cutSentCues: 0 };

@@ -1,4 +1,4 @@
-import { DEFAULT_SPEECH, type RecognizerKind, type SpeechPreferences } from '../contract/types';
+import { DEFAULT_SPEECH, type InstallationSpeech, type RecognizerKind, type SpeechPreferences } from '../contract/types';
 
 export function restoreSpeechPreferences(raw: string | null): SpeechPreferences {
   try {
@@ -28,4 +28,9 @@ export function restoreSpeechPreferences(raw: string | null): SpeechPreferences 
 
 export function selectRecognizer(prefs: SpeechPreferences, recognition: RecognizerKind): SpeechPreferences {
   return { ...prefs, recognition, handsFree: recognition !== 'browser' && prefs.turnMode !== 'manual' };
+}
+
+/** Installation choices override stale device selections, never the other way around. */
+export function installationPreferences(device: SpeechPreferences, saved: InstallationSpeech): SpeechPreferences {
+  return selectRecognizer({ ...device, output: saved.output, fishVoice: saved.fishVoice }, saved.recognition);
 }

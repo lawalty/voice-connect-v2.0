@@ -1,3 +1,4 @@
+import { installationFixture } from './installation-fixture';
 import { test, expect, type Page } from '@playwright/test';
 import { waitForFixtureBudget } from './fixture-budget';
 
@@ -43,6 +44,7 @@ test('private entry, continuous text conversation, and refresh preserve history'
   expect(errors).toEqual([]);
 });
 test('settings disclose speech processing and preserve the active conversation',async({page},info)=>{
+  await installationFixture(page, { recognition: 'vosk' });
   await signIn(page);
   const before=await page.evaluate(()=>localStorage.getItem('vc2:conversation'));
   await page.getByRole('button',{name:'Open settings'}).click();
@@ -59,7 +61,7 @@ test('settings disclose speech processing and preserve the active conversation',
   await expect(page.getByText(/may send microphone audio to its vendor/)).toBeVisible();
   await page.getByRole('button',{name:/^Vosk/}).click();
   await expect(automatic).toBeChecked();
-  await expect(page.getByRole('button',{name:'Download',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Install on server',exact:true})).toBeVisible();
   await page.getByRole('button',{name:/^Deepgram Premium/}).click();
   await expect(automatic).toBeChecked();
   await expect(page.getByText(/Audio is streamed to Deepgram/)).toBeVisible();

@@ -19,6 +19,10 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r ops/vosk/requirements.txt
       - run: node checks/audio-browser.mjs
       - run: node checks/audio-barge-browser.mjs
       - uses: actions/upload-artifact@v4

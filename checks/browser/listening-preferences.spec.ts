@@ -1,19 +1,17 @@
+import { installationFixture } from './installation-fixture';
 import { test, expect } from '@playwright/test';
 import { waitForFixtureBudget } from './fixture-budget';
 
 test.beforeEach(waitForFixtureBudget);
 
 test('interruption sensitivity and listening cues persist on this device without changing the conversation', async ({ page }, info) => {
+  await installationFixture(page);
   const preferenceWrites: string[] = [];
   page.on('request', request => {
     if (request.method() !== 'GET' && request.url().includes('/api/settings')) preferenceWrites.push(request.url());
   });
   // This scenario saves only device choices. A configured provider is simulated;
   // no microphone, provider connection, or credential write is needed.
-  await page.route('**/api/settings', async route => {
-    const response = await route.fetch();
-    await route.fulfill({ response, json: { ...await response.json(), deepgramConfigured: true } });
-  });
   await page.goto('/');
   await page.getByLabel('Password', { exact: true }).fill('browser-fixture-password-2026');
   await page.getByRole('button', { name: 'Enter your space', exact: true }).click();
@@ -62,5 +60,5 @@ test('interruption sensitivity and listening cues persist on this device without
   await expect(sensitivity).toHaveValue('25');
   await expect(cues).toBeChecked();
   expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(conversation);
-  expect(preferenceWrites).toEqual([]);
+  expect(preferenceWrites).toEqual([info.project.use.baseURL + '/api/settings/speech']);
 });

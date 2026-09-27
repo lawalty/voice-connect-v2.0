@@ -1,3 +1,4 @@
+import { installationFixture } from './installation-fixture';
 import { test, expect, type Page } from '@playwright/test';
 import { enterFixtureSession } from './fixture-session';
 import { waitForFixtureBudget } from './fixture-budget';
@@ -6,6 +7,7 @@ test.beforeEach(waitForFixtureBudget);
 
 async function enterWithMeter(page: Page) {
   await page.context().grantPermissions(['microphone']);
+  await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
     localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'deepgram', output: 'browser', handsFree: true, audioCues: false, keepAwake: false }));
     const probe = { energy: 0, confidence: 0, speech: 0, frames: 0, captures: 0, tracks: [] as MediaStreamTrack[] };

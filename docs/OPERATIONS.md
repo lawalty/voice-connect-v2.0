@@ -15,7 +15,7 @@ separate Compose project. Use only the explicitly authorized Astra SSH identity.
 No private key belongs in this project or on the application server.
 
 The first deployment creates files under `/opt/voice-connect-v2/secrets`: gateway
-token, encryption master key, and a one-time bootstrap token. These are mode 600,
+token, encryption master key, a private Vosk service token, and a one-time bootstrap token. These are mode 600,
 owned by the application's unprivileged user. The token is read on the VPS from
 the existing gateway configuration; it is never embedded into client assets.
 The app creates a separate persistent Ed25519 application identity for native
@@ -54,7 +54,7 @@ category/status, never raw provider responses or authentication headers.
 
 For Fish Audio, save the API key under **Fish Audio · TTS**, select **Fish
 Audio** as the voice service, enter the voice ID, and use **Test speaker** before
-saving preferences. The voice ID is a per-device setting; the API key never
+saving preferences. The voice ID is an installation setting in state/preferences.json; the API key never
 returns from the server. Replacing or removing it closes active Fish sessions.
 The speaker test sends a fixed sample sentence to the selected provider and may
 incur usage. A successful playback callback still requires audible confirmation

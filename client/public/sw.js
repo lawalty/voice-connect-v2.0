@@ -1,8 +1,8 @@
 // Cache the public shell and exact static speech runtime assets; never API data or recordings.
-const CACHE = 'vc2-shell-v3';
-const RUNTIME = ['/audio/vosk.worker.js', '/runtime/vosk.js', '/runtime/ort-wasm-simd-threaded.wasm', '/models/silero_vad.onnx'];
+const CACHE = 'vc2-shell-v4';
+const RUNTIME = ['/runtime/ort-wasm-simd-threaded.wasm', '/models/silero_vad.onnx'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['/', '/icon.svg', '/manifest.webmanifest']))); self.skipWaiting(); });
-self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('vc2-shell-') && key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim())); });
+self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => (key.startsWith('vc2-shell-') && key !== CACHE) || key === 'voice-connect-model-v1').map(key => caches.delete(key)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;

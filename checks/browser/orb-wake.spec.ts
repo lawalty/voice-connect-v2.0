@@ -1,3 +1,4 @@
+import { installationFixture } from './installation-fixture';
 import { test, expect, type Page } from '@playwright/test';
 import { waitForFixtureBudget } from './fixture-budget';
 import { enterFixtureSession } from './fixture-session';
@@ -12,6 +13,7 @@ type WakeProbe = {
 };
 
 async function enterWithControlledSpeech(page: Page, recognition: 'browser' | 'vosk' = 'browser') {
+  await installationFixture(page, { recognition });
   await page.addInitScript((recognition) => {
     localStorage.setItem('vc2:speech', JSON.stringify({ recognition, output: 'browser', handsFree: recognition === 'vosk', audioCues: false }));
     const probe = { starts: 0, captures: 0, aborts: 0, ready: () => {} };
@@ -149,32 +151,23 @@ test('keyboard wake respects reduced motion and a cancelled startup cannot wake 
 });
 
 test('cancelling a pending local-model check cannot open setup or capture audio later', async ({ page }) => {
-  await page.addInitScript(() => {
-    const state = { opens: 0, matches: 0, release: () => {} };
-    (window as unknown as { vcWakeCache: typeof state }).vcWakeCache = state;
-    const pending = new Promise<void>(resolve => { state.release = resolve; });
-    const open = caches.open.bind(caches);
-    caches.open = async name => {
-      if (name !== 'voice-connect-model-v1') return open(name);
-      state.opens++;
-      await pending;
-      // Simulate a slow cache returning a missing model manifest. A cancelled
-      // wake must ignore this result instead of opening first-time setup.
-      return { match: async () => { state.matches++; return undefined; } } as unknown as Cache;
-    };
+  let release!: () => void, requested = false;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/settings/vosk', async route => {
+    requested = true; await pending;
+    await route.fulfill({ json: { installed: false, state: 'missing', bytes: 130557655, received: 0, id: 'vosk-model-en-us-0.22-lgraph' } });
   });
   await enterWithControlledSpeech(page, 'vosk');
   await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { vcWakeCache: { opens: number } }).vcWakeCache.opens)).toBe(1);
+  await expect.poll(() => requested).toBe(true);
   await expect(page.locator('.orb-stage')).toHaveAttribute('data-presence', 'waking');
   await expect(page.getByRole('button', { name: 'Cancel wake', exact: true })).toBeVisible();
   expect(await probe(page)).toEqual({ starts: 0, captures: 0, aborts: 0 });
   await page.getByRole('button', { name: 'Cancel wake', exact: true }).click();
   await expect(page.locator('.orb-stage')).toHaveAttribute('data-presence', 'sleeping');
   await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled();
-  await page.evaluate(() => (window as unknown as { vcWakeCache: { release(): void } }).vcWakeCache.release());
-  await expect.poll(() => page.evaluate(() => (window as unknown as { vcWakeCache: { matches: number } }).vcWakeCache.matches)).toBe(1);
-  await expect(page.getByRole('dialog', { name: 'A conversation that keeps listening' })).toHaveCount(0);
+  release(); await page.waitForTimeout(200);
+  await expect(page.getByRole('dialog', { name: 'Set up Voice Connect' })).toHaveCount(0);
   await expect(page.locator('.orb-stage')).toHaveAttribute('data-presence', 'sleeping');
   expect(await probe(page)).toEqual({ starts: 0, captures: 0, aborts: 0 });
 });

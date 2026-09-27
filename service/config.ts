@@ -6,6 +6,7 @@ export interface ServiceConfig {
   masterKey: Buffer; bootstrapToken: string; build: string; host: string; port: number;
   secureCookie: boolean; staticDir: string; gatewayEnabled: boolean; qualifiedImageModels: string[]; gatewayModel: string;
   libraryUrl: string; libraryToken: string;
+  voskUrl: string; voskToken: string;
 }
 function secretFile(name: string, optional=false): string {
   const path = process.env[name];
@@ -27,6 +28,7 @@ export function loadConfig(overrides: Partial<ServiceConfig> = {}): ServiceConfi
     secureCookie: origin.startsWith('https:'), staticDir: resolve('dist/client'), gatewayEnabled: true,
     qualifiedImageModels:(process.env.VC_IMAGE_MODEL_ALLOWLIST??'').split(',').map(v=>v.trim()).filter(Boolean),gatewayModel:process.env.VC_GATEWAY_MODEL??'',
     libraryUrl:process.env.VC_LIBRARY_URL??'',libraryToken:overrides.libraryToken??secretFile('VC_LIBRARY_TOKEN_FILE',true),
+    voskUrl:process.env.VC_VOSK_URL??'http://127.0.0.1:27017',voskToken:overrides.voskToken??secretFile('VC_VOSK_TOKEN_FILE',true),
     ...overrides,
   };
 }

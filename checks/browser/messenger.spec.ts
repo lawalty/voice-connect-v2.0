@@ -1,3 +1,4 @@
+import { installationFixture } from './installation-fixture';
 import { test, expect } from '@playwright/test';
 import { enterFixtureSession } from './fixture-session';
 import { waitForFixtureBudget } from './fixture-budget';
@@ -6,6 +7,7 @@ test.beforeEach(waitForFixtureBudget);
 for (const provider of ['browser', 'fish'] as const) {
   test(`${provider}: orb and messenger share typed speech, draft, voice capture, and agent mute`, async ({ page, context }, info) => {
     await context.grantPermissions(['microphone']);
+    await installationFixture(page, { output: provider, fishVoice: 'fixture' });
     await page.addInitScript(output => {
       localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output, fishVoice: 'fixture', handsFree: false, audioCues: false }));
       const probe = { spoken: [] as string[], cancelled: 0, captures: 0, tracks: [] as MediaStreamTrack[], emit: (_text: string) => {} };
