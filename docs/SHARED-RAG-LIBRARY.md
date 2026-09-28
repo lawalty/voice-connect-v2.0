@@ -54,9 +54,22 @@ compatibility; they do not cause calls to Hermes.
 5. Update only `plugins.entries.vc-shared-library.config.baseUrl` in OpenClaw
    to the VC origin, retaining the existing token file and memory configuration.
    Preserve its config backup and wait for active voice turns before restarting.
+   In the bridged OpenClaw container, map `srv2003889.hstgr.cloud` to
+   `host-gateway` using the Gateway service's Compose `extra_hosts`. The VPS
+   resolver can return `127.0.1.1` for its own hostname; inside the container
+   that points at the container, not the VC host. Keep the HTTPS origin and
+   normal certificate validation. `ops/repair-library-agent-route.py --check`
+   validates this isolated change; running it without `--check` backs up the
+   override, preserves the existing image/configuration, and recreates only the
+   Gateway after active VC turns finish.
 6. Verify the public portal with real owner-session authentication, refusal of
    unauthenticated/forged requests, read parity, both download types, and a
    labeled synthetic upload through the new worker. Delete only that QA upload.
+   Verify native tool **payloads** with `ops/verify-library-agent.py CONVERSATION
+   --document DOCUMENT_ID` after a fresh isolated QA conversation has listed
+   groups/documents and retrieved the target document. An outer `isError=false`
+   or a model's cited answer does not establish successful Library access:
+   OpenClaw can wrap the plugin's error text in a nominally successful result.
 
 The old API can remain a secondary client of the same Supabase project for
 existing Hermes users and old signed links. It is not needed by VC or NorthPointe.
