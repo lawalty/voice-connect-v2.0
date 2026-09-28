@@ -73,10 +73,18 @@ describe('native history pages', () => {
 const message = (id: string, createdAt: number, text = id, extra: Partial<Message> = {}): Message => ({ id, createdAt, text, role: 'assistant', ...extra });
 describe('history display reconciliation', () => {
   it('keeps the latest stream when an older page overlaps it and sorts failed turns correctly', () => {
-    const current = [message('live', 300, 'latest stream', { turnId: 'owned' })];
+    const current = [message('assistant-owned', 300, 'latest stream', { turnId: 'owned' })];
     const older = [message('failed', 100, 'old question', { role: 'user', delivery: 'failed' }), message('native', 300, 'older snapshot', { turnId: 'owned' }), message('middle', 200)];
-    expect(mergeOlderMessages(older, current).map(m => m.id)).toEqual(['failed', 'middle', 'live']);
+    expect(mergeOlderMessages(older, current).map(m => m.id)).toEqual(['failed', 'middle', 'assistant-owned']);
     expect(mergeOlderMessages(older, current).at(-1)?.text).toBe('latest stream');
+  });
+  it('keeps distinct native assistant rows from the same run across pages', () => {
+    const first = message('native:first:assistant:0', 100, 'First answer', { turnId: 'owned' });
+    const second = message('native:second:assistant:0', 200, 'Follow-up answer', { turnId: 'owned' });
+    expect(mergeOlderMessages([first, second], [second])).toEqual([first, second]);
+    const nativeUser = message('native:input:user:0', 90, 'Question', { role: 'user', turnId: 'owned' });
+    const localUser = { ...nativeUser, id: 'owned' };
+    expect(mergeOlderMessages([localUser], [nativeUser])).toEqual([nativeUser]);
   });
   it('refreshes the tail without deleting loaded earlier history or retaining replaced tail rows', () => {
     const current = [message('older', 100), message('stale', 200), message('stream', 300, 'in progress', { turnId: 'owned' })];

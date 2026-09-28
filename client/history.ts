@@ -3,8 +3,12 @@ import type { ConversationView, Message } from '../contract/types';
 /** Durable rows replace matching local placeholders, but never replay speech. */
 export function mergeOlderMessages(older: Message[], current: Message[]): Message[] {
   const currentIds = new Set(current.map(m => m.id));
+  const local = (m: Message) => m.id === m.turnId || m.id === `assistant-${m.turnId}`;
   const currentTurns = new Set(current.filter(m => m.turnId).map(m => `${m.role}:${m.turnId}`));
-  return [...older.filter(m => !currentIds.has(m.id) && !(m.turnId && currentTurns.has(`${m.role}:${m.turnId}`))), ...current].sort((a, b) => a.createdAt - b.createdAt);
+  const localTurns = new Set(current.filter(m => m.turnId && local(m)).map(m => `${m.role}:${m.turnId}`));
+  // A run can persist multiple assistant rows. Turn identity only replaces a
+  // local placeholder; distinct native transcript rows must remain distinct.
+  return [...older.filter(m => !currentIds.has(m.id) && !(m.turnId && (local(m) ? currentTurns : localTurns).has(`${m.role}:${m.turnId}`))), ...current].sort((a, b) => a.createdAt - b.createdAt);
 }
 
 export function reconcileMessages(current: Message[], view: ConversationView, keepEarlier: boolean): Message[] {
