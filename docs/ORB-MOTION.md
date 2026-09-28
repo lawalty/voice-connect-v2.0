@@ -1,4 +1,4 @@
-# Microphone expression and sleep
+# Microphone expression, sleep, and standby
 
 The full-size and Messenger orbs use the same canvas and existing microphone
 signal. Confident speech expands and brightens the orb, increases surface motion,
@@ -17,6 +17,11 @@ ripples settle into a smaller, dimmer orb with slower idle motion. Waking during
 that transition cancels the sleep effect. The full-size canvas holds its position
 when the status label disappears. Reduced motion shows static state changes
 without voice pulses or wake/sleep animation; hidden pages stop rendering.
+
+Standby has its own light grey palette and status light, with a **Tap to resume**
+target on the orb. It ignores microphone expression and stays grey through
+connection changes. See [Standby](STANDBY.md) for capture, playback, and agent
+notification behaviour.
 
 Verification covers microphone capture through the engine into the rendered
 canvas with controlled acoustic evidence, in desktop and Android layouts. Pixel

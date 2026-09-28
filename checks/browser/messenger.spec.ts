@@ -5,7 +5,7 @@ import { waitForFixtureBudget } from './fixture-budget';
 
 test.beforeEach(waitForFixtureBudget);
 for (const provider of ['browser', 'fish'] as const) {
-  test(`${provider}: orb and messenger share typed speech, draft, voice capture, and agent mute`, async ({ page, context }, info) => {
+  test(`${provider}: orb and messenger share typed speech, draft, voice capture, and standby`, async ({ page, context }, info) => {
     await context.grantPermissions(['microphone']);
     await installationFixture(page, { output: provider, fishVoice: 'fixture' });
     await page.addInitScript(output => {
@@ -60,21 +60,24 @@ for (const provider of ['browser', 'fish'] as const) {
     await page.getByRole('button', { name: 'Back to orb' }).click();
     await expect(composer).toHaveCount(0);
     await expect(page.getByRole('log')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Mute agent', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Unmute agent', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    expect(aborts).toEqual([]);
+    // A finished typed reply may already have put the orb to sleep.
+    const wake = page.getByRole('button', { name: 'Wake NorthPointe', exact: true });
+    if (await wake.count()) { await wake.click(); await expect(page.getByText('Listening to you', { exact: true })).toBeVisible(); }
+    await page.getByRole('button', { name: 'Enter standby mode', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Resume conversation', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    expect((await state()).capturing).toBe(false);
     const quietCount = await count();
     await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
     await expect(composer).toHaveValue('A draft shared by both views.');
-    await composer.fill('A second typed reply while muted.'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await composer.fill('A second typed reply while on standby.'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect(page.getByRole('log').getByText('Your second message is in the same conversation.', { exact: true })).toBeVisible();
     expect(await count()).toBe(quietCount);
     await page.screenshot({ path: info.outputPath(`messenger-${provider}.png`), fullPage: true });
-    await page.getByRole('button', { name: 'Unmute agent', exact: true }).click();
+    await page.getByRole('button', { name: 'Resume conversation', exact: true }).click();
+    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
     await composer.fill('Another typed reply in messenger.'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect.poll(count).toBeGreaterThan(quietCount);
-    await page.getByRole('button', { name: 'Wake NorthPointe' }).click();
-    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible({ timeout: 30000 });
+    expect((await state()).capturing).toBe(true);
     const captures = (await state()).captures;
     await composer.fill('Keep this typed draft while I speak.');
     expect((await state()).capturing).toBe(true);
@@ -89,11 +92,11 @@ for (const provider of ['browser', 'fish'] as const) {
       for (let index = 1; index < controls.length; index++) expect(controls[index].left).toBeGreaterThanOrEqual(controls[index - 1].right - 1);
       await page.screenshot({ path: info.outputPath(`messenger-active-320-${provider}.png`), fullPage: true });
     }
-    const beforeMute = aborts.length;
-    await page.getByRole('button', { name: 'Mute agent', exact: true }).click();
-    expect((await state()).capturing).toBe(true); expect(aborts).toHaveLength(beforeMute);
+    await page.getByRole('button', { name: 'Enter standby mode', exact: true }).click();
+    expect((await state()).capturing).toBe(false);
     await expect(page.getByRole('button', { name: 'Mute microphone' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Unmute agent', exact: true }).click();
+    await page.getByRole('button', { name: 'Resume conversation', exact: true }).click();
+    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
     const beforeVoice = await count();
     await page.evaluate(() => (window as unknown as { vcMessengerProbe: { emit(text: string): void } }).vcMessengerProbe.emit('A voice reply from messenger.'));
     await page.getByRole('button', { name: 'Finish thought', exact: true }).click();
@@ -102,10 +105,9 @@ for (const provider of ['browser', 'fish'] as const) {
     await expect(composer).toHaveValue('');
     expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(conversation);
     await page.getByRole('button', { name: 'End voice session' }).click();
-    await page.getByRole('button', { name: 'Mute agent', exact: true }).click();
     const beforeReload = await count();
     await page.reload();
-    await expect(page.getByRole('button', { name: 'Unmute agent', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Mute agent|Unmute agent/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Wake NorthPointe' })).toBeEnabled();
     expect(await count()).toBe(provider === 'browser' ? 0 : beforeReload);
   });

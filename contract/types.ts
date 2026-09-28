@@ -1,7 +1,7 @@
 import { DEFAULT_FISH_DELIVERY, type FishDelivery } from './fish-delivery.js';
 export type RecognizerKind = 'browser' | 'vosk' | 'deepgram';
 export type OutputKind = 'browser' | 'fish';
-export type VoicePhase = 'off' | 'starting' | 'listening' | 'hearing' | 'finalizing' | 'thinking' | 'working' | 'thinking-commentary' | 'working-commentary' | 'speaking' | 'reconnecting' | 'paused' | 'error';
+export type VoicePhase = 'off' | 'starting' | 'listening' | 'hearing' | 'finalizing' | 'thinking' | 'working' | 'thinking-commentary' | 'working-commentary' | 'speaking' | 'reconnecting' | 'paused' | 'standby' | 'error';
 export interface SpeechPreferences {
   recognition: RecognizerKind;
   output: OutputKind;

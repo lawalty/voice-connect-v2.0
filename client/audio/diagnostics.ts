@@ -7,7 +7,7 @@ export type AudioDiagnosticEvent =
   | 'output-interrupt' | 'output-request' | 'output-error' | 'capture-gap' | 'backpressure' | 'barge-in' | 'barge-in-blocked';
 
 export type VoiceStopReason =
-  | 'manual' | 'restart' | 'end-session' | 'settings' | 'library' | 'edit-as-text'
+  | 'manual' | 'restart' | 'end-session' | 'standby' | 'settings' | 'library' | 'edit-as-text'
   | 'auto-off' | 'delivery-pending' | 'conversation-change' | 'logout' | 'auth-expired'
   | 'start-error' | 'resume-error' | 'capture-error' | 'disposed';
 
@@ -46,10 +46,10 @@ const EVENTS = new Set<AudioDiagnosticEvent>([
 ]);
 const PHASES = new Set<VoicePhase>([
   'off', 'starting', 'listening', 'hearing', 'finalizing', 'thinking', 'working', 'thinking-commentary', 'working-commentary',
-  'speaking', 'reconnecting', 'paused', 'error',
+  'speaking', 'reconnecting', 'paused', 'standby', 'error',
 ]);
 const REASONS = new Set<AudioDiagnosticReason>([
-  'restart', 'end-session', 'settings', 'library', 'edit-as-text', 'auto-off', 'delivery-pending',
+  'restart', 'end-session', 'standby', 'settings', 'library', 'edit-as-text', 'auto-off', 'delivery-pending',
   'conversation-change', 'logout', 'auth-expired', 'start-error', 'resume-error', 'capture-error', 'disposed',
   'vad-error', 'endpoint-error', 'turn-limit', 'page-hidden', 'network-offline', 'provider-mid-turn',
   'mic-ended', 'mic-muted', 'capture-gap', 'vad-backlog', 'capture-backlog',
@@ -67,7 +67,7 @@ export function audioReasonLabel(reason?: AudioDiagnosticReason): string {
     'provider-error': 'Recognition provider error', 'provider-mid-turn': 'Recognition lost during a turn',
     'vad-error': 'Speech detector failed', 'endpoint-error': 'Turn finalization failed',
     'turn-limit': 'Two-minute turn limit', 'settings': 'Opened settings', 'library': 'Opened library',
-    'end-session': 'End voice pressed', 'edit-as-text': 'Edit as text selected', 'auto-off': 'Auto mode turned off',
+    'end-session': 'End voice pressed', 'standby': 'Orb standby selected', 'edit-as-text': 'Edit as text selected', 'auto-off': 'Auto mode turned off',
     'delivery-pending': 'Previous message still being delivered', 'conversation-change': 'Conversation changed',
     'auth-expired': 'Login session expired', 'capture-error': 'Input stopped after a capture failure',
     'start-error': 'Voice startup failed', 'resume-error': 'Voice resume failed', 'restart': 'Voice restarted',

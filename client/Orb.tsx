@@ -6,7 +6,7 @@ const palette: Record<VoicePhase, [number, number, number]> = {
   off: [97, 180, 179], starting: [111, 188, 191], listening: [118, 215, 198], hearing: [111, 231, 205],
   finalizing: [222, 183, 122], thinking: [223, 182, 123], working: [235, 151, 86], speaking: [167, 150, 245],
   'thinking-commentary': [223, 182, 123], 'working-commentary': [235, 151, 86],
-  reconnecting: [222, 177, 113], paused: [125, 148, 164], error: [225, 134, 125],
+  reconnecting: [222, 177, 113], paused: [125, 148, 164], standby: [210, 214, 218], error: [225, 134, 125],
 };
 
 interface OrbProps {
@@ -16,9 +16,11 @@ interface OrbProps {
   waking?: boolean;
   onWake?: () => void;
   wakeDisabled?: boolean;
+  onStandby?: () => void;
+  onResume?: () => void;
 }
 
-export default function Orb({ phase, signal, asleep = false, waking = false, onWake, wakeDisabled = false }: OrbProps) {
+export default function Orb({ phase, signal, asleep = false, waking = false, onWake, wakeDisabled = false, onStandby, onResume }: OrbProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const latest = useRef({ phase, signal, asleep, waking });
   const repaint = useRef<() => void>(() => {});
@@ -74,7 +76,7 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
       // One soft exhale, then the atmosphere folds inward. Capture has already
       // stopped; this is visual settling only and can be interrupted by waking.
       const sleepExhale = fallingAsleep ? Math.sin(Math.min(1, sleepProgress / .65) * Math.PI) : 0;
-      const input = current.asleep ? null : current.signal;
+      const input = current.asleep || current.phase === 'standby' ? null : current.signal;
       if (input !== lastSignal) { lastSignal = input; acoustics.observe(input, time); }
       const shape = orbMotionShape(acoustics.sample(time), motion.matches);
       const voice = shape.radiance * (1 - sleepBlend);
@@ -200,13 +202,16 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
     };
   }, []);
   useEffect(() => { repaint.current(); }, [phase, asleep, waking]);
-  const presence = waking ? 'waking' : asleep ? 'sleeping' : 'awake';
+  const standby = phase === 'standby';
+  const presence = standby ? 'standby' : waking ? 'waking' : asleep ? 'sleeping' : 'awake';
+  const action = standby ? onResume : onStandby || onWake;
+  const disabled = standby || !onStandby ? wakeDisabled : false;
   return <div className={`orb-stage phase-${phase}${asleep ? ' orb-sleeping' : ''}${waking ? ' orb-waking' : ''}`} data-presence={presence}>
     <span className="orb-orbit orbit-one" aria-hidden="true" /><span className="orb-orbit orbit-two" aria-hidden="true" />
     <canvas ref={canvasRef} className="orb-canvas" aria-hidden="true" />
     <span className="orb-coordinate coordinate-left" aria-hidden="true">N</span><span className="orb-coordinate coordinate-right" aria-hidden="true">P</span>
-    {onWake && <button type="button" className="orb-wake-button" disabled={wakeDisabled} aria-label="Wake NorthPointe" onClick={onWake}>
-      {asleep && !wakeDisabled && <span className="orb-wake-hint" aria-hidden="true">Tap to wake</span>}
+    {action && <button type="button" className="orb-wake-button" disabled={disabled} aria-label={standby ? 'Resume conversation' : onStandby ? 'Enter standby mode' : 'Wake NorthPointe'} aria-pressed={onStandby || standby ? standby : undefined} onClick={action}>
+      {!disabled && <span className="orb-wake-hint" aria-hidden="true">{standby ? 'Tap to resume' : onStandby ? 'Tap for standby' : asleep ? 'Tap to wake' : ''}</span>}
     </button>}
   </div>;
 }

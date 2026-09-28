@@ -28,7 +28,9 @@ parallel LLM context.
 
 Full Orb mode has voice controls and the Conversation link; its text composer and
 footer caption are not mounted. Waking voice reveals a camera control alongside
-Mute and End. The camera dialog captures a photo, accepts an optional caption,
+End. Tapping the active orb enters light grey standby; tapping again resumes
+listening in the same conversation (see [Standby](STANDBY.md)).
+The camera dialog captures a photo, accepts an optional caption,
 and sends both as one turn. Messenger retains its composer and camera, sharing
 the same conversation, capture, and playback across view switches. Photo turns
 appear inline in Messenger even when sent from Orb mode.
