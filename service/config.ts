@@ -2,7 +2,7 @@ import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 export interface ServiceConfig {
-  origin: string; stateDir: string; gatewayUrl: string; gatewayToken: string;
+  origin: string; stateDir: string; gatewayUrl: string; gatewayToken: string; gatewayAdmin: boolean;
   masterKey: Buffer; bootstrapToken: string; build: string; host: string; port: number;
   secureCookie: boolean; staticDir: string; gatewayEnabled: boolean; qualifiedImageModels: string[]; gatewayModel: string;
   libraryUrl: string; libraryToken: string;
@@ -22,6 +22,7 @@ export function loadConfig(overrides: Partial<ServiceConfig> = {}): ServiceConfi
   return {
     origin: new URL(origin).origin, stateDir,
     gatewayUrl: process.env.VC_GATEWAY_URL ?? 'ws://127.0.0.1:18789',
+    gatewayAdmin: process.env.VC_GATEWAY_ADMIN === 'true',
     gatewayToken: overrides.gatewayToken??secretFile('VC_GATEWAY_TOKEN_FILE'), masterKey: key,
     bootstrapToken: overrides.bootstrapToken??secretFile('VC_BOOTSTRAP_TOKEN_FILE',true), build: process.env.VC_BUILD ?? 'development',
     host: process.env.VC_HOST ?? '127.0.0.1', port: Number(process.env.VC_PORT ?? 18880),

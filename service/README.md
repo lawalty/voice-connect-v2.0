@@ -94,12 +94,39 @@ else:
 ```
 
 Approve only the exact VC request. Do not use `--latest`, approve every pending
-request, add `operator.admin`, reset other devices, or edit OpenClaw source/config
+request, add `operator.admin` during ordinary chat pairing, reset other devices, or edit OpenClaw source/config
 or SSH `authorized_keys`. The service reconnects automatically; a restart is not
 needed merely to complete pairing. Verify `openclaw: true`, an authenticated
 conversation history request, and then a synthetic native turn. Approval capability
 becomes true only after the signed connection successfully opts into the session's
 approval subscription; advertising an RPC method is insufficient evidence.
+
+## Optional PC browser control
+
+OpenClaw 2026.9.6 requires `operator.admin` for `node.invoke` commands
+`browser.proxy` and `browser.proxy.upload.v1`. The ordinary chat scopes above
+cannot control a paired PC browser. This is a Gateway authorization boundary;
+reopening Chrome or repairing the browser node does not grant the caller access.
+
+`VC_GATEWAY_ADMIN=true` opts this trusted backend connection into requesting
+`operator.admin`. It is broader than browser access: it satisfies all operator
+scopes, including Gateway administration. Keep it off unless the installation
+owner explicitly authorizes that access. The browser node remains browser-only;
+this setting does not add commands or operator scopes to the PC node.
+
+After authorization, retain the existing SQLite state, master key, and device ID.
+Set `VC_GATEWAY_ADMIN=true` in the release's deployment environment (and retain
+that setting for subsequent deployments). The Compose file passes it to the app.
+Restart only the VC app, inspect its exact pending scope-upgrade request, and use
+the approval procedure above with `operator.admin` added to the expected scope
+set. Never approve another device or use `--latest`. The backend reconnects after
+approval. Test through an authenticated VC conversation that asks the agent to
+read the shared browser's welcome page; an administrative CLI browser call alone
+does not test VC's admitted scopes.
+
+To disable the capability, set `VC_GATEWAY_ADMIN=false` and restart the VC app.
+That narrows new connection requests even if the device's approved ceiling remains
+broader. Separately revoke the additional device grant if retiring the capability.
 
 ## Recovery and diagnostic limits
 

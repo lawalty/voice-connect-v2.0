@@ -56,6 +56,9 @@ export class Gateway implements GatewayPort {
     if(frame.event==='connect.challenge'){
       if(typeof frame.payload?.nonce!=='string'||!Number.isSafeInteger(frame.payload?.ts)){ws.close(1008,'Invalid challenge');return;}
       const scopes=['operator.read','operator.write','operator.approvals','operator.questions'];
+      // OpenClaw requires admin for browser.proxy to a paired PC node. This is
+      // a broader permission, so installations must opt in and approve the device.
+      if(this.cfg.gatewayAdmin)scopes.push('operator.admin');
       const device=signGatewayChallenge(this.store,this.cfg.gatewayToken,frame.payload.nonce,frame.payload.ts,scopes);
       void this.request('connect',{minProtocol:4,maxProtocol:4,client:{id:'gateway-client',version:'2.0.0',platform:'linux',mode:'backend'},role:'operator',scopes,caps:['tool-events'],device,auth:{token:this.cfg.gatewayToken},locale:'en-US'},true).then(async hello=>{
         clearTimeout(this.connectingTimer);if(this.socket!==ws)return;

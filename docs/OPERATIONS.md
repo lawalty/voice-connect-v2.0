@@ -101,6 +101,7 @@ or unrelated Docker resources.
 | `VC_STATE_DIR` | SQLite, upload and delivery state |
 | `VC_GATEWAY_URL` | Native Gateway WebSocket, loopback only on deployment |
 | `VC_GATEWAY_TOKEN_FILE` | Server-only Gateway credential file |
+| `VC_GATEWAY_ADMIN` | Default `false`; exact `true` requests broad `operator.admin`, needed for PC browser nodes. Requires explicit operator authorization and approval of the existing VC device's scope upgrade. |
 | `VC_MASTER_KEY_FILE` | 32-byte encryption key encoded as hexadecimal |
 | `VC_BOOTSTRAP_TOKEN_FILE` | One-time owner setup credential file |
 | `VC_BUILD` | Immutable source commit identity |
