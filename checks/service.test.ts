@@ -26,7 +26,7 @@ describe('retired browser recognition policy',()=>{
     for(const url of ['/%61pi/settings','/%61pi/no-such-endpoint','/a%70i/conversations?next=/api/status'])expect((await app.inject({url})).statusCode).toBe(401);
   });
 });
-async function fixture(unremovableBootstrap=false) {
+async function fixture(unremovableBootstrap=false, gatewayAdmin=false) {
   const dir=mkdtempSync(join(tmpdir(),'vc2-service-'));
   const server=new WebSocketServer({port:0});await new Promise<void>(resolve=>server.once('listening',()=>resolve()));
   const calls:{method:string;params:any}[]=[],clients=new Set<WebSocket>(),events:ServerEvent[]=[];
@@ -51,7 +51,7 @@ async function fixture(unremovableBootstrap=false) {
     });
   });
   const address=server.address();if(typeof address==='string'||!address)throw new Error('No fixture port');
-  const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),bootstrapToken:bootstrap,origin,secureCookie:false,gatewayUrl:`ws://127.0.0.1:${address.port}`,gatewayToken:'fixture-only',staticDir:join(dir,'absent')},verifyDeepgramKey:async()=>({ok:true}),gatewayFactory:(cfg,store,publish)=>new Gateway(cfg,store,e=>{events.push(e);publish(e);})});
+  const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),bootstrapToken:bootstrap,origin,secureCookie:false,gatewayUrl:`ws://127.0.0.1:${address.port}`,gatewayToken:'fixture-only',gatewayAdmin,staticDir:join(dir,'absent')},verifyDeepgramKey:async()=>({ok:true}),gatewayFactory:(cfg,store,publish)=>new Gateway(cfg,store,e=>{events.push(e);publish(e);})});
   cleanup.push(async()=>{await app.close();for(const s of clients)s.terminate();await new Promise<void>(resolve=>server.close(()=>resolve()));rmSync(dir,{recursive:true,force:true});});
   await expect.poll(async()=>{const r=await app.inject({method:'GET',url:'/health'});return r.json().openclaw;}).toBe(true);
   const previousBootstrapPath=process.env.VC_BOOTSTRAP_TOKEN_FILE;
@@ -289,6 +289,20 @@ describe('native OpenClaw lifecycle',()=>{
     expect(verify(null,Buffer.from(payload),key,Buffer.from(d.signature,'base64url'))).toBe(true);
     const store=(f.app as any).vc.store;expect(store.get('gateway-device')).not.toContain('PRIVATE KEY');
     expect(signGatewayChallenge(store,'fixture-only','another',Date.now(),p.scopes).id).toBe(d.id);
+  });
+  it('signs the opted-in admin scope and retains the same device and scopes after reconnect',async()=>{
+    const f=await fixture(false,true);
+    const first=f.calls.find(c=>c.method==='connect')!.params;
+    expect(first.scopes).toEqual(['operator.read','operator.write','operator.approvals','operator.questions','operator.admin']);
+    for(const socket of f.clients)socket.terminate();
+    await expect.poll(()=>f.calls.filter(c=>c.method==='connect').length,{timeout:4000}).toBe(2);
+    const second=f.calls.filter(c=>c.method==='connect')[1].params;
+    expect(second.device.id).toBe(first.device.id);
+    expect(second.scopes).toEqual(first.scopes);
+    const d=second.device;
+    const payload=['v3',d.id,'gateway-client','backend','operator',second.scopes.join(','),String(d.signedAt),'fixture-only',d.nonce,'linux',''].join('|');
+    const key=createPublicKey({key:{kty:'OKP',crv:'Ed25519',x:d.publicKey},format:'jwk'});
+    expect(verify(null,Buffer.from(payload),key,Buffer.from(d.signature,'base64url'))).toBe(true);
   });
   it('uses discovered agent, preserves send identity, and implements delta replacement without duplication',async()=>{
     const f=await fixture();const url=`/api/conversations/${f.conversation.id}/turns`;

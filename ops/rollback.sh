@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 base=/opt/voice-connect-v2
+export VC_GATEWAY_ADMIN="${VC_GATEWAY_ADMIN:-$(cat "$base/gateway-admin" 2>/dev/null || printf false)}"
+[[ "$VC_GATEWAY_ADMIN" == true || "$VC_GATEWAY_ADMIN" == false ]] || { echo 'Invalid Gateway admin opt-in'; exit 1; }
 release="${1:-$(cat "$base/previous-release") }"
 release="${release// /}"
 [[ "$(hostname)" == srv2003889 && "$release" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid host or release'; exit 1; }
