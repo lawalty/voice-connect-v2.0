@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voice Connect Library</title>
+  <link rel="stylesheet" href="/rag/styles.css?v=enhanced-ai-1">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">NORTHPOINTE · VOICE CONNECT</p>
+        <h1>Manage Library</h1>
+        <p class="lede">Upload, organize and search your documents.</p>
+        <a href="/">Return to Voice Connect</a>
+      </div>
+      <div id="status" class="status">Not connected</div>
+    </header>
+
+    <div class="grid">
+      <section class="panel">
+        <div class="section-title"><h2>Groups</h2><button id="refresh-groups" class="quiet">Refresh</button></div>
+        <form id="group-form">
+          <label>Name<input name="name" required placeholder="Church"></label>
+          <label>Aliases<input name="aliases" placeholder="NorthPointe, ministry"></label>
+          <label>Description<textarea name="description" placeholder="Sermons, ministry policy, events, and church operations"></textarea></label>
+          <div class="form-actions">
+            <button id="create-group" type="submit">Create group</button>
+            <button id="cancel-group-edit" class="quiet" type="button" hidden>Cancel edit</button>
+          </div>
+          <p class="hint group-propagation">Names, aliases, and descriptions are shared metadata. Edits immediately apply to existing documents and automatic group routing; the stable slug does not change.</p>
+          <p id="group-result" class="form-message" role="status" aria-live="polite"></p>
+        </form>
+        <div id="groups" class="cards empty">Connect to load groups.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Ingest documents</h2>
+        <form id="upload-form">
+          <label>Group<select id="upload-group" name="group" required><option value="">Create a group first</option></select></label>
+          <label>Upload documents<input id="upload-file" name="file" type="file" accept=".pdf,.docx,.md,.txt,.html,.htm" multiple></label>
+          <p id="file-selection" class="hint file-selection" role="status" aria-live="polite">Select one or more files. They will be ingested one at a time.</p>
+          <div class="or"><span>or</span></div>
+          <label>Public document or webpage URL<input id="upload-url" name="url" type="url" maxlength="2048" inputmode="url" placeholder="https://ag.org/Beliefs/Statement-of-Fundamental-Truths"></label>
+          <label>Document processing
+            <select id="processing-mode" name="processing_mode">
+              <option value="automatic">Automatic · local OCR and private (recommended)</option>
+              <option value="gemini-3.7-flash">Enhanced AI · Gemini 3.7 Flash (stable)</option>
+              <option value="gemini-3.1-pro-preview">Enhanced AI · Gemini 3.1 Pro (preview)</option>
+            </select>
+          </label>
+          <p class="hint">Automatic processing stays on Hostinger and Supabase: it uses embedded PDF text when available and locally OCRs scanned pages when needed. Enhanced AI applies to PDFs and sends each selected PDF temporarily to Google for transcription. Other document types always use local extraction.</p>
+          <button id="ingest-source" type="submit">Ingest selected sources</button>
+        </form>
+        <div id="ingestion-progress" class="ingestion-progress" role="status" aria-live="polite" aria-atomic="true" hidden>
+          <div class="processing-orb" aria-hidden="true">
+            <span class="processing-spinner"></span>
+            <span class="processing-complete">✓</span>
+          </div>
+          <div class="processing-copy">
+            <strong id="processing-title">Preparing ingestion…</strong>
+            <span id="processing-source"></span>
+            <small id="processing-count"></small>
+          </div>
+        </div>
+        <ol id="ingestion-queue" class="ingestion-queue" aria-label="Ingestion queue" hidden></ol>
+        <pre id="upload-result" class="result" role="status" aria-live="polite">Upload one or more files, or paste one public URL · PDF, DOCX, Markdown, TXT, or webpage · 50 MB maximum per file</pre>
+      </section>
+    </div>
+
+    <section class="panel search-panel">
+      <h2>Ask the RAG space</h2>
+      <form id="search-form" class="search-form">
+        <input name="query" required minlength="2" placeholder="What does our policy say about…?">
+        <select id="search-group" name="group"><option value="">Choose intelligently</option></select>
+        <button type="submit">Search</button>
+      </form>
+      <div id="routing" class="hint"></div>
+      <div id="results" class="results empty">Search results will include document and group citations.</div>
+    </section>
+
+    <section class="panel">
+      <div class="section-title"><h2>Documents</h2><button id="refresh-documents" class="quiet">Refresh</button></div>
+      <p class="hint">You can download or delete documents here. Deletion requires an explicit confirmation and permanently removes the selected document from this RAG library.</p>
+      <p id="documents-summary" class="documents-summary" aria-live="polite"></p>
+      <p id="documents-result" class="form-message" role="status" aria-live="polite"></p>
+      <div id="documents" class="documents empty">Connect to load documents.</div>
+    </section>
+  </main>
+  <script src="/rag/ingestion-queue.js?v=enhanced-ai-1" defer></script>
+  <script src="/rag/app.js?v=enhanced-ai-1" defer></script>
+</body>
+</html>
+
