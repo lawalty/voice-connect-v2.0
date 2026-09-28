@@ -79,6 +79,7 @@ export class Store {
   cancelTurn(id:string):void { this.db.prepare("UPDATE turns SET cancelled=1,delivery='cancelled' WHERE id=?").run(id); }
   outstanding():TurnRow[] { return (this.db.prepare("SELECT id FROM turns WHERE delivery IN ('pending','accepted','uncertain') OR cancelled=1 ORDER BY created DESC LIMIT 200").all() as {id:string}[]).map(v=>this.turn(v.id)!); }
   conversationTurns(id:string):TurnRow[] {return (this.db.prepare('SELECT id FROM turns WHERE conversation=? ORDER BY created DESC LIMIT 200').all(id) as {id:string}[]).map(v=>this.turn(v.id)!);}
+  matchingTurns(id:string,text:string,time:number):TurnRow[] {return (this.db.prepare('SELECT id FROM turns WHERE conversation=? AND text=? AND created>? AND created<? ORDER BY created LIMIT 20').all(id,text,time-5000,time+5000) as {id:string}[]).map(v=>this.turn(v.id)!);}
   receipt(row:TurnRow):TurnReceipt { return {turnId:row.id,delivery:row.delivery,...row.runId?{runId:row.runId}:{}}; }
   active(conversationId:string):TurnReceipt|undefined { const row=this.db.prepare("SELECT id FROM turns WHERE conversation=? AND delivery IN ('pending','accepted') ORDER BY created DESC LIMIT 1").get(conversationId) as {id:string}|undefined;return row?this.receipt(this.turn(row.id)!):undefined; }
   pendingMessages(conversationId:string):Message[] {

@@ -114,3 +114,5 @@
 .clipboard-inline-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .clipboard-inline-actions .muted { font-size: 11px; }
 .clipboard-inline .error-text { margin: 8px 0; }
+.history-earlier { align-self: center; margin: 4px auto 18px; flex-shrink: 0; }
+.history-error { color: var(--muted); font-size: .85rem; margin: 0 0 16px; overflow-wrap: anywhere; }

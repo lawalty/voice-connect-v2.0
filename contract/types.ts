@@ -40,7 +40,9 @@ export type Delivery = 'pending' | 'accepted' | 'complete' | 'cancelled' | 'unce
 export interface Message { id: string; role: 'user' | 'assistant'; text: string; createdAt: number; turnId?: string; runId?: string; delivery?: Delivery; attachments?: Attachment[]; }
 export interface TurnRequest { id: string; text: string; attachments?: string[]; }
 export interface TurnReceipt { turnId: string; delivery: Delivery; runId?: string; }
-export interface ConversationView { conversation: Conversation; messages: Message[]; activeTurn?: TurnReceipt; }
+export interface HistoryOptions { before?: string; since?: string; }
+export interface HistoryWindow { sessionId: string; sync?: string; before?: string; start?: number; reset?: boolean; }
+export interface ConversationView { conversation: Conversation; messages: Message[]; activeTurn?: TurnReceipt; history?: HistoryWindow; }
 export type ServerEvent = (
   | { type: 'pong'; nonce: string }
   | { type: 'hello'; conversationId: string; capabilities: HarnessCapabilities }
@@ -64,7 +66,7 @@ export type AudioEvent =
 export interface ModelManifest { id: string; url: string; sha256: string; bytes: number; license: string; sampleRate: number; }
 export interface HarnessAdapter {
   capabilities(): HarnessCapabilities;
-  history(conversationId: string): Promise<ConversationView>;
+  history(conversationId: string, options?: HistoryOptions): Promise<ConversationView>;
   send(conversationId: string, turn: TurnRequest): Promise<TurnReceipt>;
   abort(conversationId: string, turnId: string): Promise<void>;
   close(): void;

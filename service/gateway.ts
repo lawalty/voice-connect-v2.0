@@ -1,11 +1,12 @@
 import WebSocket from 'ws';
 import { randomUUID } from 'node:crypto';
-import type { ConversationView, HarnessAdapter, HarnessCapabilities, Message, ServerEvent, TurnRequest, TurnReceipt } from '../contract/types.js';
+import type { ConversationView, HarnessAdapter, HarnessCapabilities, HistoryOptions, Message, ServerEvent, TurnRequest, TurnReceipt } from '../contract/types.js';
 import type { ServiceConfig } from './config.js';
 import { Store } from './store.js';
 import { signGatewayChallenge } from './identity.js';
 import { Timings, type TimingSample } from './telemetry.js';
 import { assistantPhase, displayText, publicCommentary } from './assistant-text.js';
+import { historyRowId, readHistoryPage } from './history-page.js';
 export { displayText } from './assistant-text.js';
 
 type Json = Record<string, any>;
@@ -24,6 +25,7 @@ export class Gateway implements GatewayPort {
   private sequence=new Map<string,number>(); private text=new Map<string,string>(); private modelImages=new Set<string>();
   private progress=new Map<string,{seq:number;items:Map<string,string>;tools:Set<string>;fallback:number}>();
   private images=false; private approvals=false; private subscribed=new Set<string>();
+  private historyNotifications=new Map<string,NodeJS.Timeout>();
   private prompts=new Map<string,{kind:'approval'|'question';conversationId:string;expiresAt:number;allow?:boolean;requestId?:string;questionId?:string;event?:ServerEvent}>();
   private questionGroups=new Map<string,{ids:string[];answers:Record<string,string[]>;expiresAt:number}>();
   constructor(private cfg:ServiceConfig, private store:Store, private publish:(event:ServerEvent)=>void) {
@@ -39,6 +41,7 @@ export class Gateway implements GatewayPort {
     ws.on('message',(data,isBinary)=>{if(isBinary)return;try{this.frame(JSON.parse(data.toString()),ws);}catch{/* malformed remote frames are not exposed */}});
     ws.on('close',()=>{
       if(ws!==this.socket)return;clearTimeout(this.connectingTimer);this.ready=false;this.approvals=false;this.subscribed.clear();this.prompts.clear();this.questionGroups.clear();this.sequence.clear();this.text.clear();this.progress.clear();
+      for(const timer of this.historyNotifications.values())clearTimeout(timer);this.historyNotifications.clear();
       for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('Gateway connection lost'));}this.pending.clear();
       for(const row of this.store.outstanding())if(row.delivery==='pending'||row.delivery==='accepted')this.store.updateTurn(row.id,'uncertain');
       this.publish({type:'connection',connected:false,reason:this.capabilities().reason});
@@ -77,6 +80,13 @@ export class Gateway implements GatewayPort {
       }).catch(error=>{this.disconnectedReason=error instanceof IncompatibleGateway?error.reason:error instanceof RejectedRequest&&error.code==='PAIRING_REQUIRED'?'Voice Connect requires one-time device approval on the OpenClaw server.':error instanceof RejectedRequest&&error.code==='PROTOCOL_MISMATCH'?'This OpenClaw version does not support the required Gateway protocol 4.':undefined;ws.close(1008,'Gateway unavailable');});return;
     }
     if(!this.ready)return;
+    if(frame.event==='session.message'){
+      const payload=frame.payload??{};const key=payload.sessionKey??payload.key;
+      const id=typeof key==='string'?this.store.conversationForSession(key):undefined;
+      // Durable edits and sends from the dashboard/another client do not carry
+      // one of VC's owned runs. Invalidate history without claiming or speaking it.
+      if(id&&this.subscribed.has(id)&&!this.historyNotifications.has(id))this.historyNotifications.set(id,setTimeout(()=>{this.historyNotifications.delete(id);this.publish({type:'reconcile',conversationId:id});},250));
+    }
     if(frame.event==='chat')this.chat(frame.payload??{});
     if(frame.event==='agent')this.activity(frame.payload??{});
     if(frame.event==='exec.approval.requested'||frame.event==='question.requested')this.prompt(frame.event,frame.payload??{});
@@ -120,15 +130,15 @@ export class Gateway implements GatewayPort {
       this.pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({type:'req',id,method,params}),error=>{if(error){clearTimeout(timer);this.pending.delete(id);reject(new Error('Gateway unavailable'));}});
     });
   }
-  async history(id:string):Promise<ConversationView> {
+  async history(id:string,options:HistoryOptions={}):Promise<ConversationView> {
     const conversation=this.store.conversation(id);if(!conversation)throw new Error('Conversation not found');
     if(!this.ready)throw Object.assign(new Error('Conversation reconnecting'),{statusCode:503});
     await this.subscribe(id);
-    const result=await this.request('chat.history',{...this.target(id),limit:200,maxChars:50000});
-    if(typeof result.sessionId==='string')this.store.setSession(id,result.sessionId);
+    const {raw:result,window}=await readHistoryPage((method,params)=>this.request(method,params),id,this.target(id),options);
+    if(!options.before&&typeof result.sessionId==='string')this.store.setSession(id,result.sessionId);
     const info=result.sessionInfo??{};const model=info.model??result.model;const provider=info.modelProvider??info.provider??result.modelProvider;
     if(typeof model==='string')this.images=this.modelImages.has(model)||this.modelImages.has(`${provider}/${model}`);
-    const messages:Message[]=[];const seen=new Set<string>();
+    const messages:Message[]=[];const seen=new Set<string>();const siblings=new Map<string,number>();
     const live=result.inFlightRun;
     const activeRunIds=new Set<string>(Array.isArray(info.activeRunIds)?info.activeRunIds.filter((v:unknown)=>typeof v==='string'):[]);
     if(typeof live?.runId==='string')activeRunIds.add(live.runId);
@@ -141,12 +151,13 @@ export class Gateway implements GatewayPort {
       const rawTime=typeof raw.timestamp==='number'?raw.timestamp:Date.parse(raw.timestamp??'');
       // Native transcripts may omit the input receipt id. Match each recent local send once,
       // only with both exact content and a bounded timestamp, and never infer completion from text alone.
-      if(!known&&raw.role==='user'&&Number.isFinite(rawTime))known=this.store.conversationTurns(id).find(t=>!seen.has(t.id)&&t.text===text&&Math.abs(t.createdAt-rawTime)<5000);
+      if(!known&&raw.role==='user'&&Number.isFinite(rawTime))known=this.store.matchingTurns(id,text,rawTime).find(t=>!seen.has(t.id));
       if(known?.conversationId!==id)known=undefined;
       if(known){seen.add(known.id);if(known.delivery==='pending'||known.delivery==='uncertain')this.store.updateTurn(known.id,'accepted',known.runId??known.id);}
       const createdAt=typeof raw.timestamp==='number'?raw.timestamp:Date.parse(raw.timestamp??'')||Date.now();
       const attachments=raw.role==='user'&&known?known.attachments.flatMap(a=>{const value=this.store.attachment(a);return value?[value.meta]:[];}):[];
-      if(text||attachments.length)messages.push({id:String(raw.id??raw.messageId??`${raw.role}-${messages.length}-${createdAt}`),role:raw.role,text,createdAt,...known?{turnId:known.id,delivery:known.delivery}:{},...raw.runId?{runId:raw.runId}:{},...attachments.length?{attachments}:{}});
+      const rowId=historyRowId(raw,siblings);
+      if(text||attachments.length)messages.push({id:rowId,role:raw.role,text,createdAt,...known?{turnId:known.id,delivery:this.store.turn(known.id)!.delivery}:{},...raw.runId?{runId:raw.runId}:{},...attachments.length?{attachments}:{}});
     }
     if(live?.runId){const row=this.store.findRun(live.runId);if(row&&!row.cancelRequested){this.store.updateTurn(row.id,'accepted',live.runId);if(typeof live.text==='string')this.text.set(live.runId,live.text);}}
     // A missing run is unknown, never silently resent. It is not an active speaking run.
@@ -154,10 +165,11 @@ export class Gateway implements GatewayPort {
       if(activeRunIds.has(row.runId??row.id)||activeRunIds.has(row.id))this.store.updateTurn(row.id,'accepted',row.runId??row.id);
       else if(info.hasActiveRun!==true||activeRunIds.size>0)this.store.updateTurn(row.id,'uncertain');
     }
-    for(const pending of this.store.pendingMessages(id))if(!seen.has(pending.id))messages.push(pending);
+    for(const pending of this.store.pendingMessages(id))if(!seen.has(pending.id)&&(!window.before||window.start===undefined||pending.createdAt>=window.start))messages.push(pending);
+    messages.sort((a,b)=>a.createdAt-b.createdAt);
     this.boundState();
     for(const prompt of this.prompts.values())if(prompt.conversationId===id&&prompt.event)this.publish(prompt.event);
-    return {conversation,messages,activeTurn:this.store.active(id)};
+    return {conversation,messages,activeTurn:this.store.active(id),history:window};
   }
   async send(id:string,turn:TurnRequest):Promise<TurnReceipt> {
     this.store.mapping(id);
@@ -285,5 +297,5 @@ export class Gateway implements GatewayPort {
     await this.request('exec.approval.resolve',{id,decision});this.prompts.delete(id);
   }
   async answer(id:string,answer:string):Promise<void> {const p=this.prompts.get(id);if(!p||p.kind!=='question'||p.expiresAt<Date.now()||!p.requestId||!p.questionId)throw new Error('Question is no longer available');const group=this.questionGroups.get(p.requestId);if(!group)throw new Error('Question is no longer available');group.answers[p.questionId]=[answer];if(group.ids.every(q=>group.answers[q])){await this.request('question.resolve',{id:p.requestId,answers:{answers:group.answers}});this.questionGroups.delete(p.requestId);}this.prompts.delete(id);}
-  close():void {this.stopped=true;clearTimeout(this.timer);clearTimeout(this.connectingTimer);this.socket?.removeAllListeners();this.socket?.close();for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('Service stopped'));}this.pending.clear();}
+  close():void {this.stopped=true;clearTimeout(this.timer);clearTimeout(this.connectingTimer);for(const timer of this.historyNotifications.values())clearTimeout(timer);this.historyNotifications.clear();this.socket?.removeAllListeners();this.socket?.close();for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('Service stopped'));}this.pending.clear();}
 }

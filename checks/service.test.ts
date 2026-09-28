@@ -43,7 +43,7 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
       if(request.method==='connect')payload={type:'hello-ok',protocol:4,server:{version:'2026.9.6-fixture'},features:{methods:['chat.send','chat.history','chat.abort','agents.list','models.list','sessions.messages.subscribe','exec.approval.resolve','exec.approval.list','question.resolve']},snapshot:{sessionDefaults:{model:'openai/verified-image-model'}}};
       if(request.method==='agents.list')payload={defaultId:'northpointe',agents:[{id:'northpointe',name:'NorthPointe'}]};
       if(request.method==='models.list')payload={models:[{id:'verified-image-model',provider:'openai',input:['text','image']}]};
-      if(request.method==='chat.history')payload=history??{sessionId:'session-fixture',messages:[],sessionInfo:{model:'verified-image-model',modelProvider:'openai'}};
+      if(request.method==='chat.history')payload=(typeof history==='function'?history(request.params):history)??{sessionId:'session-fixture',messages:[],sessionInfo:{model:'verified-image-model',modelProvider:'openai'}};
       if(request.method==='chat.send')payload={runId:request.params.idempotencyKey,status:'started'};
       if(request.method==='chat.abort')payload={ok:true,aborted:true,runIds:[request.params.runId]};
       if(request.method==='exec.approval.list')payload=pendingApprovals;
@@ -69,6 +69,27 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
   return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
 }
 describe('owner boundary',()=>{
+  it('orders a failed local turn within native history and hides it outside a paged tail',async()=>{
+    const f=await fixture(),store=(f.app as any).vc.store,url=`/api/conversations/${f.conversation.id}`;
+    const failed=store.addTurn(f.conversation.id,{id:'old-failed',text:'Old rejected turn'}).row;
+    store.updateTurn(failed.id,'failed');
+    const messages=[{id:'before',role:'assistant',content:'Before the failure',timestamp:failed.createdAt-1000},{id:'after',role:'assistant',content:'After the failure',timestamp:failed.createdAt+1000}];
+    f.setHistory({sessionId:'session-fixture',messages});
+    expect((await f.app.inject({url,headers:f.headers})).json().messages.map((m:any)=>m.id)).toEqual(['before','old-failed','after']);
+    f.setHistory({sessionId:'session-fixture',messages:[messages[1]],hasMore:true,nextOffset:200,totalMessages:500});
+    const tail=(await f.app.inject({url,headers:f.headers})).json();
+    expect(tail.messages.map((m:any)=>m.id)).toEqual(['after']);expect(tail.history.before).toBeTruthy();
+    expect(f.calls.some(c=>c.method==='chat.send')).toBe(false);
+  });
+  it('reconciles persisted dashboard messages without claiming or speaking an unowned run',async()=>{
+    const f=await fixture();await f.app.inject({url:`/api/conversations/${f.conversation.id}`,headers:f.headers});
+    f.events.length=0;
+    for(let n=0;n<3;n++)f.emit('session.message',{sessionKey:`agent:northpointe:vc2:${f.conversation.id}`,runId:'dashboard-owned',message:{role:'assistant',content:'Do not forward this raw payload'}});
+    f.emit('session.message',{sessionKey:'agent:northpointe:unrelated'});
+    await expect.poll(()=>f.events.filter(e=>e.type==='reconcile')).toHaveLength(1);
+    expect(f.events.filter(e=>['assistant','commentary','turn'].includes(e.type))).toHaveLength(0);
+    expect(f.calls.some(c=>c.method==='chat.send')).toBe(false);
+  });
   it('probes authenticated event delivery with independent revisions on both device connections',async()=>{
     const f=await fixture(),address=await f.app.listen({host:'127.0.0.1',port:0});
     const open=()=>{
