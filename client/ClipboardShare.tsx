@@ -8,13 +8,12 @@ import Dialog from './Dialog';
 export interface ClipboardShareHandle { send(): Promise<void>; }
 export interface ClipboardShareState { ready: boolean; locked: boolean; }
 
-export default function ClipboardShare({ source, inline, composerCaption, onCaption, canSend, imagesAllowed, voicePaused, onClose, onSend, onState, ref }: {
+export default function ClipboardShare({ source, inline, composerCaption, onCaption, canSend, voicePaused, onClose, onSend, onState, ref }: {
   source: Promise<ClipboardContent>;
   inline: boolean;
   composerCaption?: string;
   onCaption(value: string): void;
   canSend: boolean;
-  imagesAllowed: boolean;
   voicePaused: boolean;
   onClose(): void;
   onSend(photo: Attachment | undefined, text: string, turnId: string): Promise<void>;
@@ -28,7 +27,7 @@ export default function ClipboardShare({ source, inline, composerCaption, onCapt
   const uploaded = useRef<Attachment | undefined>(undefined), submission = useRef<{ id: string; text: string } | null>(null), sending = useRef(false);
   const loadEpoch = useRef(0);
   const currentCaption = composerCaption ?? caption;
-  const ready = Boolean(content && !loading && (content.kind !== 'image' || imagesAllowed));
+  const ready = Boolean(content && !loading);
   useEffect(() => { onState({ ready, locked: busy || attempted }); }, [ready, busy, attempted, onState]);
   async function load(input: Promise<ClipboardContent>) {
     const epoch = ++loadEpoch.current; setLoading(true); setError('');
@@ -73,7 +72,6 @@ export default function ClipboardShare({ source, inline, composerCaption, onCapt
       try { void load(Promise.resolve(pastedContent(event.clipboardData))); } catch (reason) { setError((reason as Error).message); }
     }} onChange={event => setFallbackText(event.target.value)} /></label>{fallbackText.trim() && <button className="button secondary" onClick={() => void load(Promise.resolve({ kind: 'text', text: fallbackText }))}>Preview text</button>}</>}
     {content && !inline && <label className="camera-caption">Caption (optional)<textarea rows={3} maxLength={20000} value={currentCaption} disabled={busy || attempted} placeholder="What would you like NorthPointe to know?" onChange={event => composerCaption === undefined ? setCaption(event.target.value) : onCaption(event.target.value)} /></label>}
-    {content?.kind === 'image' && !imagesAllowed && <p role="alert" className="error-text">Image input is unavailable for this connection.</p>}
     {error && <p role="alert" className="error-text">{error}</p>}
     {!canSend && content && <p role="status" className="muted">Waiting for the conversation to reconnect. Your clipboard is kept here.</p>}
     {inline ? <div className="clipboard-inline-actions"><span className="muted">{attempted ? 'Delivery needs checking. Send again to check the same message.' : voicePaused ? 'Listening paused · add a caption below, then send.' : 'Add a caption below, then send.'}</span><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="Remove clipboard image"><X size={18} /></button></div>

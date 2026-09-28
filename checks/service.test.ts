@@ -27,7 +27,7 @@ describe('retired browser recognition policy',()=>{
     for(const url of ['/%61pi/settings','/%61pi/no-such-endpoint','/a%70i/conversations?next=/api/status'])expect((await app.inject({url})).statusCode).toBe(401);
   });
 });
-async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel='s2.1-pro', imageModel?:{id:string;provider:string;input?:string[];qualified:string[]}) {
+async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel='s2.1-pro', imageModel?:{id:string;provider:string;input?:string[];qualified:string[];reject?:boolean}) {
   const dir=mkdtempSync(join(tmpdir(),'vc2-service-'));
   const server=new WebSocketServer({port:0});await new Promise<void>(resolve=>server.once('listening',()=>resolve()));
   const calls:{method:string;params:any}[]=[],clients=new Set<WebSocket>(),events:ServerEvent[]=[];
@@ -37,6 +37,7 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
     socket.send(JSON.stringify({type:'event',event:'connect.challenge',payload:{nonce:'fixture',ts:Date.now()}}));
     socket.on('message',raw=>{
       const request=JSON.parse(raw.toString());calls.push({method:request.method,params:request.params});
+      if(request.method==='chat.send'&&request.params.attachments?.length&&imageModel?.reject){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST',message:'Private provider diagnostic must not be exposed'}}));return;}
       if('sessionId'in request.params&&typeof request.params.sessionId!=='string'){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST'}}));return;}
       if((request.method==='chat.abort'&&('sessionId'in request.params||rejectAbort))||(request.method==='chat.history'&&'sessionId'in request.params&&!request.params.messageId)){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST'}}));return;}
       let payload:any={};
@@ -69,7 +70,7 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
   return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
 }
 describe('owner boundary',()=>{
-  it.each([true,false])('requires explicit image qualification when the native catalog omits modalities (qualified=%s)',async(qualified)=>{
+  it.each([true,false])('forwards images when the native catalog omits modalities, regardless of qualification (qualified=%s)',async(qualified)=>{
     const f=await fixture(false,false,'s2.1-pro',{id:'gpt-6-sol',provider:'openai',qualified:qualified?['openai/gpt-6-sol']:[]});
     await f.app.inject({url:`/api/conversations/${f.conversation.id}`,headers:f.headers});
     const settings=(await f.app.inject({url:'/api/settings',headers:f.headers})).json();
@@ -77,10 +78,24 @@ describe('owner boundary',()=>{
     const store=(f.app as any).vc.store;
     store.saveAttachment({id:'synthetic-photo',name:'test.png',mimeType:'image/png',width:2,height:2},await sharp({create:{width:2,height:2,channels:3,background:'red'}}).png().toBuffer());
     const sent=await f.app.inject({method:'POST',url:`/api/conversations/${f.conversation.id}/turns`,headers:f.headers,payload:{id:'image-qualification',text:'Describe this test image.',attachments:['synthetic-photo']}});
-    expect(sent.statusCode).toBe(qualified?200:409);
+    expect(sent.statusCode).toBe(200);expect(sent.json().delivery).toBe('accepted');
     const native=f.calls.find(c=>c.method==='chat.send');
-    if(qualified)expect(native?.params.attachments[0]).toMatchObject({type:'image',mimeType:'image/png',fileName:'test.png'});
-    else expect(native).toBeUndefined();
+    expect(native?.params.attachments[0]).toMatchObject({type:'image',mimeType:'image/png',fileName:'test.png'});
+  });
+  it('reports actual image rejection and keeps the attachment without resending or dropping it',async()=>{
+    const f=await fixture(false,false,'s2.1-pro',{id:'text-only-fixture',provider:'fixture',input:['text'],qualified:[],reject:true});
+    const store=(f.app as any).vc.store;
+    const bytes=await sharp({create:{width:2,height:2,channels:3,background:'red'}}).png().toBuffer();
+    store.saveAttachment({id:'rejected-photo',name:'test.png',mimeType:'image/png',width:2,height:2},bytes);
+    const request={method:'POST' as const,url:`/api/conversations/${f.conversation.id}/turns`,headers:f.headers,payload:{id:'rejected-image-turn',text:'My image caption.',attachments:['rejected-photo']}};
+    const sent=await f.app.inject(request);
+    expect(sent.json()).toMatchObject({delivery:'failed',error:'OpenClaw declined this image message. Your image and caption are kept here.'});
+    expect(JSON.stringify(f.events)).not.toContain('Private provider diagnostic');
+    expect((await f.app.inject(request)).json().delivery).toBe('failed');
+    const native=f.calls.filter(c=>c.method==='chat.send');expect(native).toHaveLength(1);
+    expect(native[0].params.attachments[0].content).toBe(bytes.toString('base64'));
+    expect(store.turn('rejected-image-turn').text).toBe('My image caption.');
+    expect(store.attachment('rejected-photo').bytes).toEqual(bytes);
   });
   it('orders a failed local turn within native history and hides it outside a paged tail',async()=>{
     const f=await fixture(),store=(f.app as any).vc.store,url=`/api/conversations/${f.conversation.id}`;

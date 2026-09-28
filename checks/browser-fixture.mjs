@@ -27,7 +27,9 @@ gateway.on('connection',ws=>{
     const event=(name,payload)=>ws.readyState===1&&ws.send(JSON.stringify({type:'event',event:name,payload}));
     if(f.method==='connect')return res({type:'hello-ok',protocol:4,server:{version:'2026.9.6-fixture'},features:{methods:['agents.list','models.list','chat.history','chat.send','chat.abort','sessions.messages.subscribe','exec.approval.resolve','question.resolve']},snapshot:{sessionDefaults:{defaultAgentId:'northpointe',model:'openai/gpt-6-astra'}}});
     if(f.method==='agents.list')return res({defaultId:'northpointe',agents:[{id:'northpointe',name:'NorthPointe'}]});
-    if(f.method==='models.list')return res({models:[{id:'gpt-6-astra',provider:'openai',input:['text','image']}]});
+    // The deployed catalog omits modalities. Camera and clipboard must work
+    // without relying on a model allowlist or changing the selected model.
+    if(f.method==='models.list')return res({models:[{id:'gpt-6-astra',provider:'openai'}]});
     if(f.method==='sessions.messages.subscribe')return res({ok:true});
     if(f.method==='chat.history'){
       const messages=sessions.get(p.sessionKey)||[];
@@ -38,6 +40,7 @@ gateway.on('connection',ws=>{
       return res({sessionId:p.sessionKey,messages,sessionInfo:{modelProvider:'openai',model:'gpt-6-astra',hasActiveRun:activeRunIds.length>0,activeRunIds}});
     }
     if(f.method==='chat.send'){
+      if(p.attachments?.length&&p.message==='Image rejection fixture')return ws.send(JSON.stringify({type:'res',id:f.id,ok:false,error:{code:'INVALID_REQUEST',message:'Private provider diagnostic'}}));
       if(receipts.has(p.idempotencyKey))return res(receipts.get(p.idempotencyKey));
       const runId=p.idempotencyKey, receipt={runId,status:'started'};
       receipts.set(runId,receipt);
@@ -82,7 +85,7 @@ gateway.on('connection',ws=>{
     res({ok:true});
   });
 });
-const app=spawn(process.execPath,['dist/service/main.js'],{stdio:['ignore','inherit','inherit'],env:{...process.env,NODE_ENV:'test',VC_HOST:'127.0.0.1',VC_PORT:String(appPort),VC_ORIGIN:origin,VC_STATE_DIR:join(dir,'state'),VC_GATEWAY_URL:`ws://127.0.0.1:${gatewayPort}`,VC_GATEWAY_TOKEN_FILE:join(dir,'gateway'),VC_MASTER_KEY_FILE:join(dir,'master'),VC_BOOTSTRAP_TOKEN_FILE:join(dir,'bootstrap'),VC_BUILD:'browser-fixture'}});
+const app=spawn(process.execPath,['dist/service/main.js'],{stdio:['ignore','inherit','inherit'],env:{...process.env,NODE_ENV:'test',VC_HOST:'127.0.0.1',VC_PORT:String(appPort),VC_ORIGIN:origin,VC_STATE_DIR:join(dir,'state'),VC_GATEWAY_URL:`ws://127.0.0.1:${gatewayPort}`,VC_GATEWAY_TOKEN_FILE:join(dir,'gateway'),VC_MASTER_KEY_FILE:join(dir,'master'),VC_BOOTSTRAP_TOKEN_FILE:join(dir,'bootstrap'),VC_IMAGE_MODEL_ALLOWLIST:'',VC_BUILD:'browser-fixture'}});
 let ready=false;
 for(let n=0;n<100;n++){
   try { const response=await fetch(`${origin}/api/status`); if(response.ok){ready=true;break;} }catch{}

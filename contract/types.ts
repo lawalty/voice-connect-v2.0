@@ -39,7 +39,7 @@ export interface Attachment { id: string; mimeType: string; name: string; width:
 export type Delivery = 'pending' | 'accepted' | 'complete' | 'cancelled' | 'uncertain' | 'failed';
 export interface Message { id: string; role: 'user' | 'assistant'; text: string; createdAt: number; turnId?: string; runId?: string; delivery?: Delivery; attachments?: Attachment[]; }
 export interface TurnRequest { id: string; text: string; attachments?: string[]; }
-export interface TurnReceipt { turnId: string; delivery: Delivery; runId?: string; }
+export interface TurnReceipt { turnId: string; delivery: Delivery; runId?: string; error?: string; }
 export interface HistoryOptions { before?: string; since?: string; }
 export interface HistoryWindow { sessionId: string; sync?: string; before?: string; start?: number; reset?: boolean; }
 export interface ConversationView { conversation: Conversation; messages: Message[]; activeTurn?: TurnReceipt; history?: HistoryWindow; }

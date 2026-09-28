@@ -30,6 +30,7 @@ for (const mode of ['orb-auto', 'messenger', 'messenger-auto'] as const) {
       return { mic: p.tracks.filter(t => t.kind === 'audio' && t.readyState === 'live' && t.enabled).length, video: p.tracks.filter(t => t.kind === 'video' && t.readyState === 'live').length, spoken: p.spoken, cancels: p.cancels };
     });
     await enterFixtureSession(page);
+    expect((await (await page.request.get('/api/settings')).json()).harness.images).toBe(false);
     await expect(page.getByRole('button', { name: 'Wake NorthPointe' })).toBeEnabled();
     await page.getByRole('button', { name: 'NorthPointe', exact: true }).click();
     await page.getByRole('button', { name: 'Begin a new conversation' }).click();
@@ -111,4 +112,24 @@ test('an image-only send with a lost acknowledgement reuses its upload and turn 
   expect(uploads).toHaveLength(1); expect(aborts).toHaveLength(0);
   await expect(page.getByRole('log').getByAltText('Shared photo')).toHaveCount(1);
   await expect(page.getByRole('log').getByText('Your conversation stays together. I’m here with you.', { exact: true })).toHaveCount(1);
+});
+
+test('a native image rejection keeps the photo and caption instead of silently sending text only', async ({ page, context }) => {
+  await context.grantPermissions(['camera']);
+  await page.addInitScript(() => localStorage.setItem('vc2:speaker-muted', 'true'));
+  await enterFixtureSession(page);
+  await expect(page.getByRole('button', { name: 'Wake NorthPointe' })).toBeEnabled();
+  await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
+  await page.getByRole('button', { name: 'Attach a camera photo' }).click();
+  await expect(page.getByRole('button', { name: 'Take photo', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Take photo', exact: true }).click();
+  await page.getByLabel('Caption (optional)').fill('Image rejection fixture');
+  const sends: unknown[] = [];
+  page.on('request', request => { if (request.method() === 'POST' && request.url().endsWith('/turns')) sends.push(request.postDataJSON()); });
+  await page.getByRole('button', { name: 'Send photo', exact: true }).click();
+  await expect(page.getByRole('dialog').getByRole('alert')).toHaveText('OpenClaw declined this image message. Your image and caption are kept here.');
+  await expect(page.getByAltText('Photo to send')).toBeVisible();
+  await expect(page.getByLabel('Caption (optional)')).toHaveValue('Image rejection fixture');
+  expect(sends).toHaveLength(1);
+  await expect(page.getByRole('dialog')).not.toContainText('Private provider diagnostic');
 });

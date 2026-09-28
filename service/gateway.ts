@@ -174,10 +174,12 @@ export class Gateway implements GatewayPort {
   async send(id:string,turn:TurnRequest):Promise<TurnReceipt> {
     this.store.mapping(id);
     for(const a of turn.attachments??[])if(!this.store.attachment(a))throw new Error('Attachment not found');
-    if((turn.attachments?.length??0)>0&&!this.images)throw new Error('Image support is not verified for this OpenClaw model');
+    // Catalog modalities are advisory. Forward the image intact and let the
+    // selected harness/model accept it or report a real failure.
     const {row,fresh}=this.store.addTurn(id,turn);if(!fresh)return this.store.receipt(row);
     this.timings.record(row.id,'submitted',row.createdAt);
     if(!this.ready){this.store.updateTurn(row.id,'failed');return this.store.receipt(this.store.turn(row.id)!);}
+    let rejection:string|undefined;
     try{
       await this.subscribe(id);if(this.store.turn(row.id)?.cancelRequested)return this.store.receipt(this.store.turn(row.id)!);
       const attachments=(turn.attachments??[]).map(a=>{const value=this.store.attachment(a)!;return {type:'image',mimeType:value.meta.mimeType,fileName:value.meta.name,content:value.bytes.toString('base64')};});
@@ -186,8 +188,13 @@ export class Gateway implements GatewayPort {
       this.store.updateTurn(row.id,'accepted',runId);
       this.timings.record(row.id,'admitted',row.createdAt);
       if(this.store.turn(row.id)?.cancelRequested)await this.request('chat.abort',{...this.target(id),runId});
-    }catch(error){this.store.updateTurn(row.id,error instanceof RejectedRequest?'failed':'uncertain');}
-    const receipt=this.store.receipt(this.store.turn(row.id)!);this.publish({type:'turn',conversationId:id,...receipt});return receipt;
+    }catch(error){
+      this.store.updateTurn(row.id,error instanceof RejectedRequest?'failed':'uncertain');
+      if(error instanceof RejectedRequest)rejection=turn.attachments?.length
+        ? 'OpenClaw declined this image message. Your image and caption are kept here.'
+        : 'OpenClaw declined this message. Your draft is kept.';
+    }
+    const receipt={...this.store.receipt(this.store.turn(row.id)!),...rejection?{error:rejection}:{}};this.publish({type:'turn',conversationId:id,...receipt});return receipt;
   }
   async abort(id:string,turnId:string):Promise<void> {
     const row=this.store.turn(turnId);if(!row||row.conversationId!==id)throw new Error('Turn not found');

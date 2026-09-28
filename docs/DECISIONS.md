@@ -117,6 +117,19 @@ device permission. The deployment now includes `openai/gpt-6-sol`; no Android
 permission or model selection is changed. This verifies image input through the
 installed harness, not general visual accuracy or physical camera capture.
 
+## Image capability is advisory (2026-09-28)
+
+At the owner's request, camera access, clipboard previews, and image submission
+no longer require VC's model qualification flag. Missing or stale model metadata
+must not disable the camera before Android can request permission. The existing
+catalog/qualification flag is diagnostic only; it is not an authorization gate.
+Images are forwarded intact to the selected native session. VC does not switch
+models, strip the image, or resend the caption as a text-only fallback. OpenClaw
+can respond normally or reject the request. A synchronous rejection retains the
+image and caption and reports that OpenClaw declined it, without exposing raw
+provider diagnostics or guessing that the model lacks vision. Browser permissions,
+authentication, upload format/size validation, and duplicate-send protection remain.
+
 ## Security and operational limits
 
 The owner authenticates with an Argon2id-hashed password and HttpOnly session cookie.
