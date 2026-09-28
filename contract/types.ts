@@ -37,7 +37,7 @@ export interface AppSettings { deepgramConfigured: boolean; fishConfigured: bool
 export interface Conversation { id: string; title: string; createdAt: number; updatedAt: number; }
 export interface Attachment { id: string; mimeType: string; name: string; width: number; height: number; previewUrl?: string; }
 export type Delivery = 'pending' | 'accepted' | 'complete' | 'cancelled' | 'uncertain' | 'failed';
-export interface Message { id: string; role: 'user' | 'assistant'; text: string; createdAt: number; turnId?: string; runId?: string; delivery?: Delivery; attachments?: Attachment[]; }
+export interface Message { id: string; role: 'user' | 'assistant' | 'notice'; text: string; createdAt: number; turnId?: string; runId?: string; delivery?: Delivery; attachments?: Attachment[]; }
 export interface TurnRequest { id: string; text: string; attachments?: string[]; }
 export interface TurnReceipt { turnId: string; delivery: Delivery; runId?: string; error?: string; }
 export interface HistoryOptions { before?: string; since?: string; }

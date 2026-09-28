@@ -7,6 +7,7 @@ import { signGatewayChallenge } from './identity.js';
 import { Timings, type TimingSample } from './telemetry.js';
 import { assistantPhase, displayText, publicCommentary } from './assistant-text.js';
 import { historyRowId, readHistoryPage } from './history-page.js';
+import { presenceCaptions, presenceLabel, presenceMode, presenceNotes, type PresenceMode } from '../contract/presence.js';
 export { displayText } from './assistant-text.js';
 
 type Json = Record<string, any>;
@@ -14,6 +15,7 @@ class RejectedRequest extends Error {constructor(readonly code?:string){super('O
 class IncompatibleGateway extends Error {constructor(readonly reason:string){super('Gateway compatibility check failed');}}
 const terminal=new Set(['complete','failed','cancelled']);
 export interface GatewayPort extends HarnessAdapter {
+  presence(id:string,mode:PresenceMode):Promise<void>;
   approval(id:string,decision:string):Promise<void>; answer(id:string,answer:string):Promise<void>; diagnostics?():TimingSample[];
 }
 export class Gateway implements GatewayPort {
@@ -157,7 +159,8 @@ export class Gateway implements GatewayPort {
       const createdAt=typeof raw.timestamp==='number'?raw.timestamp:Date.parse(raw.timestamp??'')||Date.now();
       const attachments=raw.role==='user'&&known?known.attachments.flatMap(a=>{const value=this.store.attachment(a);return value?[value.meta]:[];}):[];
       const rowId=historyRowId(raw,siblings);
-      if(text||attachments.length)messages.push({id:rowId,role:raw.role,text,createdAt,...known?{turnId:known.id,delivery:this.store.turn(known.id)!.delivery}:{},...raw.runId?{runId:raw.runId}:{},...attachments.length?{attachments}:{}});
+      const notice=raw.role==='assistant'&&raw.provider==='openclaw'&&raw.model==='gateway-injected'?presenceMode(text):undefined;
+      if(text||attachments.length)messages.push({id:rowId,role:notice?'notice':raw.role,text:notice?presenceCaptions[notice]:text,createdAt,...known?{turnId:known.id,delivery:this.store.turn(known.id)!.delivery}:{},...raw.runId?{runId:raw.runId}:{},...attachments.length?{attachments}:{}});
     }
     if(live?.runId){const row=this.store.findRun(live.runId);if(row&&!row.cancelRequested){this.store.updateTurn(row.id,'accepted',live.runId);if(typeof live.text==='string')this.text.set(live.runId,live.text);}}
     // A missing run is unknown, never silently resent. It is not an active speaking run.
@@ -170,6 +173,18 @@ export class Gateway implements GatewayPort {
     this.boundState();
     for(const prompt of this.prompts.values())if(prompt.conversationId===id&&prompt.event)this.publish(prompt.event);
     return {conversation,messages,activeTurn:this.store.active(id),history:window};
+  }
+  async presence(id:string,mode:PresenceMode):Promise<void> {
+    // chat.inject is intentionally not advertised by OpenClaw 2026.9.6. It
+    // appends a labelled gateway-authored note without calling the agent. Never
+    // fall back to chat.send, which would trigger empty-reply recovery.
+    const view=await this.history(id);
+    // A brand-new, empty conversation has no agent context to notify yet.
+    if(!view.messages.length&&!view.activeTurn)return;
+    const result=await this.request('chat.inject',{...this.target(id),message:presenceNotes[mode],label:presenceLabel});
+    if(result.ok!==true||typeof result.messageId!=='string')throw new Error('Presence record not confirmed');
+    // No turn receipt, owned run, pending reply, or speech eligibility is made.
+    this.publish({type:'reconcile',conversationId:id});
   }
   async send(id:string,turn:TurnRequest):Promise<TurnReceipt> {
     this.store.mapping(id);

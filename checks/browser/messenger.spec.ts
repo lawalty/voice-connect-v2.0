@@ -22,7 +22,10 @@ for (const provider of ['browser', 'fish'] as const) {
       Object.defineProperty(window, 'SpeechRecognition', { configurable: true, value: Recognition });
       Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
         getVoices: () => [], addEventListener() {}, removeEventListener() {}, cancel() { probe.cancelled++; },
-        speak(utterance: SpeechSynthesisUtterance) { probe.spoken.push(utterance.text); queueMicrotask(() => utterance.onstart?.(new Event('start') as SpeechSynthesisEvent)); },
+        speak(utterance: SpeechSynthesisUtterance) {
+          probe.spoken.push(utterance.text);
+          queueMicrotask(() => { utterance.onstart?.(new Event('start') as SpeechSynthesisEvent); utterance.onend?.(new Event('end') as SpeechSynthesisEvent); });
+        },
       } });
     }, provider);
     const premium: string[] = [], aborts: string[] = [];

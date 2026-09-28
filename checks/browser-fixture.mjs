@@ -39,6 +39,13 @@ gateway.on('connection',ws=>{
       const activeRunIds=messages.filter(message=>message.role==='user'&&timers.has(message.runId)).map(message=>message.runId);
       return res({sessionId:p.sessionKey,messages,sessionInfo:{modelProvider:'openai',model:'gpt-6-astra',hasActiveRun:activeRunIds.length>0,activeRunIds}});
     }
+    if(f.method==='chat.inject'){
+      const history=sessions.get(p.sessionKey)||[],messageId=randomUUID();
+      const message={id:messageId,role:'assistant',provider:'openclaw',model:'gateway-injected',content:[{type:'text',text:`[${p.label}]\n\n${p.message}`}],timestamp:Date.now()};
+      history.push(message);sessions.set(p.sessionKey,history);
+      event('chat',{sessionKey:p.sessionKey,runId:`inject-${messageId}`,seq:0,state:'final',message});
+      return res({ok:true,messageId});
+    }
     if(f.method==='chat.send'){
       if(p.attachments?.length&&p.message==='Image rejection fixture')return ws.send(JSON.stringify({type:'res',id:f.id,ok:false,error:{code:'INVALID_REQUEST',message:'Private provider diagnostic'}}));
       if(receipts.has(p.idempotencyKey))return res(receipts.get(p.idempotencyKey));

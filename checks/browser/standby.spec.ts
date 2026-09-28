@@ -2,7 +2,6 @@ import { test, expect, type Page } from '@playwright/test';
 import { installationFixture } from './installation-fixture';
 import { enterFixtureSession } from './fixture-session';
 import { waitForFixtureBudget } from './fixture-budget';
-import { presenceNotes } from '../../client/conversation-actions';
 
 test.beforeEach(waitForFixtureBudget);
 
@@ -36,6 +35,8 @@ async function setup(page: Page, output: 'browser' | 'fish' = 'browser') {
     } });
   }, output);
   await enterFixtureSession(page);
+  await page.getByRole('button', { name: 'NorthPointe', exact: true }).click();
+  await page.getByRole('button', { name: 'Begin a new conversation', exact: true }).click();
   await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
   await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
 }
@@ -52,8 +53,20 @@ const resume = (page: Page) => page.getByRole('button', { name: 'Resume conversa
 
 test('standby is grey, releases capture, keeps the draft and session, and resumes by tap after reconnect', async ({ page }, info) => {
   const turns: string[] = [];
-  page.on('request', request => { if (request.method() === 'POST' && request.url().endsWith('/turns')) turns.push(request.postDataJSON().text); });
   await setup(page);
+  // Give the native transcript context to record the status against. This
+  // external send has no playback ownership in this page.
+  await page.evaluate(async () => {
+    const status = await (await fetch('/api/status')).json();
+    await fetch(`/api/conversations/${localStorage.getItem('vc2:conversation')}/turns`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': status.csrfToken }, body: JSON.stringify({ id: crypto.randomUUID(), text: 'Pre-standby context' }) });
+  });
+  await expect.poll(() => page.evaluate(async () => (await (await fetch(`/api/conversations/${localStorage.getItem('vc2:conversation')}`)).json()).messages.filter((m: any) => m.role === 'assistant').length)).toBe(1);
+  const generated: string[] = [];
+  page.on('request', request => {
+    if (request.method() !== 'POST') return;
+    if (request.url().endsWith('/presence')) turns.push(request.postDataJSON().mode);
+    if (request.url().endsWith('/turns')) generated.push(request.postDataJSON().text);
+  });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const id = await page.evaluate(() => localStorage.getItem('vc2:conversation'));
   await page.getByRole('button', { name: /^Conversation/ }).click();
@@ -66,7 +79,7 @@ test('standby is grey, releases capture, keeps the draft and session, and resume
   expect((await state(page)).live).toBe(0);
   expect((await state(page)).stops).toBeGreaterThan(0);
   await say(page, 'A bystander must never be submitted');
-  await expect.poll(() => turns).toEqual([presenceNotes.standby]);
+  await expect.poll(() => turns).toEqual(['standby']);
   await expect(page.getByRole('button', { name: /Mute agent|Mute microphone/ })).toHaveCount(0);
   await expect.poll(() => page.locator('.orb-canvas').evaluate(element => {
     const c = element as HTMLCanvasElement, pixels = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
@@ -83,13 +96,17 @@ test('standby is grey, releases capture, keeps the draft and session, and resume
   expect((await state(page)).starts).toBe(1);
   await resume(page).click();
   await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
-  await expect.poll(() => turns).toEqual([presenceNotes.standby, presenceNotes.resume]);
+  await expect.poll(() => turns).toEqual(['standby', 'resume']);
   expect((await state(page)).starts).toBe(2);
   expect((await state(page)).live).toBeGreaterThan(0);
   await page.getByRole('button', { name: /^Conversation/ }).click();
   await expect(page.getByRole('textbox', { name: 'Message NorthPointe' })).toHaveValue('Keep my draft.\nAn unfinished thought');
+  await expect(page.getByText('Listening resumed', { exact: true })).toBeVisible();
   const history = await page.evaluate(async id => (await fetch(`/api/conversations/${id}`)).json(), id);
-  expect(history.messages.filter((m: any) => m.role === 'user').map((m: any) => m.text)).toEqual(expect.arrayContaining([presenceNotes.standby, presenceNotes.resume]));
+  expect(history.messages.filter((m: any) => m.role === 'notice').map((m: any) => m.text)).toEqual(['Standby · conversation paused', 'Listening resumed']);
+  expect(history.messages.filter((m: any) => m.role === 'assistant')).toHaveLength(1);
+  expect(history.activeTurn).toBeUndefined();
+  expect(generated).toEqual([]);
   expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(id);
   expect((await state(page)).spoken).toEqual([]);
   await page.getByRole('button', { name: 'End voice session' }).click();
@@ -133,6 +150,7 @@ test('a pending send cannot overtake standby and resume notices or restart old s
     await route.continue();
   });
   page.on('request', r => { if (r.url().endsWith('/abort')) aborts.push(r.url()); });
+  page.on('request', r => { if (r.url().endsWith('/presence')) turns.push(r.postDataJSON().mode); });
   await setup(page);
   await say(page, 'Receipt delayed fixture');
   await page.getByRole('button', { name: 'Finish thought', exact: true }).click();
@@ -143,7 +161,7 @@ test('a pending send cannot overtake standby and resume notices or restart old s
   await resume(page).click();
   await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
   release();
-  await expect.poll(() => turns).toEqual(['Receipt delayed fixture', presenceNotes.standby, presenceNotes.resume]);
+  await expect.poll(() => turns).toEqual(['Receipt delayed fixture', 'standby', 'resume']);
   await expect.poll(() => aborts.length).toBeGreaterThan(0);
   await page.waitForTimeout(600);
   expect((await state(page)).spoken).toEqual([]);
@@ -152,8 +170,8 @@ test('a pending send cannot overtake standby and resume notices or restart old s
 
 test('notification or microphone failure leaves standby private and keyboard resume remains available', async ({ page }) => {
   const turns: string[] = [];
-  await page.route('**/api/conversations/*/turns', async route => {
-    turns.push(route.request().postDataJSON().text);
+  await page.route('**/api/conversations/*/presence', async route => {
+    turns.push(route.request().postDataJSON().mode);
     await route.fulfill({ status: 503, json: { error: 'Fixture connection unavailable' } });
   });
   await setup(page);
@@ -166,11 +184,11 @@ test('notification or microphone failure leaves standby private and keyboard res
   await expect(page.locator('.orb-stage')).toHaveAttribute('data-presence', 'standby');
   await expect(resume(page)).toBeEnabled();
   expect((await state(page)).live).toBe(0);
-  expect(turns).toEqual([presenceNotes.standby]);
+  expect(turns).toEqual(['standby']);
   await page.evaluate(() => { (window as any).standbyProbe.fail = false; });
   await resume(page).focus(); await page.keyboard.press('Enter');
   await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
-  await expect.poll(() => turns).toEqual([presenceNotes.standby, presenceNotes.resume]);
+  await expect.poll(() => turns).toEqual(['standby', 'resume']);
   await page.getByRole('button', { name: 'End voice session' }).click();
 });
 
@@ -178,10 +196,15 @@ test('a typed message queued during standby stays silent even if listening resum
   let release!: () => void, pending = false;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const turns: string[] = [];
+  await page.route('**/api/conversations/*/presence', async route => {
+    const mode = route.request().postDataJSON().mode;
+    turns.push(mode);
+    if (mode === 'standby') { pending = true; await gate; }
+    await route.continue();
+  });
   await page.route('**/api/conversations/*/turns', async route => {
     const text = route.request().postDataJSON().text as string;
     turns.push(text);
-    if (text === presenceNotes.standby) { pending = true; await gate; }
     if (text === 'A quiet typed message') {
       const response = await route.fetch();
       // Let real reply frames arrive before the receipt releases the next
@@ -200,7 +223,7 @@ test('a typed message queued during standby stays silent even if listening resum
   await resume(page).click();
   await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
   release();
-  await expect.poll(() => turns).toEqual([presenceNotes.standby, 'A quiet typed message', presenceNotes.resume]);
+  await expect.poll(() => turns).toEqual(['standby', 'A quiet typed message', 'resume']);
   await page.waitForTimeout(650);
   expect((await state(page)).spoken).toEqual([]);
   await expect(page.getByRole('textbox', { name: 'Message NorthPointe' })).toHaveValue('');

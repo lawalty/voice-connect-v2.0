@@ -144,3 +144,15 @@ Deployment is separate from /root/openclaw. No historical deployment, personal S
 key, authorized_keys file, or existing OpenClaw prompt is modified. Only the dedicated
 Astra identity is used for operational SSH. Source, release image, and served build
 identity must agree before acceptance is recorded.
+
+## Standby is context-only, not a reply request (2026-09-28)
+
+The first standby implementation used `chat.send` plus a request to stay silent.
+Live testing showed the harness recovered an intentionally empty answer and
+produced acknowledgements. Presence now uses the native `chat.inject` handler:
+a labelled app status is appended to the existing transcript without an agent
+run. No delivery receipt or reply expectation is created. Only the user's next
+actual message uses `chat.send`. Native status records are presented separately
+from assistant replies. Failed injection never falls back to generation, retries,
+or a request for the user to speak. Existing cancellation and local capture/audio
+privacy still apply; already-completed external actions cannot be undone.

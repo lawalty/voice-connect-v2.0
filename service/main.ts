@@ -151,6 +151,12 @@ export async function buildApp(options:AppOptions={}) {
   app.get('/api/conversations',async()=>store.conversations());
   app.post('/api/conversations',async(req,reply)=>{const body=z.object({title:z.string().trim().min(1).max(100).optional()}).strict().parse(req.body??{});if(!store.get('default-agent'))return reply.code(503).send({error:'OpenClaw is connecting. Please try again shortly.'});return store.createConversation(body.title);});
   app.get('/api/conversations/:id',async(req,reply)=>{const p=z.object({id}).parse(req.params);const options=z.object({before:z.string().max(16000).optional(),since:z.string().max(8192).optional()}).strict().parse(req.query);if(!store.conversation(p.id))return reply.code(404).send({error:'Conversation not found.'});return gateway.history(p.id,options);});
+  app.post('/api/conversations/:id/presence',{config:{rateLimit:{max:60,timeWindow:60000}}},async(req,reply)=>{
+    const p=z.object({id}).parse(req.params);if(!store.conversation(p.id))return reply.code(404).send({error:'Conversation not found.'});
+    const body=z.object({mode:z.enum(['standby','resume'])}).strict().parse(req.body);
+    try{await gateway.presence(p.id,body.mode);return {ok:true};}
+    catch{return reply.code(503).send({error:'The conversation status could not be saved.'});}
+  });
   app.post('/api/conversations/:id/turns',{config:{rateLimit:{max:30,timeWindow:60000}}},async(req,reply)=>{
     const p=z.object({id}).parse(req.params);if(!store.conversation(p.id))return reply.code(404).send({error:'Conversation not found.'});
     const turn=z.object({id,text:z.string().max(20000),attachments:z.array(id).max(4).optional()}).strict().parse(req.body);

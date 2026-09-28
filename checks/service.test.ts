@@ -10,6 +10,7 @@ import type { ServerEvent } from '../contract/types.js';
 import { Store } from '../service/store.js';
 import { signGatewayChallenge } from '../service/identity.js';
 import sharp from 'sharp';
+import { presenceLabel, presenceNotes } from '../contract/presence.js';
 import { loadConfig } from '../service/config.js';
 import * as recognition from '../service/audio.js';
 import * as fish from '../service/fish.js';
@@ -31,12 +32,13 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
   const dir=mkdtempSync(join(tmpdir(),'vc2-service-'));
   const server=new WebSocketServer({port:0});await new Promise<void>(resolve=>server.once('listening',()=>resolve()));
   const calls:{method:string;params:any}[]=[],clients=new Set<WebSocket>(),events:ServerEvent[]=[];
-  let holdSend=false,rejectAbort=false,history:any,pendingApprovals:any[]=[];const held:(()=>void)[]=[];
+  let holdSend=false,rejectAbort=false,rejectPresence=false,history:any,pendingApprovals:any[]=[];const held:(()=>void)[]=[];
   server.on('connection',socket=>{
     clients.add(socket);socket.on('close',()=>clients.delete(socket));
     socket.send(JSON.stringify({type:'event',event:'connect.challenge',payload:{nonce:'fixture',ts:Date.now()}}));
     socket.on('message',raw=>{
       const request=JSON.parse(raw.toString());calls.push({method:request.method,params:request.params});
+      if(request.method==='chat.inject'&&rejectPresence){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST',message:'Private permission diagnostic'}}));return;}
       if(request.method==='chat.send'&&request.params.attachments?.length&&imageModel?.reject){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST',message:'Private provider diagnostic must not be exposed'}}));return;}
       if('sessionId'in request.params&&typeof request.params.sessionId!=='string'){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST'}}));return;}
       if((request.method==='chat.abort'&&('sessionId'in request.params||rejectAbort))||(request.method==='chat.history'&&'sessionId'in request.params&&!request.params.messageId)){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST'}}));return;}
@@ -46,6 +48,12 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
       if(request.method==='models.list')payload={models:[imageModel?{id:imageModel.id,provider:imageModel.provider,input:imageModel.input}:{id:'verified-image-model',provider:'openai',input:['text','image']}]};
       if(request.method==='chat.history')payload=(typeof history==='function'?history(request.params):history)??{sessionId:'session-fixture',messages:[],sessionInfo:{model:imageModel?.id??'verified-image-model',modelProvider:imageModel?.provider??'openai'}};
       if(request.method==='chat.send')payload={runId:request.params.idempotencyKey,status:'started'};
+      if(request.method==='chat.inject'){
+        const messageId=`presence-${calls.length}`;
+        const message={id:messageId,role:'assistant',provider:'openclaw',model:'gateway-injected',content:[{type:'text',text:`[${request.params.label}]\n\n${request.params.message}`}],timestamp:Date.now()};
+        history.messages.push(message);payload={ok:true,messageId};
+        socket.send(JSON.stringify({type:'event',event:'chat',payload:{sessionKey:request.params.sessionKey,runId:`inject-${messageId}`,seq:0,state:'final',message}}));
+      }
       if(request.method==='chat.abort')payload={ok:true,aborted:true,runIds:[request.params.runId]};
       if(request.method==='exec.approval.list')payload=pendingApprovals;
       const reply=()=>{if(socket.readyState===1)socket.send(JSON.stringify({type:'res',id:request.id,ok:true,payload}));};
@@ -67,8 +75,51 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
   const created=await app.inject({method:'POST',url:'/api/conversations',headers,payload:{}});expect(created.statusCode).toBe(200);
   const conversation=created.json();
   const emit=(event:string,payload:any)=>{for(const socket of clients)socket.send(JSON.stringify({type:'event',event,payload}));};
-  return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
+  return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectPresence:()=>{rejectPresence=true;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
 }
+
+describe('silent presence control',()=>{
+  const context=()=>({sessionId:'existing-session',messages:[{id:'previous-message',role:'user',content:'Existing conversation',timestamp:Date.now()-1000}]});
+  it('records pause and resume in native context without any generation, delivery expectation, or audio event',async()=>{
+    const f=await fixture(false,true);f.setHistory(context());
+    const url=`/api/conversations/${f.conversation.id}`;
+    for(const mode of ['standby','resume'] as const){
+      const r=await f.app.inject({method:'POST',url:`${url}/presence`,headers:f.headers,payload:{mode}});
+      expect(r.statusCode).toBe(200);expect(r.json()).toEqual({ok:true});
+    }
+    const calls=f.calls.filter(c=>c.method==='chat.inject');expect(calls).toHaveLength(2);
+    expect(calls.map(c=>c.params)).toEqual(['standby','resume'].map(mode=>({sessionKey:`agent:northpointe:vc2:${f.conversation.id}`,agentId:'northpointe',label:presenceLabel,message:presenceNotes[mode as keyof typeof presenceNotes]})));
+    expect(f.calls.filter(c=>c.method==='chat.send')).toEqual([]);
+    expect(f.events.filter(e=>['turn','assistant','complete','activity','commentary'].includes(e.type))).toEqual([]);
+    const view=(await f.app.inject({url,headers:f.headers})).json();
+    expect(view.activeTurn).toBeUndefined();
+    expect(view.messages.map((m:any)=>m.role)).toEqual(['user','notice','notice']);
+    expect(view.messages.slice(1).map((m:any)=>m.text)).toEqual(['Standby · conversation paused','Listening resumed']);
+    expect((f.app as any).vc.store.conversationTurns(f.conversation.id)).toEqual([]);
+    // Only the next real words request a generated reply in the same session.
+    await f.app.inject({method:'POST',url:`${url}/turns`,headers:f.headers,payload:{id:'next-real-words',text:'Continue with this new question.'}});
+    expect(f.calls.filter(c=>c.method==='chat.send').map(c=>c.params)).toEqual([{sessionKey:`agent:northpointe:vc2:${f.conversation.id}`,agentId:'northpointe',sessionId:'existing-session',message:'Continue with this new question.',idempotencyKey:'next-real-words'}]);
+  });
+  it('does not wake an agent for an empty conversation',async()=>{
+    const f=await fixture();const r=await f.app.inject({method:'POST',url:`/api/conversations/${f.conversation.id}/presence`,headers:f.headers,payload:{mode:'standby'}});
+    expect(r.statusCode).toBe(200);expect(f.calls.some(c=>['chat.send','chat.inject'].includes(c.method))).toBe(false);
+  });
+  it('never falls back to generation or retries a rejected control note',async()=>{
+    const f=await fixture();f.setHistory(context());f.rejectPresence();
+    const r=await f.app.inject({method:'POST',url:`/api/conversations/${f.conversation.id}/presence`,headers:f.headers,payload:{mode:'resume'}});
+    expect(r.statusCode).toBe(503);expect(r.body).not.toContain('Private');
+    expect(f.calls.filter(c=>c.method==='chat.inject')).toHaveLength(1);
+    expect(f.calls.some(c=>c.method==='chat.send')).toBe(false);
+    expect((f.app as any).vc.store.active(f.conversation.id)).toBeUndefined();
+  });
+  it('requires authentication, CSRF, a known conversation, and a fixed mode',async()=>{
+    const f=await fixture(),url=`/api/conversations/${f.conversation.id}/presence`;
+    for(const [headers,status] of [[{origin},401],[{cookie:f.cookie,origin},403]] as const)expect((await f.app.inject({method:'POST',url,headers,payload:{mode:'standby'}})).statusCode).toBe(status);
+    for(const payload of [{mode:'speak'},{mode:'standby',message:'Arbitrary injected text'}])expect((await f.app.inject({method:'POST',url,headers:f.headers,payload})).statusCode).toBe(400);
+    expect((await f.app.inject({method:'POST',url:'/api/conversations/missing/presence',headers:f.headers,payload:{mode:'standby'}})).statusCode).toBe(404);
+    expect(f.calls.some(c=>c.method==='chat.inject')).toBe(false);
+  });
+});
 describe('owner boundary',()=>{
   it.each([true,false])('forwards images when the native catalog omits modalities, regardless of qualification (qualified=%s)',async(qualified)=>{
     const f=await fixture(false,false,'s2.1-pro',{id:'gpt-6-sol',provider:'openai',qualified:qualified?['openai/gpt-6-sol']:[]});

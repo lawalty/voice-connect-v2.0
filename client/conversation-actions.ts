@@ -9,8 +9,3 @@ export class ConversationActions {
     return result;
   }
 }
-
-export const presenceNotes = {
-  standby: '[Voice Connect: standby] Something came up unexpectedly, such as someone walking up or a phone call. I am stepping away and will return soon. Pause our conversation and wait for me. Do not speak, ask follow-up questions, or treat this as ending the conversation. This is a control notice from my orb tap, not a new task.',
-  resume: '[Voice Connect: resumed] I am back and have tapped the orb to resume our existing conversation. Standby is over. Wait for my next message; no greeting, recap, or acknowledgement is needed. Do not restart an interrupted task unless I ask.',
-} as const;

@@ -22,3 +22,4 @@
 .phase-standby .orb-coordinate,.phase-standby .orb-wake-hint,.state-standby{color:#d2d6da}
 .phase-standby .orb-wake-button:focus-visible{outline-color:#d2d6da;box-shadow:0 0 30px #d2d6da22}
 .state-standby .state-light{background:#d2d6da;box-shadow:0 0 9px #d2d6da44}
+.message-notice{align-self:center;max-width:100%;text-align:center;color:var(--muted)}.message-notice .message-bubble{background:transparent;border:0;padding:8px 12px;font-size:12px}.message-notice .message-meta{justify-content:center}

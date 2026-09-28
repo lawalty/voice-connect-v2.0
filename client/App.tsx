@@ -17,7 +17,8 @@ import { modelStatus, retireDeviceModel } from './audio/model';
 import { restoreSpeechPreferences, installationPreferences } from './speech-preferences';
 import { VoiceMessageDraft } from './voice-message-draft';
 import { mergeOlderMessages, reconcileMessages } from './history';
-import { ConversationActions, presenceNotes } from './conversation-actions';
+import { ConversationActions } from './conversation-actions';
+import type { PresenceMode } from '../contract/presence';
 
 const preferenceKey = 'vc2:speech';
 const labels: Partial<Record<VoicePhase, string>> = { starting: 'Opening your microphone', listening: 'Listening to you', hearing: 'I’m hearing you', finalizing: 'Finishing your thought', thinking: 'NorthPointe is thinking', speaking: 'NorthPointe is speaking', paused: 'Voice input paused', error: 'Voice needs attention' };
@@ -508,32 +509,25 @@ export default function App() {
       restoreSubmittedDraft(); setNotice(`${messageFor(reason)} Your draft is kept. Check the conversation before resending if delivery is uncertain.`); void refreshHistory(id, true).catch(() => {}); }
     finally { sendingRef.current = false; setSending(false); }
   }, [abort, refreshHistory, enterTextMode, updateDraft, updateHeard]);
-  function notifyPresence(mode: keyof typeof presenceNotes) {
-    const id = conversationRef.current, epoch = presenceEpoch.current, turnId = crypto.randomUUID();
+  function notifyPresence(mode: PresenceMode) {
+    const id = conversationRef.current, epoch = presenceEpoch.current;
     void conversationActions.current.run(async () => {
       if (conversationRef.current !== id || presenceEpoch.current !== epoch) return;
       // The previous send may have been awaiting its receipt when the orb was
       // tapped. Cancel only after that receipt is known, then send the notice.
       if (activeTurnRef.current || aborting.current) await abort();
       if (conversationRef.current !== id || presenceEpoch.current !== epoch) return;
-      const receipt = await api<TurnReceipt>(`/api/conversations/${encodeURIComponent(id)}/turns`, {
-        method: 'POST', body: JSON.stringify({ id: turnId, text: presenceNotes[mode] }), signal: AbortSignal.timeout(20000),
+      await api(`/api/conversations/${encodeURIComponent(id)}/presence`, {
+        method: 'POST', body: JSON.stringify({ mode }), signal: AbortSignal.timeout(20000),
       });
       if (conversationRef.current !== id || presenceEpoch.current !== epoch) return;
       ++conversationRevision.current;
-      setMessages(items => items.some(item => item.role === 'user' && item.turnId === turnId) ? items : [...items, {
-        id: turnId, role: 'user', text: presenceNotes[mode], createdAt: Date.now(), turnId, delivery: receipt.delivery,
-      }]);
-      if (!completed.current.has(turnId) && ['pending', 'accepted', 'uncertain'].includes(receipt.delivery)) {
-        setActiveTurn(receipt); activeTurnRef.current = receipt;
-      }
-      // Presence turns never own speech, even if the agent acknowledges them
-      // after the user has already resumed. Keep their delivery auditable.
-      if (!['accepted', 'complete'].includes(receipt.delivery)) throw new Error('Presence notice was not confirmed.');
+      // A context-only status has no response to await, recover, or play.
+      void refreshHistory(id, true).catch(() => {});
     }).catch(() => {
       if (conversationRef.current === id && presenceEpoch.current === epoch) setNotice(standbyRef.current
         ? 'Standby is on: microphone and playback are paused. NorthPointe could not be notified; check the connection.'
-        : 'NorthPointe could not confirm the presence update. Tell it you are back in your next message.');
+        : 'Listening is ready. The conversation status could not be saved; check the connection.');
     });
   }
   function enterStandby() {
