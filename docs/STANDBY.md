@@ -1,5 +1,13 @@
 # Orb standby
 
+**Status: complete — owner accepted on September 28, 2026.**
+
+The owner tested deployed release `593b232` and confirmed that the standby
+notice reached the agent, the agent waited, and the same conversation resumed
+on the owner's next message. Microphone and speaker were both muted during
+standby on the owner's device. This closes acceptance of the one-tap pause and
+quiet resume behavior, including the intentional-silence retry fix.
+
 Tap the active orb to enter standby. It turns light grey and shows **On standby**
 and **Tap to resume**. This replaces the speaker mute button in Orb and Messenger.
 Tap it again to reopen listening in the same conversation. Keyboard Enter and
@@ -45,12 +53,15 @@ authenticated service, and isolated Gateway fixture in desktop and Android
 layouts. Speech recognition and audio providers are controlled test doubles.
 It covers grey pixels, capture release, stale recognition, preserved drafts and
 session, ordered notices, reconnect, delayed receipts, browser/Fish playback
-cancellation, keyboard controls, and failure recovery. Physical phone/Bluetooth
-and live native context retention require acceptance on the deployed build.
+cancellation, keyboard controls, and failure recovery. Device acceptance and
+live native context retention are recorded above and in release evidence.
 
 Local verification on September 28, 2026 passed the production build,
 TypeScript check, all 293 unit tests, and 42 desktop/Android-layout browser
 checks across standby, wake, Messenger, progress commentary, and clipboard
 sharing. Desktop and Android standby screenshots were visually reviewed.
-Deployment identity and live verification are recorded separately in release evidence;
-physical phone and Bluetooth acceptance remain a distinct gate.
+The silence fix passed the build, TypeScript check, 297 unit tests, 18 focused
+desktop/Android-layout browser tests, and live agent verification. The live
+check confirmed that pause/resume generated no replies or agent activity, and
+the next actual message retained both earlier context and the presence notes.
+Deployment identity and live verification are recorded in release evidence.
