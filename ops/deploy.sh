@@ -4,6 +4,8 @@ release="${1:?Usage: deploy.sh COMMIT_SHA}"
 [[ "$release" =~ ^[0-9a-f]{40}$ ]] || { echo 'Expected a full commit SHA'; exit 1; }
 [[ "$(hostname)" == srv2003889 ]] || { echo 'Unexpected deployment host'; exit 1; }
 base=/opt/voice-connect-v2
+export VC_GATEWAY_ADMIN="${VC_GATEWAY_ADMIN:-$(cat "$base/gateway-admin" 2>/dev/null || printf false)}"
+[[ "$VC_GATEWAY_ADMIN" == true || "$VC_GATEWAY_ADMIN" == false ]] || { echo 'Invalid Gateway admin opt-in'; exit 1; }
 source_dir="$base/releases/$release"
 test -f "$source_dir/package.json"
 install -d -m 700 "$base" "$base/backups" "$base/secrets"

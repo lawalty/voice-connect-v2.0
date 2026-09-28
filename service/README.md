@@ -115,8 +115,10 @@ owner explicitly authorizes that access. The browser node remains browser-only;
 this setting does not add commands or operator scopes to the PC node.
 
 After authorization, retain the existing SQLite state, master key, and device ID.
-Set `VC_GATEWAY_ADMIN=true` in the release's deployment environment (and retain
-that setting for subsequent deployments). The Compose file passes it to the app.
+Record `true` in the root-owned `/opt/voice-connect-v2/gateway-admin` file. The
+deploy and rollback scripts retain this installation setting across releases;
+an explicit `VC_GATEWAY_ADMIN` environment variable overrides it. The Compose
+file passes the value to the app. Only exact `true` enables the grant request.
 Restart only the VC app, inspect its exact pending scope-upgrade request, and use
 the approval procedure above with `operator.admin` added to the expected scope
 set. Never approve another device or use `--latest`. The backend reconnects after
