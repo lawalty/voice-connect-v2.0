@@ -1,0 +1,6 @@
+project_id = "hermes-supabase-rag"
+
+[functions.rag-embed]
+# Service-to-service calls authenticate with an sb_secret_ key in `apikey`.
+# The function itself verifies auth: "secret" through @supabase/server.
+verify_jwt = false

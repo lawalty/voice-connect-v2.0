@@ -1,5 +1,8 @@
 .library-content { display: grid; gap: 20px; }
 .library-content > p { margin: 0; }
+.library-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.library-intro p { margin: 0; }
+.library-manage { text-decoration: none; flex: none; }
 .library-search { display: grid; gap: 14px; }
 .library-search label { display: grid; gap: 8px; }
 .library-search select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #465053; border-radius: 10px; background: #172326; color: inherit; font: inherit; }

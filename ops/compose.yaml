@@ -22,7 +22,7 @@ services:
       VC_VOSK_URL: http://127.0.0.1:27017
       VC_VOSK_TOKEN_FILE: /run/secrets/vosk-token
       VC_FISH_MODEL: ${VC_FISH_MODEL:-s2.1-pro}
-      VC_LIBRARY_URL: https://hermes-agent-n3zu.srv1391383.hstgr.cloud
+      VC_LIBRARY_URL: https://srv2003889.hstgr.cloud
       VC_LIBRARY_TOKEN_FILE: /run/secrets/library-token
       VC_BUILD: ${VC_RELEASE}
     volumes:
@@ -66,6 +66,52 @@ services:
       interval: 20s
       timeout: 5s
       retries: 3
+  library-api:
+    image: voice-connect-library:${VC_RELEASE:?Set immutable VC_RELEASE}
+    build:
+      context: ./library
+      dockerfile: Dockerfile
+    network_mode: host
+    command: [uvicorn, "app.main:create_app", --factory, --host, "127.0.0.1", --port, "18881"]
+    env_file: /opt/voice-connect-v2/library/rag.env
+    environment:
+      RAG_INLINE_WORKER: "false"
+      RAG_PUBLIC_BASE_URL: https://srv2003889.hstgr.cloud
+      RAG_VOICE_CONNECT_AUTH_URL: http://127.0.0.1:18880/api/status
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18881/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  library-worker:
+    profiles: [library-worker]
+    image: voice-connect-library:${VC_RELEASE:?Set immutable VC_RELEASE}
+    network_mode: host
+    command: [vc-library-worker]
+    env_file: /opt/voice-connect-v2/library/rag.env
+    environment:
+      RAG_INLINE_WORKER: "false"
+      RAG_PUBLIC_BASE_URL: https://srv2003889.hstgr.cloud
+      RAG_VOICE_CONNECT_AUTH_URL: http://127.0.0.1:18880/api/status
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 1536m
+    cpus: 1.0
+    depends_on:
+      library-api:
+        condition: service_healthy
   edge:
     image: caddy:2@sha256:0c994536bddb66445885237f1a5dcc1916bccea922661c76b4e9fc24061f9b52
     network_mode: host

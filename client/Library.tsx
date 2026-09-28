@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { BookOpen, Download, Search } from 'lucide-react';
+import { BookOpen, Download, ExternalLink, Search } from 'lucide-react';
 import Dialog from './Dialog';
 import { api } from './api';
 import type { LibraryDocument, LibraryGroup, LibraryLink, LibrarySearch } from '../contract/library';
@@ -29,7 +29,7 @@ export default function Library({onClose}:{onClose:()=>void}) {
   }
   const downloadButton=(id:string)=><button className="text-button library-download" disabled={Boolean(downloading)} onClick={()=>void download(id)}><Download size={15}/>{downloading===id?'Preparing…':'Get download'}</button>;
   return <Dialog title="Library" onClose={onClose} wide><div className="library-content">
-    <p className="muted">Your shared documents, ready to explore.</p>
+    <div className="library-intro"><div><p className="muted">Your shared documents, ready to explore.</p><small>Upload, organize and ingest documents with your Voice Connect sign-in.</small></div><a className="button secondary library-manage" href="/rag/" target="_blank" rel="noopener noreferrer" aria-label="Manage Library (opens in a new tab)" title="Opens in a new tab">Manage Library<ExternalLink size={16} aria-hidden="true"/></a></div>
     <form className="library-search" onSubmit={event=>void search(event)}>
       <label>Collection<select value={group} disabled={searching} onChange={event=>setGroup(event.target.value)}><option value="">All collections</option>{groups.map(item=><option key={item.id} value={item.slug}>{item.name}</option>)}</select></label>
       <label>Search your documents<input value={query} onChange={event=>setQuery(event.target.value)} placeholder="What would you like to find?" minLength={2} maxLength={4000} required/></label>

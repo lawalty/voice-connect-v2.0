@@ -7,5 +7,16 @@ srv2003889.hstgr.cloud {
 		Permissions-Policy "camera=(self), microphone=(self), geolocation=()"
 		X-Frame-Options DENY
 	}
-	reverse_proxy 127.0.0.1:18880
+	@library path /rag /rag/* /v1/* /share/documents/*
+	handle @library {
+		request_body {
+			max_size 55MB
+		}
+		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+		header Cache-Control "private, no-store"
+		reverse_proxy 127.0.0.1:18881
+	}
+	handle {
+		reverse_proxy 127.0.0.1:18880
+	}
 }

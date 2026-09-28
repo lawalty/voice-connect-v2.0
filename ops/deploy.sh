@@ -8,6 +8,9 @@ export VC_GATEWAY_ADMIN="${VC_GATEWAY_ADMIN:-$(cat "$base/gateway-admin" 2>/dev/
 [[ "$VC_GATEWAY_ADMIN" == true || "$VC_GATEWAY_ADMIN" == false ]] || { echo 'Invalid Gateway admin opt-in'; exit 1; }
 source_dir="$base/releases/$release"
 test -f "$source_dir/package.json"
+test -s "$base/library/rag.env" || { echo 'Provision the existing Library backend credentials before deploying.'; exit 1; }
+# The worker is enabled only after the explicit one-time handoff from its old host.
+if test -f "$base/library/worker-enabled"; then export COMPOSE_PROFILES=library-worker; fi
 install -d -m 700 "$base" "$base/backups" "$base/secrets"
 exec 9>"$base/deploy.lock"
 flock -n 9 || { echo 'Another VC deployment is running'; exit 1; }
@@ -48,7 +51,8 @@ print('VC directories, secrets, and state backup ready; no secret values display
 PY
 export VC_RELEASE="$release"
 cd "$source_dir"
-docker compose --project-directory "$source_dir" -f ops/compose.yaml build app vosk
+docker compose --project-directory "$source_dir" -f ops/compose.yaml build app vosk library-api
+docker compose --project-directory "$source_dir" -f ops/compose.yaml up -d --no-build --wait library-api
 if test -f "$base/current-release"; then cp "$base/current-release" "$base/previous-release"; fi
 cat ops/Caddyfile > "$base/Caddyfile"
 chmod 644 "$base/Caddyfile"
