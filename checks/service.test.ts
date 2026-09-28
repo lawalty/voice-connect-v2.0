@@ -27,7 +27,7 @@ describe('retired browser recognition policy',()=>{
     for(const url of ['/%61pi/settings','/%61pi/no-such-endpoint','/a%70i/conversations?next=/api/status'])expect((await app.inject({url})).statusCode).toBe(401);
   });
 });
-async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel='s2.1-pro') {
+async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel='s2.1-pro', imageModel?:{id:string;provider:string;input?:string[];qualified:string[]}) {
   const dir=mkdtempSync(join(tmpdir(),'vc2-service-'));
   const server=new WebSocketServer({port:0});await new Promise<void>(resolve=>server.once('listening',()=>resolve()));
   const calls:{method:string;params:any}[]=[],clients=new Set<WebSocket>(),events:ServerEvent[]=[];
@@ -42,8 +42,8 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
       let payload:any={};
       if(request.method==='connect')payload={type:'hello-ok',protocol:4,server:{version:'2026.9.6-fixture'},features:{methods:['chat.send','chat.history','chat.abort','agents.list','models.list','sessions.messages.subscribe','exec.approval.resolve','exec.approval.list','question.resolve']},snapshot:{sessionDefaults:{model:'openai/verified-image-model'}}};
       if(request.method==='agents.list')payload={defaultId:'northpointe',agents:[{id:'northpointe',name:'NorthPointe'}]};
-      if(request.method==='models.list')payload={models:[{id:'verified-image-model',provider:'openai',input:['text','image']}]};
-      if(request.method==='chat.history')payload=(typeof history==='function'?history(request.params):history)??{sessionId:'session-fixture',messages:[],sessionInfo:{model:'verified-image-model',modelProvider:'openai'}};
+      if(request.method==='models.list')payload={models:[imageModel?{id:imageModel.id,provider:imageModel.provider,input:imageModel.input}:{id:'verified-image-model',provider:'openai',input:['text','image']}]};
+      if(request.method==='chat.history')payload=(typeof history==='function'?history(request.params):history)??{sessionId:'session-fixture',messages:[],sessionInfo:{model:imageModel?.id??'verified-image-model',modelProvider:imageModel?.provider??'openai'}};
       if(request.method==='chat.send')payload={runId:request.params.idempotencyKey,status:'started'};
       if(request.method==='chat.abort')payload={ok:true,aborted:true,runIds:[request.params.runId]};
       if(request.method==='exec.approval.list')payload=pendingApprovals;
@@ -52,7 +52,7 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
     });
   });
   const address=server.address();if(typeof address==='string'||!address)throw new Error('No fixture port');
-  const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),bootstrapToken:bootstrap,origin,secureCookie:false,gatewayUrl:`ws://127.0.0.1:${address.port}`,gatewayToken:'fixture-only',gatewayAdmin,fishModel,staticDir:join(dir,'absent')},verifyDeepgramKey:async()=>({ok:true}),gatewayFactory:(cfg,store,publish)=>new Gateway(cfg,store,e=>{events.push(e);publish(e);})});
+  const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),bootstrapToken:bootstrap,origin,secureCookie:false,gatewayUrl:`ws://127.0.0.1:${address.port}`,gatewayToken:'fixture-only',gatewayAdmin,fishModel,staticDir:join(dir,'absent'),...imageModel?{qualifiedImageModels:imageModel.qualified}:{}},verifyDeepgramKey:async()=>({ok:true}),gatewayFactory:(cfg,store,publish)=>new Gateway(cfg,store,e=>{events.push(e);publish(e);})});
   cleanup.push(async()=>{await app.close();for(const s of clients)s.terminate();await new Promise<void>(resolve=>server.close(()=>resolve()));rmSync(dir,{recursive:true,force:true});});
   await expect.poll(async()=>{const r=await app.inject({method:'GET',url:'/health'});return r.json().openclaw;}).toBe(true);
   const previousBootstrapPath=process.env.VC_BOOTSTRAP_TOKEN_FILE;
@@ -69,6 +69,19 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
   return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
 }
 describe('owner boundary',()=>{
+  it.each([true,false])('requires explicit image qualification when the native catalog omits modalities (qualified=%s)',async(qualified)=>{
+    const f=await fixture(false,false,'s2.1-pro',{id:'gpt-6-sol',provider:'openai',qualified:qualified?['openai/gpt-6-sol']:[]});
+    await f.app.inject({url:`/api/conversations/${f.conversation.id}`,headers:f.headers});
+    const settings=(await f.app.inject({url:'/api/settings',headers:f.headers})).json();
+    expect(settings.harness.images).toBe(qualified);
+    const store=(f.app as any).vc.store;
+    store.saveAttachment({id:'synthetic-photo',name:'test.png',mimeType:'image/png',width:2,height:2},await sharp({create:{width:2,height:2,channels:3,background:'red'}}).png().toBuffer());
+    const sent=await f.app.inject({method:'POST',url:`/api/conversations/${f.conversation.id}/turns`,headers:f.headers,payload:{id:'image-qualification',text:'Describe this test image.',attachments:['synthetic-photo']}});
+    expect(sent.statusCode).toBe(qualified?200:409);
+    const native=f.calls.find(c=>c.method==='chat.send');
+    if(qualified)expect(native?.params.attachments[0]).toMatchObject({type:'image',mimeType:'image/png',fileName:'test.png'});
+    else expect(native).toBeUndefined();
+  });
   it('orders a failed local turn within native history and hides it outside a paged tail',async()=>{
     const f=await fixture(),store=(f.app as any).vc.store,url=`/api/conversations/${f.conversation.id}`;
     const failed=store.addTurn(f.conversation.id,{id:'old-failed',text:'Old rejected turn'}).row;

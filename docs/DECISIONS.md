@@ -108,6 +108,15 @@ catalog omitted input modalities, so the explicit VC image allowlist now include
 that exact model. This proves the native image path, not general visual accuracy
 or physical Android camera/audio behavior. The user's selected model is unchanged.
 
+GPT-6 Sol was visually qualified through the same deployed Gateway on 2026-09-28
+(run 813d0b36-012a-4ebe-8f1d-efdafe259444). It read the image-only code `739204`
+and identified a red circle and blue square. The native catalog still omitted
+input modalities. Sol was missing from VC's explicit image allowlist, so VC
+reported `harness.images=false` and disabled both camera buttons before requesting
+device permission. The deployment now includes `openai/gpt-6-sol`; no Android
+permission or model selection is changed. This verifies image input through the
+installed harness, not general visual accuracy or physical camera capture.
+
 ## Security and operational limits
 
 The owner authenticates with an Argon2id-hashed password and HttpOnly session cookie.
