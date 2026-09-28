@@ -81,11 +81,11 @@ describe('owner boundary',()=>{
     expect(tail.messages.map((m:any)=>m.id)).toEqual(['after']);expect(tail.history.before).toBeTruthy();
     expect(f.calls.some(c=>c.method==='chat.send')).toBe(false);
   });
-  it('reconciles persisted dashboard messages without claiming or speaking an unowned run',async()=>{
+  it.each(['session.message','sessions.changed'])('reconciles persisted dashboard %s without claiming or speaking an unowned run',async(event)=>{
     const f=await fixture();await f.app.inject({url:`/api/conversations/${f.conversation.id}`,headers:f.headers});
     f.events.length=0;
-    for(let n=0;n<3;n++)f.emit('session.message',{sessionKey:`agent:northpointe:vc2:${f.conversation.id}`,runId:'dashboard-owned',message:{role:'assistant',content:'Do not forward this raw payload'}});
-    f.emit('session.message',{sessionKey:'agent:northpointe:unrelated'});
+    for(let n=0;n<3;n++)f.emit(event,{sessionKey:`agent:northpointe:vc2:${f.conversation.id}`,runId:'dashboard-owned',message:{role:'assistant',content:'Do not forward this raw payload'}});
+    f.emit(event,{sessionKey:'agent:northpointe:unrelated'});
     await expect.poll(()=>f.events.filter(e=>e.type==='reconcile')).toHaveLength(1);
     expect(f.events.filter(e=>['assistant','commentary','turn'].includes(e.type))).toHaveLength(0);
     expect(f.calls.some(c=>c.method==='chat.send')).toBe(false);

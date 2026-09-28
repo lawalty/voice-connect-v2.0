@@ -80,10 +80,10 @@ export class Gateway implements GatewayPort {
       }).catch(error=>{this.disconnectedReason=error instanceof IncompatibleGateway?error.reason:error instanceof RejectedRequest&&error.code==='PAIRING_REQUIRED'?'Voice Connect requires one-time device approval on the OpenClaw server.':error instanceof RejectedRequest&&error.code==='PROTOCOL_MISMATCH'?'This OpenClaw version does not support the required Gateway protocol 4.':undefined;ws.close(1008,'Gateway unavailable');});return;
     }
     if(!this.ready)return;
-    if(frame.event==='session.message'){
+    if(frame.event==='session.message'||frame.event==='sessions.changed'){
       const payload=frame.payload??{};const key=payload.sessionKey??payload.key;
       const id=typeof key==='string'?this.store.conversationForSession(key):undefined;
-      // Durable edits and sends from the dashboard/another client do not carry
+      // Durable edits, batch commits, and sends from another client do not carry
       // one of VC's owned runs. Invalidate history without claiming or speaking it.
       if(id&&this.subscribed.has(id)&&!this.historyNotifications.has(id))this.historyNotifications.set(id,setTimeout(()=>{this.historyNotifications.delete(id);this.publish({type:'reconcile',conversationId:id});},250));
     }

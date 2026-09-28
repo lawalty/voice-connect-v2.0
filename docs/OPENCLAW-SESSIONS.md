@@ -24,7 +24,8 @@ reasoning, raw tool payloads, and ephemeral commentary remain outside Messenger.
 - Reconcile delivery before retrying an uncertain send. A failed turn does not
   imply that later messages are unavailable, or authorize replaying a request.
 - Subscribe before reading history, and re-subscribe after reconnecting.
-  Persisted `session.message` notifications also invalidate VC history when a
+  Persisted `session.message` and targeted `sessions.changed` notifications
+  (including batch commits) also invalidate VC history when a
   dashboard or another client writes the same session. They never grant VC
   ownership of a foreign run or permission to speak its old replies.
 - Use `hasMore` and `nextOffset` for pages; offsets are not durable bookmarks.
