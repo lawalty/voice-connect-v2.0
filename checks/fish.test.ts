@@ -4,6 +4,7 @@ import { decode, encode } from '@msgpack/msgpack';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bridgeFishAudio } from '../service/fish';
 import { PLAYBACK_WINDOW_BYTES, PCM_BYTES_PER_SECOND } from '../contract/audio-flow';
+import type { FishDelivery } from '../contract/fish-delivery';
 
 class Socket extends EventEmitter {
   readyState: number = WebSocket.OPEN;
@@ -20,24 +21,44 @@ class Socket extends EventEmitter {
   events() { return this.sent.filter(item => !item.binary).map(item => JSON.parse(item.data as string) as Record<string, unknown>); }
   pcm() { return Buffer.concat(this.sent.filter(item => item.binary).map(item => Buffer.from(item.data))); }
 }
-function fixture(voice = 'test_voice-123') {
+function fixture(voice = 'test_voice-123', delivery?: { model: string; cue: FishDelivery }) {
   const client = new Socket(), remote = new Socket(); remote.readyState = WebSocket.CONNECTING;
   let allowed = true;
   const factory = vi.fn((_url: string, _options: WebSocket.ClientOptions) => remote as unknown as WebSocket);
-  bridgeFishAudio(client as unknown as WebSocket, 'test-private-api-key', voice, () => allowed, factory);
+  bridgeFishAudio(client as unknown as WebSocket, 'test-private-api-key', voice, () => allowed, factory, delivery);
   return { client, remote, factory, revoke: () => { allowed = false; }, open: () => { remote.readyState = WebSocket.OPEN; remote.emit('open'); } };
 }
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe('Fish Audio authenticated streaming bridge', () => {
+  it.each([
+    ['s2.1-pro', 'restrained', '[calm, warm, measured voice]'],
+    ['s2-pro', 'soft', '[soft tone]'],
+    ['s2.1-pro-free', 'calm', '[calm]'],
+    ['s1', 'restrained', '(calm)'],
+    ['s1', 'soft', '(soft tone)'],
+    ['s2.1-pro', 'off', ''],
+    ['s1', 'off', ''],
+    ['s3-unverified', 'restrained', ''],
+  ] as const)('checks request model %s for %s cues only at the provider boundary', (model, cue, prefix) => {
+    const f = fixture('test_voice-123', { model, cue }); f.open();
+    expect(f.factory.mock.calls[0]![1].headers).toMatchObject({ model });
+    const passages = ['I am here. ', 'What is on your mind?'];
+    for (const text of passages) f.client.control({ type: 'speak', text });
+    expect(f.remote.frames().filter(frame => frame.event === 'text').map(frame => frame.text)).toEqual(passages.map(text => prefix ? `${prefix} ${text}` : text));
+    expect(f.remote.frames().filter(frame => frame.event === 'flush')).toHaveLength(2);
+    expect(JSON.stringify(f.client.events())).not.toMatch(/calm|soft tone|measured/);
+    f.client.close(); expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('uses binary configuration, streams before completion, and drains only after the final flush', () => {
     const f = fixture(); expect(f.client.events()).toEqual([]); f.open();
     expect(f.factory).toHaveBeenCalledWith('wss://api.fish.audio/v1/tts/live', expect.objectContaining({ headers: { Authorization: 'Bearer test-private-api-key', model: 's2.1-pro' }, maxPayload: 2097152 }));
     expect(f.remote.frames()[0]).toEqual({ event: 'start', request: { text: '', reference_id: 'test_voice-123', format: 'pcm', sample_rate: 24000, latency: 'balanced', chunk_length: 200 } });
     expect(f.client.events()).toEqual([{ type: 'ready', sampleRate: 24000, playbackWindowBytes: PLAYBACK_WINDOW_BYTES }]);
     f.client.control({ type: 'speak', text: 'First coherent sentence.' });
-    expect(f.remote.frames().slice(1)).toEqual([{ event: 'text', text: 'First coherent sentence.' }, { event: 'flush' }]);
+    expect(f.remote.frames().slice(1)).toEqual([{ event: 'text', text: '[calm, warm, measured voice] First coherent sentence.' }, { event: 'flush' }]);
     f.remote.provider({ event: 'audio', audio: Uint8Array.of(0x34) });
     f.remote.provider({ event: 'audio', audio: Uint8Array.of(0x12, 0xfe, 0xff) });
     expect(f.client.pcm()).toEqual(Buffer.from([0x34, 0x12, 0xfe, 0xff]));

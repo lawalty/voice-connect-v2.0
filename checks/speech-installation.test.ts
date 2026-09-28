@@ -16,6 +16,18 @@ function settings() {
   return { dir, saved: new SpeechSettings(dir) };
 }
 describe('installation speech choices', () => {
+  it('defaults old settings to restrained delivery and preserves Off across devices and older clients', () => {
+    const { saved } = settings();
+    const legacy = { version: 1, revision: 7, setupComplete: true, recognition: 'browser', output: 'fish', fishVoice: 'legacy-voice' };
+    writeFileSync(saved.path, JSON.stringify(legacy));
+    expect(saved.read()).toEqual({ ...legacy, fishDelivery: 'restrained' });
+    expect(JSON.parse(readFileSync(saved.path, 'utf8'))).toEqual(legacy);
+    const off = saved.save({ recognition: 'browser', output: 'fish', fishVoice: 'legacy-voice', fishDelivery: 'off' }, 7);
+    expect(installationPreferences({ ...DEFAULT_SPEECH, fishDelivery: 'happy' }, off).fishDelivery).toBe('off');
+    expect(saved.save({ recognition: 'browser', output: 'fish', fishVoice: 'legacy-voice' }, 8).fishDelivery).toBe('off');
+    expect(() => saved.save({ recognition: 'browser', output: 'fish', fishVoice: 'legacy-voice', fishDelivery: '[arbitrary cue]' } as never, 9)).toThrow();
+    expect(saved.read().fishDelivery).toBe('off');
+  });
   it('requires setup, persists independently of devices and rejects stale writes', () => {
     const { dir, saved } = settings();
     expect(saved.read()).toMatchObject({ setupComplete: false, recognition: 'vosk', output: 'browser' });
@@ -54,6 +66,11 @@ describe('installation speech choices', () => {
     expect((await app.inject({ method: 'PUT', url: '/api/settings/speech', headers, payload })).statusCode).toBe(409);
     const current = (await app.inject({ url: '/api/settings', headers: { cookie } })).json();
     expect(current.speech).toMatchObject({ setupComplete: true, revision: 1, recognition: 'browser' });
+    expect(current.fishModel).toBe('s2.1-pro');
+    expect(current.speech.fishDelivery).toBe('restrained');
+    const changed = await app.inject({ method: 'PUT', url: '/api/settings/speech', headers, payload: { ...payload, revision: 1, fishDelivery: 'soft' } });
+    expect(changed.statusCode).toBe(200); expect(changed.json().fishDelivery).toBe('soft');
+    expect((await app.inject({ method: 'PUT', url: '/api/settings/speech', headers, payload: { ...payload, revision: 2, fishDelivery: '(bad tag)' } })).statusCode).toBe(400);
     expect(current.vosk.state).toBe('unavailable');
   });
 });

@@ -105,6 +105,7 @@ or unrelated Docker resources.
 | `VC_MASTER_KEY_FILE` | 32-byte encryption key encoded as hexadecimal |
 | `VC_BOOTSTRAP_TOKEN_FILE` | One-time owner setup credential file |
 | `VC_BUILD` | Immutable source commit identity |
+| `VC_FISH_MODEL` | Fish synthesis model, default `s2.1-pro`; determines supported delivery-cue syntax |
 | `VC_GATEWAY_MODEL` | Default model name when Gateway omits it from handshake |
 | `VC_IMAGE_MODEL_ALLOWLIST` | Models independently verified with real image input |
 | `VC_LIBRARY_URL` | Existing shared RAG API origin |
@@ -112,6 +113,8 @@ or unrelated Docker resources.
 
 See [shared RAG library](SHARED-RAG-LIBRARY.md) for the existing Supabase schema,
 credential boundary and additive OpenClaw tools.
+
+See [Fish delivery](FISH-DELIVERY.md) for model-aware emotion presets and the TTS-only cue boundary.
 
 The current allowlist is limited to the live `openai/gpt-6-astra` model. Requalify
 camera support when changing models; a model name alone is not proof of vision.

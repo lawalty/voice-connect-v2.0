@@ -1,3 +1,4 @@
+import { DEFAULT_FISH_DELIVERY, type FishDelivery } from './fish-delivery.js';
 export type RecognizerKind = 'browser' | 'vosk' | 'deepgram';
 export type OutputKind = 'browser' | 'fish';
 export type VoicePhase = 'off' | 'starting' | 'listening' | 'hearing' | 'finalizing' | 'thinking' | 'working' | 'thinking-commentary' | 'working-commentary' | 'speaking' | 'reconnecting' | 'paused' | 'error';
@@ -6,6 +7,7 @@ export interface SpeechPreferences {
   output: OutputKind;
   browserVoice: string;
   fishVoice?: string;
+  fishDelivery?: FishDelivery;
   handsFree: boolean;
   /** Remember an explicit manual-turn choice when switching recognizers. */
   turnMode?: 'automatic' | 'manual';
@@ -17,7 +19,7 @@ export interface SpeechPreferences {
 }
 export const DEFAULT_SPEECH: SpeechPreferences = {
   recognition: 'vosk', output: 'browser', browserVoice: '', fishVoice: '', handsFree: true, turnMode: 'automatic', keepAwake: true,
-  interruptionSensitivity: 50, audioCues: true,
+  interruptionSensitivity: 50, audioCues: true, fishDelivery: DEFAULT_FISH_DELIVERY,
 };
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }
 export interface HarnessCapabilities { connected: boolean; images: boolean; cancellation: boolean; approvals: boolean; version: string; reason?: string; }
@@ -25,12 +27,13 @@ export interface AppStatus { ownerConfigured: boolean; authenticated: boolean; b
 export interface InstallationSpeech {
   version: 1; revision: number; setupComplete: boolean;
   recognition: RecognizerKind; output: OutputKind; fishVoice: string;
+  fishDelivery?: FishDelivery;
 }
 export interface HostModelStatus {
   id: string; installed: boolean; state: 'missing' | 'downloading' | 'extracting' | 'loading' | 'ready' | 'error' | 'unavailable';
   bytes: number; received: number; error?: string | null;
 }
-export interface AppSettings { deepgramConfigured: boolean; fishConfigured: boolean; harness: HarnessCapabilities; speech: InstallationSpeech; vosk: HostModelStatus; }
+export interface AppSettings { deepgramConfigured: boolean; fishConfigured: boolean; fishModel?: string; harness: HarnessCapabilities; speech: InstallationSpeech; vosk: HostModelStatus; }
 export interface Conversation { id: string; title: string; createdAt: number; updatedAt: number; }
 export interface Attachment { id: string; mimeType: string; name: string; width: number; height: number; previewUrl?: string; }
 export type Delivery = 'pending' | 'accepted' | 'complete' | 'cancelled' | 'uncertain' | 'failed';

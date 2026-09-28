@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 import { decode, encode } from '@msgpack/msgpack';
 import type { AudioEvent } from '../contract/types.js';
 import { PCM_RATE, PLAYBACK_FRAME_BYTES, PLAYBACK_WINDOW_BYTES } from '../contract/audio-flow.js';
+import { DEFAULT_FISH_DELIVERY, DEFAULT_FISH_MODEL, fishSpeechText, type FishDelivery } from '../contract/fish-delivery.js';
 
 type RemoteFactory = (url: string, options: WebSocket.ClientOptions) => WebSocket;
 const MAX_FRAME = 2 * 1024 * 1024;
@@ -11,6 +12,7 @@ const MAX_PENDING_AUDIO = MAX_FRAME * 2;
 export function bridgeFishAudio(
   client: WebSocket, key: string, voice: string, authorized: () => boolean,
   remoteFactory: RemoteFactory = (url, options) => new WebSocket(url, options),
+  delivery: { model: string; cue: FishDelivery } = { model: DEFAULT_FISH_MODEL, cue: DEFAULT_FISH_DELIVERY },
 ): void {
   let remote: WebSocket | undefined;
   let ended = false, ready = false, inputEnded = false, textChars = 0, audioBytes = 0;
@@ -120,7 +122,7 @@ export function bridgeFishAudio(
       touch();
       // The client supplies coherent chunks. Flush allows the first sentence to
       // play before the complete assistant answer exists.
-      if (upstream({ event: 'text', text: control.text }) && upstream({ event: 'flush' })) armAudioTimer();
+      if (upstream({ event: 'text', text: fishSpeechText(control.text, delivery.model, delivery.cue) }) && upstream({ event: 'flush' })) armAudioTimer();
     } else if (control.type === 'flush') {
       if (inputEnded) return;
       inputEnded = true;
@@ -133,7 +135,7 @@ export function bridgeFishAudio(
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(voice)) { fail('The Fish Audio voice ID is invalid. Update it in settings.'); return; }
   try {
     remote = remoteFactory('wss://api.fish.audio/v1/tts/live', {
-      headers: { Authorization: `Bearer ${key}`, model: 's2.1-pro' },
+      headers: { Authorization: `Bearer ${key}`, model: delivery.model },
       maxPayload: MAX_FRAME, perMessageDeflate: false, handshakeTimeout: 10000,
     });
   } catch { fail('Fish Audio is unavailable. Check your key or choose Browser speech.'); return; }

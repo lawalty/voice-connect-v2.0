@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { restoreSpeechPreferences, selectRecognizer } from '../client/speech-preferences';
 
 describe('device speech preference compatibility', () => {
+  it('restores a delivery preset, preserves Off, and defaults invalid legacy values', () => {
+    for (const fishDelivery of ['off', 'calm', 'soft', 'restrained']) expect(restoreSpeechPreferences(JSON.stringify({ fishDelivery })).fishDelivery).toBe(fishDelivery);
+    for (const fishDelivery of [null, false, '[arbitrary]', {}, []]) expect(restoreSpeechPreferences(JSON.stringify({ fishDelivery })).fishDelivery).toBe('restrained');
+    expect(restoreSpeechPreferences(null).fishDelivery).toBe('restrained');
+  });
   it('starts new or malformed devices with local automatic turns and browser output', () => {
     for (const value of [null, '{broken', 'null', '[]']) {
       expect(restoreSpeechPreferences(value)).toMatchObject({ recognition: 'vosk', handsFree: true, turnMode: 'automatic', output: 'browser', interruptionSensitivity: 50, audioCues: true });

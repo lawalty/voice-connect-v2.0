@@ -1,13 +1,15 @@
 import type { AudioEvent, SpeechOutput, SpeechPreferences } from '../../contract/types';
 import { Generation } from './dsp';
 import { PLAYBACK_WINDOW_BYTES } from '../../contract/audio-flow';
+import type { FishDelivery } from '../../contract/fish-delivery';
 
-export function audioURL(kind: 'stt' | 'tts', conversationId: string, voice?: string) {
+export function audioURL(kind: 'stt' | 'tts', conversationId: string, voice?: string, delivery?: FishDelivery) {
   const url = new URL('/api/audio', location.href);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('kind', kind); url.searchParams.set('conversationId', conversationId);
   if (voice) url.searchParams.set('voice', voice);
   if (kind === 'tts') url.searchParams.set('provider', 'fish');
+  if (kind === 'tts' && delivery) url.searchParams.set('fishDelivery', delivery);
   return url.href;
 }
 export interface PlaybackSamples { samples: Float32Array; sampleRate: number; startTime: number; }
@@ -147,12 +149,12 @@ export class PremiumOutput implements SpeechOutput {
   private playbackWindow = 0;
   private pendingBytes = 0;
   private playedBytes = 0;
-  constructor(private context: AudioContext, private conversationId: string, private voice: string, private events: OutputEvents) {}
+  constructor(private context: AudioContext, private conversationId: string, private voice: string, private events: OutputEvents, private delivery?: FishDelivery) {}
   private connect() {
     if (this.socket || this.failed) return;
     const id = this.generation.current;
     let socket: WebSocket;
-    try { socket = this.socket = new WebSocket(audioURL('tts', this.conversationId, this.voice)); }
+    try { socket = this.socket = new WebSocket(audioURL('tts', this.conversationId, this.voice, this.delivery)); }
     catch { this.fail('Premium voice connection could not start. The reply remains available as text.'); return; }
     socket.binaryType = 'arraybuffer';
     this.timeout = setTimeout(() => this.fail('Premium voice did not become ready. The reply remains available as text.'), 15000);

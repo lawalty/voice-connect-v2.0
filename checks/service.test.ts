@@ -12,6 +12,7 @@ import { signGatewayChallenge } from '../service/identity.js';
 import sharp from 'sharp';
 import { loadConfig } from '../service/config.js';
 import * as recognition from '../service/audio.js';
+import * as fish from '../service/fish.js';
 
 const cleanup:(()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const fn of cleanup.reverse())await fn();cleanup.length=0;});
@@ -26,7 +27,7 @@ describe('retired browser recognition policy',()=>{
     for(const url of ['/%61pi/settings','/%61pi/no-such-endpoint','/a%70i/conversations?next=/api/status'])expect((await app.inject({url})).statusCode).toBe(401);
   });
 });
-async function fixture(unremovableBootstrap=false, gatewayAdmin=false) {
+async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel='s2.1-pro') {
   const dir=mkdtempSync(join(tmpdir(),'vc2-service-'));
   const server=new WebSocketServer({port:0});await new Promise<void>(resolve=>server.once('listening',()=>resolve()));
   const calls:{method:string;params:any}[]=[],clients=new Set<WebSocket>(),events:ServerEvent[]=[];
@@ -51,7 +52,7 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false) {
     });
   });
   const address=server.address();if(typeof address==='string'||!address)throw new Error('No fixture port');
-  const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),bootstrapToken:bootstrap,origin,secureCookie:false,gatewayUrl:`ws://127.0.0.1:${address.port}`,gatewayToken:'fixture-only',gatewayAdmin,staticDir:join(dir,'absent')},verifyDeepgramKey:async()=>({ok:true}),gatewayFactory:(cfg,store,publish)=>new Gateway(cfg,store,e=>{events.push(e);publish(e);})});
+  const app=await buildApp({config:{stateDir:dir,masterKey:randomBytes(32),bootstrapToken:bootstrap,origin,secureCookie:false,gatewayUrl:`ws://127.0.0.1:${address.port}`,gatewayToken:'fixture-only',gatewayAdmin,fishModel,staticDir:join(dir,'absent')},verifyDeepgramKey:async()=>({ok:true}),gatewayFactory:(cfg,store,publish)=>new Gateway(cfg,store,e=>{events.push(e);publish(e);})});
   cleanup.push(async()=>{await app.close();for(const s of clients)s.terminate();await new Promise<void>(resolve=>server.close(()=>resolve()));rmSync(dir,{recursive:true,force:true});});
   await expect.poll(async()=>{const r=await app.inject({method:'GET',url:'/health'});return r.json().openclaw;}).toBe(true);
   const previousBootstrapPath=process.env.VC_BOOTSTRAP_TOKEN_FILE;
@@ -184,6 +185,28 @@ describe('owner boundary',()=>{
     expect(await attempt('kind=stt&provider=fish&voice=my-voice')).toContain('speech output only');
     expect(await attempt('kind=tts&provider=fish')).toContain('voice ID');
     expect(await attempt('kind=tts&provider=fish&voice=https%3A%2F%2Fother.example')).toContain('supported speech provider');
+  });
+  it('uses the server model and saved delivery while allowing a validated unsaved speaker preview',async()=>{
+    const f=await fixture(false,false,'s1'),address=await f.app.listen({host:'127.0.0.1',port:0});
+    await f.app.inject({method:'PUT',url:'/api/settings/fish',headers:f.headers,payload:{apiKey:'synthetic-fish-key-not-a-secret'}});
+    const saved=await f.app.inject({method:'PUT',url:'/api/settings/speech',headers:f.headers,payload:{revision:0,recognition:'browser',output:'fish',fishVoice:'fixture-voice',fishDelivery:'soft'}});
+    expect(saved.statusCode).toBe(200);
+    expect((await f.app.inject({url:'/api/settings',headers:f.headers})).json().fishModel).toBe('s1');
+    const bridge=vi.spyOn(fish,'bridgeFishAudio').mockImplementation(socket=>{socket.send(JSON.stringify({type:'ready',sampleRate:24000}));socket.close();});
+    const attempt=(query:string)=>new Promise<{type:string}>((resolve,reject)=>{
+      const socket=new WebSocket(`${address.replace('http:','ws:')}/api/audio?conversationId=${f.conversation.id}&${query}`,{headers:{origin,cookie:f.cookie}});
+      socket.once('error',reject);socket.once('message',message=>{resolve(JSON.parse(message.toString()));socket.close();});
+    });
+    try {
+      const base='kind=tts&provider=fish&voice=fixture-voice';
+      expect((await attempt(base)).type).toBe('ready');
+      expect(bridge.mock.calls.at(-1)?.[5]).toEqual({model:'s1',cue:'soft'});
+      expect((await attempt(base+'&fishDelivery=off')).type).toBe('ready');
+      expect(bridge.mock.calls.at(-1)?.[5]).toEqual({model:'s1',cue:'off'});
+      for(const query of [base+'&fishDelivery=arbitrary',base+'&model=s2-pro','kind=stt&provider=vosk&fishDelivery=calm'])expect((await attempt(query)).type).toBe('error');
+      expect(bridge).toHaveBeenCalledTimes(2);
+      expect((await f.app.inject({url:'/api/settings/speech',headers:f.headers})).json().fishDelivery).toBe('soft');
+    } finally {bridge.mockRestore();}
   });
   it('rejects legacy Deepgram output before the upstream bridge while keeping recognition available',async()=>{
     const f=await fixture(),address=await f.app.listen({host:'127.0.0.1',port:0});

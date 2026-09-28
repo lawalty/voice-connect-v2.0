@@ -1,4 +1,5 @@
 import { DEFAULT_SPEECH, type InstallationSpeech, type RecognizerKind, type SpeechPreferences } from '../contract/types';
+import { DEFAULT_FISH_DELIVERY, FISH_DELIVERIES } from '../contract/fish-delivery';
 
 export function restoreSpeechPreferences(raw: string | null): SpeechPreferences {
   try {
@@ -16,6 +17,7 @@ export function restoreSpeechPreferences(raw: string | null): SpeechPreferences 
       output: ['browser', 'fish'].includes(saved.output) ? saved.output : DEFAULT_SPEECH.output,
       browserVoice: typeof saved.browserVoice === 'string' ? saved.browserVoice : DEFAULT_SPEECH.browserVoice,
       fishVoice: typeof saved.fishVoice === 'string' ? saved.fishVoice : '',
+      fishDelivery: FISH_DELIVERIES.includes(saved.fishDelivery) ? saved.fishDelivery : DEFAULT_FISH_DELIVERY,
       keepAwake: typeof saved.keepAwake === 'boolean' ? saved.keepAwake : DEFAULT_SPEECH.keepAwake,
       interruptionSensitivity: typeof saved.interruptionSensitivity === 'number' && Number.isFinite(saved.interruptionSensitivity)
         ? Math.min(100, Math.max(0, saved.interruptionSensitivity)) : DEFAULT_SPEECH.interruptionSensitivity,
@@ -32,5 +34,5 @@ export function selectRecognizer(prefs: SpeechPreferences, recognition: Recogniz
 
 /** Installation choices override stale device selections, never the other way around. */
 export function installationPreferences(device: SpeechPreferences, saved: InstallationSpeech): SpeechPreferences {
-  return selectRecognizer({ ...device, output: saved.output, fishVoice: saved.fishVoice }, saved.recognition);
+  return selectRecognizer({ ...device, output: saved.output, fishVoice: saved.fishVoice, fishDelivery: saved.fishDelivery ?? DEFAULT_FISH_DELIVERY }, saved.recognition);
 }

@@ -17,6 +17,7 @@ import { Store, digest } from './store.js';
 import { Gateway, type GatewayPort } from './gateway.js';
 import { bridgeRecognition, deepgramVerificationMessage, verifyDeepgramKey, type DeepgramVerification } from './audio.js';
 import { bridgeFishAudio } from './fish.js';
+import { DEFAULT_FISH_DELIVERY, FISH_DELIVERIES } from '../contract/fish-delivery.js';
 import { normalizeImage } from './images.js';
 import { LibraryClient } from './library.js';
 import { registerLibraryRoutes } from './library-routes.js';
@@ -109,7 +110,7 @@ export async function buildApp(options:AppOptions={}) {
     for(const [s,b] of sockets)if(!store.session(b.token))s.close(1008,'Sign in again');return status(req);
   });
   app.post('/api/auth/logout',async(req,reply)=>{const token=req.cookies.vc_session??'';store.logout(token);closeToken(token);reply.clearCookie('vc_session',{path:'/'});return {ok:true};});
-  app.get('/api/settings',async():Promise<AppSettings>=>({deepgramConfigured:Boolean(store.get('deepgram')),fishConfigured:Boolean(store.get('fish')),harness:gateway.capabilities(),speech:speechSettings.read(),vosk:await vosk.status()}));
+  app.get('/api/settings',async():Promise<AppSettings>=>({deepgramConfigured:Boolean(store.get('deepgram')),fishConfigured:Boolean(store.get('fish')),fishModel:cfg.fishModel,harness:gateway.capabilities(),speech:speechSettings.read(),vosk:await vosk.status()}));
   app.get('/api/settings/speech',async()=>speechSettings.read());
   app.get('/api/settings/vosk',async()=>vosk.status());
   app.post('/api/settings/vosk',async(_req,reply)=>{try{return await vosk.request('/install','POST');}catch{return reply.code(503).send({error:'The host speech service is unavailable. Check its installation.'});}});
@@ -192,9 +193,10 @@ export async function buildApp(options:AppOptions={}) {
   });
   app.get('/api/audio',{websocket:true},(socket,req)=>{
     const conversationId=bindSocket(socket,req);if(!conversationId)return;
-    const q=z.object({kind:z.enum(['stt','tts']),provider:z.enum(['deepgram','fish','vosk']).default('deepgram'),voice:id.optional(),conversationId:id}).strict().safeParse(req.query);
+    const q=z.object({kind:z.enum(['stt','tts']),provider:z.enum(['deepgram','fish','vosk']).default('deepgram'),voice:id.optional(),fishDelivery:z.enum(FISH_DELIVERIES).optional(),conversationId:id}).strict().safeParse(req.query);
     const unavailable=(message:string)=>{socket.send(JSON.stringify({type:'error',message}));socket.close(1008,'Speech unavailable');};
     if(!q.success){unavailable('Choose a supported speech provider and voice in Settings.');return;}
+    if(q.data.fishDelivery && (q.data.provider!=='fish'||q.data.kind!=='tts')){unavailable('Delivery cues are available for Fish Audio speech output only.');return;}
     if(q.data.provider==='vosk'){
       if(q.data.kind!=='stt'||q.data.voice){unavailable('Vosk supports recognition only.');return;}
       if(!cfg.voskToken){unavailable('The host Vosk service is not configured.');return;}
@@ -204,7 +206,7 @@ export async function buildApp(options:AppOptions={}) {
       if(q.data.kind!=='tts'||!q.data.voice){unavailable('Fish Audio needs a voice ID and supports speech output only.');return;}
       const key=store.fishKey();if(!key){unavailable('Save your Fish Audio API key in Settings before testing or using this voice.');return;}
       sockets.get(socket)!.provider='fish';
-      bridgeFishAudio(socket,key,q.data.voice,()=>Boolean(session(req)));return;
+      bridgeFishAudio(socket,key,q.data.voice,()=>Boolean(session(req)),undefined,{model:cfg.fishModel,cue:q.data.fishDelivery??speechSettings.read().fishDelivery??DEFAULT_FISH_DELIVERY});return;
     }
     if(q.data.kind!=='stt'){unavailable('Deepgram is used for recognition only. Choose Fish Audio or Device voices for speech output.');return;}
     if(q.data.voice){unavailable('Deepgram recognition does not use an output voice.');return;}

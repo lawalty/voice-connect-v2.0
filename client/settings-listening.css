@@ -37,3 +37,7 @@
   font-size: 10px;
 }
 .interruption-setting .setting-detail { margin-top: 11px; }
+.fish-voice-row { margin-top: 16px; align-items: start; }
+.fish-delivery-control { min-width: 0; }
+.fish-delivery-control select { width: 100%; }
+.fish-delivery-control code { color: #b4d6c5; overflow-wrap: anywhere; }

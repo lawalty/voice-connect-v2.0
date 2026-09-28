@@ -53,7 +53,7 @@ export default function SpeechOutputCheck({ preferences, voices, conversationId,
     return release;
     // Inventory updates must not erase a listening confirmation for the completed test.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preferences.output, preferences.browserVoice, preferences.fishVoice, release, update]);
+  }, [preferences.output, preferences.browserVoice, preferences.fishVoice, preferences.fishDelivery, release, update]);
 
   function stop() { release(); update(previous => ({ ...previous, phase: previous.phase === 'error' ? 'error' : 'stopped' })); }
   function start() {
@@ -71,7 +71,7 @@ export default function SpeechOutputCheck({ preferences, voices, conversationId,
       else {
         const audio = context.current = new AudioContext({ latencyHint: 'interactive' });
         void audio.resume().catch(() => events.error('The browser could not activate speaker output. Tap Test speaker to retry.'));
-        output.current = new PremiumOutput(audio, conversationId, fishVoice, events);
+        output.current = new PremiumOutput(audio, conversationId, fishVoice, events, preferences.fishDelivery);
       }
       // Stay in the original tap event so Android can grant playback activation.
       output.current.enqueue(SAMPLE); output.current.finish();

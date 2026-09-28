@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEve
 import { ArrowDown, ArrowRight, AudioLines, BookOpen, Camera as CameraIcon, Clipboard as ClipboardIcon, Check, ChevronDown, CircleStop, Headphones, LockKeyhole, MessageSquare, Mic, Plus, Send, Settings2, Square, Volume2, VolumeX, WifiOff, X } from 'lucide-react';
 import { type AcousticSignal, type AppSettings, type InstallationSpeech, type AppStatus, type Attachment, type Conversation, type ConversationView, type Message, type ServerEvent, type SpeechPreferences, type TurnReceipt, type VoicePhase } from '../contract/types';
 import { api, ApiError, setCsrf } from './api';
+import { DEFAULT_FISH_DELIVERY } from '../contract/fish-delivery';
 import { VoiceEngine } from './audio/engine';
 import Orb from './Orb';
 import Settings from './Settings';
@@ -547,8 +548,8 @@ export default function App() {
   function saveDevicePreferences(value: SpeechPreferences) { setPreferences(value); try { localStorage.setItem(preferenceKey, JSON.stringify(value)); } catch {} }
   async function savePreferences(value: SpeechPreferences) {
     if (!settings) throw new Error('Wait for installation settings to load.');
-    if (settings.speech.setupComplete && value.recognition === settings.speech.recognition && value.output === settings.speech.output && (value.fishVoice || '') === settings.speech.fishVoice) { saveDevicePreferences(value); return; }
-    const saved = await api<InstallationSpeech>('/api/settings/speech', { method: 'PUT', body: JSON.stringify({ revision: settings.speech.revision, recognition: value.recognition, output: value.output, fishVoice: value.fishVoice || '' }) });
+    if (settings.speech.setupComplete && value.recognition === settings.speech.recognition && value.output === settings.speech.output && (value.fishVoice || '') === settings.speech.fishVoice && (value.fishDelivery ?? DEFAULT_FISH_DELIVERY) === (settings.speech.fishDelivery ?? DEFAULT_FISH_DELIVERY)) { saveDevicePreferences(value); return; }
+    const saved = await api<InstallationSpeech>('/api/settings/speech', { method: 'PUT', body: JSON.stringify({ revision: settings.speech.revision, recognition: value.recognition, output: value.output, fishVoice: value.fishVoice || '', fishDelivery: value.fishDelivery ?? DEFAULT_FISH_DELIVERY }) });
     setSettings(previous => previous ? { ...previous, speech: saved } : previous);
     saveDevicePreferences(installationPreferences(value, saved));
   }

@@ -20,7 +20,7 @@ interface OutputEvents { started(): void; ended(): void; error(message: string):
 class FakeOutput {
   words: string[] = []; finished = false;
   readonly events: OutputEvents;
-  constructor(_preferences: SpeechPreferences | AudioContext, eventsOrConversation: OutputEvents | string, _voice?: string, premiumEvents?: OutputEvents) {
+  constructor(_preferences: SpeechPreferences | AudioContext, eventsOrConversation: OutputEvents | string, _voice?: string, premiumEvents?: OutputEvents, readonly delivery?: string) {
     this.events = typeof eventsOrConversation === 'string' ? premiumEvents! : eventsOrConversation; fixture.outputs.push(this);
   }
   enqueue(text: string) { this.words.push(text); this.events.started(); }
@@ -117,7 +117,7 @@ afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); 
 
 describe('automatic continuous VoiceEngine orchestration', () => {
   it.each(['browser', 'fish'] as const)('speaks ephemeral commentary with %s, returns to work, and gives the answer priority', async output => {
-    const run = setup(); await run.engine.start({ ...preferences, output }, 'commentary');
+    const run = setup(); await run.engine.start({ ...preferences, output, fishDelivery: 'soft' }, 'commentary');
     run.engine.awaitReply();
     run.engine.speakCommentary('first', 'I will check'); expect(fixture.outputs).toHaveLength(0);
     run.engine.speakCommentary('first', 'I will check the configuration.');
@@ -132,6 +132,7 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     run.engine.speak('The configuration is correct.');
     expect(fixture.outputs[1]!.cancel).toHaveBeenCalledOnce();
     expect(fixture.outputs[2]!.words).toEqual(['The configuration is correct.']);
+    expect(fixture.outputs.map(item => item.delivery)).toEqual(output === 'fish' ? ['soft', 'soft', 'soft'] : [undefined, undefined, undefined]);
     fixture.outputs[1]!.events.started(); fixture.outputs[1]!.end();
     expect(run.phases.at(-1)).toBe('speaking');
     run.engine.speakCommentary('late', 'This must stay silent.', true); expect(fixture.outputs).toHaveLength(3);

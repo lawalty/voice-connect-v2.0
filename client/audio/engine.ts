@@ -587,7 +587,7 @@ export class VoiceEngine {
         error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); if (this.outputKind === 'commentary') this.stopCommentary(); } },
       };
       this.output = this.preferences!.output !== 'browser'
-        ? new PremiumOutput(this.warmContext(), this.conversationId, this.preferences!.fishVoice || '', events)
+        ? new PremiumOutput(this.warmContext(), this.conversationId, this.preferences!.fishVoice || '', events, this.preferences!.fishDelivery)
         : new BrowserOutput(this.preferences!, events);
     }
     this.trace.record('output-request', { provider: this.preferences?.output });
