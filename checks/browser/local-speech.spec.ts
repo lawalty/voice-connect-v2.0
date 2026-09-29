@@ -1,3 +1,4 @@
+import { installationFixture } from './installation-fixture';
 import {test,expect,type Page,type BrowserContext} from '@playwright/test';
 import { waitForFixtureBudget } from './fixture-budget';
 
@@ -17,6 +18,7 @@ async function enterPrivateSpace(page:Page,context:BrowserContext){
 }
 
 async function useNativeSpeechFixture(page:Page){
+  await installationFixture(page, { showTranscriptions: true });
   await page.addInitScript(()=>{
     // This fixture deliberately exercises the supported browser fallback, not the new-device default.
     localStorage.setItem('vc2:speech',JSON.stringify({recognition:'browser',output:'browser',handsFree:false}));

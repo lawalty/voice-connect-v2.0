@@ -16,10 +16,12 @@ export interface SpeechPreferences {
   interruptionSensitivity?: number;
   /** Brief sounds when ready for a turn and when that listening window closes. */
   audioCues?: boolean;
+  /** Installation-wide visibility of live transcription over the orb. */
+  showTranscriptions?: boolean;
 }
 export const DEFAULT_SPEECH: SpeechPreferences = {
   recognition: 'vosk', output: 'browser', browserVoice: '', fishVoice: '', handsFree: true, turnMode: 'automatic', keepAwake: true,
-  interruptionSensitivity: 50, audioCues: true, fishDelivery: DEFAULT_FISH_DELIVERY,
+  interruptionSensitivity: 50, audioCues: true, fishDelivery: DEFAULT_FISH_DELIVERY, showTranscriptions: false,
 };
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }
 export interface HarnessCapabilities { connected: boolean; images: boolean; cancellation: boolean; approvals: boolean; version: string; reason?: string; }
@@ -29,6 +31,7 @@ export interface InstallationSpeech {
   version: 1; revision: number; setupComplete: boolean;
   recognition: RecognizerKind; output: OutputKind; fishVoice: string;
   fishDelivery?: FishDelivery;
+  showTranscriptions?: boolean;
 }
 export interface HostModelStatus {
   id: string; installed: boolean; state: 'missing' | 'downloading' | 'extracting' | 'loading' | 'ready' | 'error' | 'unavailable';
