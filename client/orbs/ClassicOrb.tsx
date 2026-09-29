@@ -1,3 +1,4 @@
+import { useAgentName } from '../agent-name';
 import { useEffect, useRef } from 'react';
 import type { AcousticSignal, VoicePhase } from '../../contract/types';
 import { OrbAcousticMotion, orbMotionShape } from '../orb-acoustics';
@@ -21,6 +22,7 @@ export interface OrbProps {
 }
 
 export default function Orb({ phase, signal, asleep = false, waking = false, onWake, wakeDisabled = false, onStandby, onResume }: OrbProps) {
+  const agentName = useAgentName();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const latest = useRef({ phase, signal, asleep, waking });
   const repaint = useRef<() => void>(() => {});
@@ -210,7 +212,7 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
     <span className="orb-orbit orbit-one" aria-hidden="true" /><span className="orb-orbit orbit-two" aria-hidden="true" />
     <canvas ref={canvasRef} className="orb-canvas" aria-hidden="true" />
     <span className="orb-coordinate coordinate-left" aria-hidden="true">N</span><span className="orb-coordinate coordinate-right" aria-hidden="true">P</span>
-    {action && <button type="button" className="orb-wake-button" disabled={disabled} aria-label={standby ? 'Resume conversation' : onStandby ? 'Enter standby mode' : 'Wake NorthPointe'} aria-pressed={onStandby || standby ? standby : undefined} onClick={action}>
+    {action && <button type="button" className="orb-wake-button" disabled={disabled} aria-label={standby ? 'Resume conversation' : onStandby ? 'Enter standby mode' : `Wake ${agentName}`} aria-pressed={onStandby || standby ? standby : undefined} onClick={action}>
       {!disabled && <span className="orb-wake-hint" aria-hidden="true">{standby ? 'Tap to resume' : onStandby ? 'Tap for standby' : asleep ? 'Tap to wake' : ''}</span>}
     </button>}
   </div>;

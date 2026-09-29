@@ -28,11 +28,12 @@ describe('retired browser recognition policy',()=>{
     for(const url of ['/%61pi/settings','/%61pi/no-such-endpoint','/a%70i/conversations?next=/api/status'])expect((await app.inject({url})).statusCode).toBe(401);
   });
 });
-async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel='s2.1-pro', imageModel?:{id:string;provider:string;input?:string[];qualified:string[];reject?:boolean}) {
+async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel='s2.1-pro', imageModel?:{id:string;provider:string;input?:string[];qualified:string[];reject?:boolean}, nativeIdentity=true) {
   const dir=mkdtempSync(join(tmpdir(),'vc2-service-'));
   const server=new WebSocketServer({port:0});await new Promise<void>(resolve=>server.once('listening',()=>resolve()));
   const calls:{method:string;params:any}[]=[],clients=new Set<WebSocket>(),events:ServerEvent[]=[];
   let holdSend=false,rejectAbort=false,rejectPresence=false,history:any,pendingApprovals:any[]=[];const held:(()=>void)[]=[];
+  const agentNames:Record<string,string>={northpointe:'NorthPointe',researcher:'Research Agent'};
   server.on('connection',socket=>{
     clients.add(socket);socket.on('close',()=>clients.delete(socket));
     socket.send(JSON.stringify({type:'event',event:'connect.challenge',payload:{nonce:'fixture',ts:Date.now()}}));
@@ -43,8 +44,9 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
       if('sessionId'in request.params&&typeof request.params.sessionId!=='string'){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST'}}));return;}
       if((request.method==='chat.abort'&&('sessionId'in request.params||rejectAbort))||(request.method==='chat.history'&&'sessionId'in request.params&&!request.params.messageId)){socket.send(JSON.stringify({type:'res',id:request.id,ok:false,error:{code:'INVALID_REQUEST'}}));return;}
       let payload:any={};
-      if(request.method==='connect')payload={type:'hello-ok',protocol:4,server:{version:'2026.9.6-fixture'},features:{methods:['chat.send','chat.history','chat.abort','agents.list','models.list','sessions.messages.subscribe','exec.approval.resolve','exec.approval.list','question.resolve']},snapshot:{sessionDefaults:{model:'openai/verified-image-model'}}};
-      if(request.method==='agents.list')payload={defaultId:'northpointe',agents:[{id:'northpointe',name:'NorthPointe'}]};
+      if(request.method==='connect')payload={type:'hello-ok',protocol:4,server:{version:'2026.9.6-fixture'},features:{methods:['chat.send','chat.history','chat.abort','agents.list',...nativeIdentity?['agent.identity.get']:[],'models.list','sessions.messages.subscribe','exec.approval.resolve','exec.approval.list','question.resolve']},snapshot:{sessionDefaults:{model:'openai/verified-image-model'}}};
+      if(request.method==='agents.list')payload={defaultId:'northpointe',agents:Object.entries(agentNames).map(([id,name])=>({id,name:'Catalog label',identity:{name}}))};
+      if(request.method==='agent.identity.get')payload={agentId:request.params.agentId,name:agentNames[request.params.agentId],avatar:'private-workspace-path'};
       if(request.method==='models.list')payload={models:[imageModel?{id:imageModel.id,provider:imageModel.provider,input:imageModel.input}:{id:'verified-image-model',provider:'openai',input:['text','image']}]};
       if(request.method==='chat.history')payload=(typeof history==='function'?history(request.params):history)??{sessionId:'session-fixture',messages:[],sessionInfo:{model:imageModel?.id??'verified-image-model',modelProvider:imageModel?.provider??'openai'}};
       if(request.method==='chat.send')payload={runId:request.params.idempotencyKey,status:'started'};
@@ -75,8 +77,28 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
   const created=await app.inject({method:'POST',url:'/api/conversations',headers,payload:{}});expect(created.statusCode).toBe(200);
   const conversation=created.json();
   const emit=(event:string,payload:any)=>{for(const socket of clients)socket.send(JSON.stringify({type:'event',event,payload}));};
-  return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectPresence:()=>{rejectPresence=true;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
+  return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setAgentName:(name:string,id='northpointe')=>{agentNames[id]=name;},setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectPresence:()=>{rejectPresence=true;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
 }
+
+describe('agent display identity',()=>{
+  it.each([true,false])('follows native renames without changing conversation routing (identity method=%s)',async(nativeIdentity)=>{
+    const f=await fixture(false,false,'s2.1-pro',undefined,nativeIdentity);
+    const store=(f.app as any).vc.store,url=`/api/conversations/${f.conversation.id}/agent`;
+    const before=store.mapping(f.conversation.id);
+    expect((await f.app.inject({url})).statusCode).toBe(401);
+    expect((await f.app.inject({url,headers:f.headers})).json()).toEqual({id:'northpointe',name:'NorthPointe'});
+    f.setAgentName('Digital Lloyd');
+    expect((await f.app.inject({url,headers:f.headers})).json()).toEqual({id:'northpointe',name:'Digital Lloyd'});
+    // A new default agent must not relabel an existing conversation.
+    store.set('default-agent','researcher');
+    const second=store.createConversation('Another agent');
+    expect((await f.app.inject({url:`/api/conversations/${second.id}/agent`,headers:f.headers})).json()).toEqual({id:'researcher',name:'Research Agent'});
+    expect((await f.app.inject({url,headers:f.headers})).json()).toEqual({id:'northpointe',name:'Digital Lloyd'});
+    expect(store.mapping(f.conversation.id)).toEqual(before);
+    expect(f.calls.some(c=>['chat.send','sessions.patch','agents.update'].includes(c.method))).toBe(false);
+    expect((await f.app.inject({url:'/api/conversations/unknown-conversation/agent',headers:f.headers})).statusCode).toBe(404);
+  });
+});
 
 describe('silent presence control',()=>{
   const context=()=>({sessionId:'existing-session',messages:[{id:'previous-message',role:'user',content:'Existing conversation',timestamp:Date.now()-1000}]});

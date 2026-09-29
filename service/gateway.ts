@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { randomUUID } from 'node:crypto';
-import type { ConversationView, HarnessAdapter, HarnessCapabilities, HistoryOptions, Message, ServerEvent, TurnRequest, TurnReceipt } from '../contract/types.js';
+import type { AgentIdentity, ConversationView, HarnessAdapter, HarnessCapabilities, HistoryOptions, Message, ServerEvent, TurnRequest, TurnReceipt } from '../contract/types.js';
 import type { ServiceConfig } from './config.js';
 import { Store } from './store.js';
 import { signGatewayChallenge } from './identity.js';
@@ -35,6 +35,20 @@ export class Gateway implements GatewayPort {
   }
   capabilities():HarnessCapabilities {return {connected:this.ready,images:this.images,cancellation:this.methods.has('chat.abort'),approvals:this.ready&&this.approvals,version:this.version,...!this.ready?{reason:this.disconnectedReason??'OpenClaw is reconnecting. Your conversation is preserved.'}:{}};}
   diagnostics():TimingSample[]{return this.timings.snapshot();}
+  async identity(conversationId:string):Promise<AgentIdentity> {
+    // Resolve the agent bound to this conversation, not today's default agent.
+    // Reading its presentation name must never alter session routing or history.
+    const id=this.target(conversationId).agentId;
+    const name=(value:unknown)=>typeof value==='string'?value.replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,160):'';
+    if(this.methods.has('agent.identity.get')){
+      const identity=await this.request('agent.identity.get',{agentId:id});
+      const display=name(identity.name);
+      if(display&&(!identity.agentId||identity.agentId===id))return {id,name:display};
+    }
+    const catalog=await this.request('agents.list',{});
+    const agent=Array.isArray(catalog.agents)?catalog.agents.find((entry:Json)=>entry.id===id):undefined;
+    return {id,name:name(agent?.identity?.name)||name(agent?.name)||'Assistant'};
+  }
   private connect():void {
     if(this.stopped)return;
     const ws=new WebSocket(this.cfg.gatewayUrl,{maxPayload:25*1024*1024,perMessageDeflate:false,handshakeTimeout:10000});this.socket=ws;

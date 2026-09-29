@@ -19,6 +19,7 @@
 
 /* Standby remains visibly distinct from sleeping, reconnecting, and listening. */
 .phase-standby .orb-orbit{border-color:#d2d6da26}
+.conversation-title{max-width:100%}.conversation-title span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.conversation-title svg{flex-shrink:0}
 .phase-standby .orb-coordinate,.phase-standby .orb-wake-hint,.state-standby{color:#d2d6da}
 .phase-standby .orb-wake-button:focus-visible{outline-color:#d2d6da;box-shadow:0 0 30px #d2d6da22}
 .state-standby .state-light{background:#d2d6da;box-shadow:0 0 9px #d2d6da44}

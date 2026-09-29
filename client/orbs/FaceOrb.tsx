@@ -1,3 +1,4 @@
+import { useAgentName } from '../agent-name';
 import { useEffect, useRef, useState } from 'react';
 import ClassicOrb, { type OrbProps } from './ClassicOrb';
 import type { OrbPack } from './packs';
@@ -7,6 +8,7 @@ import { SILENT_MOUTH, type MouthPose } from './speech';
 
 export interface FaceOrbProps extends OrbProps { pack:OrbPack; motion:number; phaseColors:boolean; getSpeech?:()=>MouthPose; }
 export default function FaceOrb(props:FaceOrbProps){
+  const agentName = useAgentName();
   const {pack,motion:strength,phaseColors,phase,asleep=false,waking=false,onWake,wakeDisabled=false,onStandby,onResume}=props;
   const canvas=useRef<HTMLCanvasElement>(null),latest=useRef(props),repaint=useRef(()=>{});
   const [failed,setFailed]=useState(false),[ready,setReady]=useState(false);
@@ -47,7 +49,7 @@ export default function FaceOrb(props:FaceOrbProps){
   return <div className={`orb-stage orb-character phase-${phase}${asleep?' orb-sleeping':''}`} data-presence={standby?'standby':waking?'waking':asleep?'sleeping':'awake'} data-orb-pack={pack.id} data-face-ready={ready} data-phase-colors={phaseColors}>
     <canvas ref={canvas} className="orb-canvas" aria-hidden="true"/>
     {!ready&&<span className="orb-face-loading" role="status">Loading your orb…</span>}
-    {action&&<button type="button" className="orb-wake-button" disabled={disabled} aria-label={standby?'Resume conversation':onStandby?'Enter standby mode':'Wake NorthPointe'} aria-pressed={onStandby||standby?standby:undefined} onClick={action}>
+    {action&&<button type="button" className="orb-wake-button" disabled={disabled} aria-label={standby?'Resume conversation':onStandby?'Enter standby mode':`Wake ${agentName}`} aria-pressed={onStandby||standby?standby:undefined} onClick={action}>
       {!disabled&&<span className="orb-wake-hint" aria-hidden="true">{standby?'Tap to resume':onStandby?'Tap for standby':asleep?'Tap to wake':''}</span>}
     </button>}
   </div>;
