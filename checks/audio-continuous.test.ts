@@ -384,6 +384,38 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     expect(run.callbacks.onError).not.toHaveBeenCalled();
   });
 
+  it.each(['continue', 'cancel', 'restart'])('waits for retired Android audio resources before capture, including %s during close', async action => {
+    Object.assign(navigator, { userAgent: 'Mozilla/5.0 (Linux; Android 16)' });
+    let finishClose!: () => void;
+    const closing = new Promise<void>(resolve => { finishClose = resolve; });
+    const contexts: DelayedContext[] = [];
+    class DelayedContext {
+      state = 'running'; sampleRate = 48000; destination = {}; audioWorklet = { addModule: async () => {} };
+      onstatechange: (() => void) | null = null;
+      readonly index = contexts.length;
+      close = vi.fn(async () => { if (this.index === 0) await closing; this.state = 'closed'; });
+      async resume() {}
+      createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+      constructor() { contexts.push(this); }
+    }
+    vi.stubGlobal('AudioContext', DelayedContext);
+    const run = setup();
+    run.engine.prepareSpeech({ ...preferences, output: 'fish' }, 'one-conversation');
+    const starting = run.engine.start(preferences, 'one-conversation');
+    await drain();
+    expect(contexts[0]!.close).toHaveBeenCalledOnce();
+    expect(microphone).not.toHaveBeenCalled();expect(contexts).toHaveLength(1);
+    let replacement: Promise<void> | undefined;
+    if (action === 'cancel') run.engine.stop();
+    if (action === 'restart') replacement = run.engine.start(preferences, 'one-conversation');
+    await drain();expect(microphone).not.toHaveBeenCalled();
+    finishClose();await Promise.all([starting, replacement]);
+    expect(microphone).toHaveBeenCalledTimes(action === 'cancel' ? 0 : 1);
+    expect(contexts).toHaveLength(action === 'cancel' ? 1 : 2);
+    expect(run.phases.at(-1)).toBe(action === 'cancel' ? 'off' : 'listening');
+    expect(run.callbacks.onError).not.toHaveBeenCalled();
+  });
+
   it('does not open Android playback for denied or cancelled microphone requests', async () => {
     Object.assign(navigator, { userAgent: 'Mozilla/5.0 (Linux; Android 16)' });
     const createContext = vi.fn(); vi.stubGlobal('AudioContext', createContext);

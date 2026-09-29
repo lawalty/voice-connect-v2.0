@@ -17,6 +17,7 @@ export interface VoiceCallbacks {
 
 export class VoiceEngine {
   private context?: AudioContext;
+  private closingContext?: Promise<void>;
   private faceTimeline = new SpeechFaceTimeline();
   faceSpeech(): MouthPose {
     if (this.preferences?.output === 'browser') return this.faceTimeline.sample(0, performance.now());
@@ -191,7 +192,14 @@ export class VoiceEngine {
   private releaseContext() {
     this.cues?.dispose(); this.cues = undefined;
     const context = this.context; this.context = undefined;
-    if (context) { context.onstatechange = null; void context.close().catch(() => {}); }
+    if (context) {
+      context.onstatechange = null;
+      // close() releases system audio resources asynchronously. A second tap
+      // must also wait for the first retired context, even after it is detached.
+      const closing = this.closingContext = Promise.all([this.closingContext, context.close().catch(() => {})]).then(() => {});
+      void closing.then(() => { if (this.closingContext === closing) this.closingContext = undefined; });
+    }
+    return this.closingContext;
   }
   async start(preferences: SpeechPreferences, conversationId: string): Promise<void> {
     if (this.disposed) return;
@@ -207,9 +215,12 @@ export class VoiceEngine {
     // the hardware buttons then adjust a different volume stream. Acquire the
     // mic first and use a fresh context on every Android voice start. Other
     // browsers retain activation in the original tap (including Safari).
-    if (/Android/i.test(navigator.userAgent)) this.releaseContext();
-    else this.warmContext();
+    const android = /Android/i.test(navigator.userAgent);
+    const retiring = android ? this.releaseContext() : undefined;
+    if (!android) this.warmContext();
     try {
+      if (retiring) await retiring;
+      if (generation !== this.generation) return;
       if (!window.isSecureContext) throw new Error('Voice requires HTTPS or localhost.');
       const recognizer = this.recognizer = this.createRecognizer(generation);
       this.lastCapabilities = { ...recognizer.capabilities };

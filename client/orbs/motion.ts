@@ -17,16 +17,19 @@ export class FaceMotion {
     const talking=phase==='speaking'||phase.endsWith('-commentary');
     const sleeping=asleep||phase==='standby';
     const t=now/1000;
-    const glance=reduced?0:Math.sin(t*.61)*.14+Math.sin(t*1.07+.8)*.06;
+    // These atlas poses look upward. Use them as brief glances, then return
+    // to the forward-facing neutral pose instead of holding them while waiting.
+    const glanceTime=t%9.6;
+    const glance=!reduced&&glanceTime>6.8&&glanceTime<8?Math.sin((glanceTime-6.8)/1.2*Math.PI)**2:0;
     const cycle=t%4.7;
     const blink=Math.max(0,1-Math.abs(cycle-1.8)/.12);
     const hue=sleeping?0:talking?.255:work?-.35:0;
-    // Keep the listening pose out of speech: its shifted nose/lips would fight
-    // the mouth shapes. Eye glances continue through the waiting states.
-    const target={listen:!sleeping&&(phase==='listening'||phase==='hearing')?.6+glance:0,think:!sleeping&&work?.75+glance*.25:0,
+    // Every spoken state, including progress commentary, looks forward.
+    // Head turns, nods, blinks and the audio-driven mouth remain independent.
+    const target={listen:!sleeping&&!talking&&(phase==='listening'||phase==='hearing')?.55*glance:0,think:!sleeping&&!talking&&work?.65*glance:0,
       smile:!sleeping&&now<this.delightedUntil?.7:0,blink:sleeping?1:blink,hue,sleep:Number(sleeping),
       mouth:!sleeping&&talking&&!reduced?speech.open:0,round:speech.round,wide:speech.wide};
-    for(const key of Object.keys(target) as (keyof typeof target)[]){const rate=key==='mouth'?90:key==='blink'?60:5;this.values[key]=reduced?target[key]:this.values[key]+(target[key]-this.values[key])*(1-Math.exp(-dt*rate));}
+    for(const key of Object.keys(target) as (keyof typeof target)[]){const rate=key==='mouth'?90:key==='blink'?60:talking&&(key==='listen'||key==='think')?28:5;this.values[key]=reduced?target[key]:this.values[key]+(target[key]-this.values[key])*(1-Math.exp(-dt*rate));}
     const motion=reduced?0:strength*(sleeping?.25:1);
     const yaw=(Math.sin(t*.72+.2)*.68+Math.sin(t*1.43-.5)*.24+(talking?Math.sin(t*.94+.8)*.22:0))*pack.motion.yaw;
     const pitch=(Math.sin(t*.93-.3)*.47+Math.sin(t*1.71+.6)*.24+(talking?Math.sin(t*3.2)*speech.open*.3:0))*pack.motion.pitch;

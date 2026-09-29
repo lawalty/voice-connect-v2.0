@@ -43,6 +43,22 @@ No actionable P0/P1/P2 visual findings remain after the final combined compariso
 - Confirm exported-file download in that browser, and assess reduced motion on the target OS.
 - Hardware performance, battery cost, and physical mobile voice behavior are not established by desktop screenshots or unit tests.
 
-The local fixture is left open for visual review. No production deployment was performed.
+The initial feature was subsequently deployed for owner mobile acceptance. The
+owner approved the face animation on Android and reported persistent upward
+gaze plus quiet audio with ineffective volume buttons.
+
+## September 28 mobile feedback follow-up
+
+- Speaking progress phases had retained the upward-looking thinking pose. All
+  three speaking phases now ease promptly back to forward gaze, retaining head
+  turns, nods, blinking and lip motion. Listening and waiting states use brief
+  glances instead of continuously holding the upward pose.
+- Browser evidence: `.local/orb-qa/forward-gaze-speaking.png`, 1280 x 720,
+  silent Speaking preview with Lively movement. Eyes face forward; changing
+  head yaw and mouth values were observed. No browser warnings/errors reported.
+- Production build/typecheck and all 319 tests pass, including commentary gaze,
+  predominantly forward waiting gaze, unchanged playback samples, and Android
+  close/restart/cancel ordering. See `docs/ANDROID-AUDIO-ROUTING.md` for the audio
+  correction and its limits. Actual Android volume acceptance remains pending.
 
 final result: passed

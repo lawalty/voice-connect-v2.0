@@ -2,6 +2,7 @@ import { describe,expect,it } from 'vitest';
 import { SpeechFaceTimeline,SILENT_MOUTH } from '../client/orbs/speech';
 import { FaceMotion } from '../client/orbs/motion';
 import { LUMINOUS_GLASS } from '../client/orbs/packs';
+import type { VoicePhase } from '../contract/types';
 const tone=(seconds=.1)=>Float32Array.from({length:24000*seconds},(_,i)=>Math.sin(i/24000*220*Math.PI*2)*.18);
 describe('playback-clock face movement',()=>{
   it('waits for playback, closes in gaps, and ignores network arrival time',()=>{
@@ -18,6 +19,32 @@ describe('playback-clock face movement',()=>{
   it('clearly labels the device-voice fallback and never keeps PCM in feature frames',()=>{
     const samples=tone(),t=new SpeechFaceTimeline();t.schedule({samples,sampleRate:24000,startTime:0});samples.fill(0);expect(t.sample(.02,0).open).toBeGreaterThan(.4);
     t.nativeStarted(0);expect(t.sample(0,123).source).toBe('estimated');
+  });
+  it('reads lip-sync features without changing the playback samples or their level',()=>{
+    const samples=tone(1),original=samples.slice(),t=new SpeechFaceTimeline();
+    t.schedule({samples,sampleRate:24000,startTime:0});
+    for(let time=0;time<1;time+=.033)t.sample(time,time*1000);
+    expect(samples).toEqual(original);
+  });
+  it.each<VoicePhase>(['speaking','thinking-commentary','working-commentary'])('returns its gaze forward during %s while the head and lips move',phase=>{
+    const motion=new FaceMotion(),speech={open:.8,round:.2,wide:.3,source:'audio' as const};
+    let pose=motion.sample(6800,'thinking',false,false,1,LUMINOUS_GLASS,SILENT_MOUTH);
+    for(let time=6833;time<=7394;time+=33)pose=motion.sample(time,'thinking',false,false,1,LUMINOUS_GLASS,SILENT_MOUTH);
+    expect(pose.think).toBeGreaterThan(.3); // Enter speech during an actual glance.
+    const first=motion.sample(7427,phase,false,false,1,LUMINOUS_GLASS,speech);
+    for(let time=7460;time<=7625;time+=33)pose=motion.sample(time,phase,false,false,1,LUMINOUS_GLASS,speech);
+    expect(pose.think).toBeLessThan(.01);expect(pose.listen).toBe(0);
+    expect(pose.yaw).not.toBe(first.yaw);expect(pose.mouth).toBeGreaterThan(.7);
+  });
+  it.each<VoicePhase>(['listening','hearing','thinking','working','finalizing'])('looks forward most of the time during %s, with brief glances',phase=>{
+    const motion=new FaceMotion();let forward=0,glancing=0,total=0;
+    for(let time=33;time<28800;time+=33){
+      const pose=motion.sample(time,phase,false,false,1,LUMINOUS_GLASS,SILENT_MOUTH);
+      if(pose.listen+pose.think<.05)forward++;
+      if(pose.listen+pose.think>.3)glancing++;
+      total++;
+    }
+    expect(forward/total).toBeGreaterThan(.8);expect(glancing).toBeGreaterThan(0);
   });
   it('resumes at current audio after a long period without rendering',()=>{
     const t=new SpeechFaceTimeline();
