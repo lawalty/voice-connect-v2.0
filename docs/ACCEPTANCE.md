@@ -1,5 +1,25 @@
 # Acceptance evidence
 
+## September 29: interruption opt-out and capture stalls
+
+The capture warning and interruption sensitivity have separate causes. Capture
+previously dropped after eight unacknowledged 32-ms blocks, and also treated a
+500-ms callback delay as missing audio. A bounded worklet reserve and source-clock
+continuity checks now retain briefly delayed frames; VAD consumption controls the
+transfer rate. Actual overflow still preserves the draft and rejects late endpoints.
+
+342 unit tests and the production build passed. Real Chromium/Silero checks passed
+for recorded echo, synthetic playback, changing fan noise, independent speech,
+and speech over playback. Desktop and mobile-layout fixtures covered the saved
+interruption toggle, automatic turns, manual Interrupt, an 800-ms UI stall, and a
+1.7-second overload that correctly held an unfinished turn for review.
+
+One combined run had two mobile-layout failures with genuine capture-backlog
+warnings during heavy local CPU load. An isolated repeat passed, followed by
+three successive passes of both affected scenarios (six checks). This is not a
+guarantee under sustained device overload, nor a measured cause of the owner's
+original warning. No physical Android/fan-room latency acceptance is claimed.
+
 ## September 26: phone conversation interruptions
 
 The owner reported recognition and reply-channel disconnect notices about five

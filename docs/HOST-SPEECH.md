@@ -25,6 +25,8 @@ not simply accepting an arbitrary API key.
   sensitivity. Turning it off prevents voice from interrupting an active reply;
   the microphone stays connected, automatic turns resume afterward, and the
   manual Interrupt button remains available. The disabled slider retains its value.
+- A fresh installation requires explicit provider setup. Installing a model or
+  saving credentials does not open a microphone or silently choose paid processing.
 
 ## Capture stalls
 
@@ -39,8 +41,6 @@ Sustained overload still fails closed: an early overflow notification fences the
 recognizer, keeps the unsent text, and prevents a late endpoint from committing a
 damaged turn. Larger buffers cannot restore audio that was actually lost. Browser
 stall simulations are regression evidence, not physical-device latency acceptance.
-- A fresh installation requires explicit provider setup. Installing a model or
-  saving credentials does not open a microphone or silently choose paid processing.
 
 ## Host Vosk
 

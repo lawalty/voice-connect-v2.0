@@ -3,15 +3,29 @@ import { installationFixture } from './installation-fixture';
 import { enterFixtureSession } from './fixture-session';
 import { waitForFixtureBudget } from './fixture-budget';
 
-interface Probe { blocks: number; dropped: number; tracks: MediaStreamTrack[]; pending: SpeechSynthesisUtterance[]; cancellations: number; }
+interface Probe { blocks: number; dropped: number; tracks: MediaStreamTrack[]; pending: SpeechSynthesisUtterance[]; cancellations: number;
+  events: { type: string; at: number; sequence?: number; processingMs?: number; endTime?: number }[]; }
 declare global { interface Window { vcMicProbe: Probe; } }
 test.beforeEach(waitForFixtureBudget);
+test.afterEach(async ({ page }, info) => {
+  const probe = await page.evaluate(() => ({ blocks: window.vcMicProbe?.blocks, dropped: window.vcMicProbe?.dropped, events: window.vcMicProbe?.events }));
+  await info.attach('capture-timings', { body: JSON.stringify(probe), contentType: 'application/json' });
+});
 
 async function fixture(page: Page) {
   await page.context().grantPermissions(['microphone']);
   await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
-    const probe: Probe = window.vcMicProbe = { blocks: 0, dropped: 0, tracks: [], pending: [], cancellations: 0 };
+    const probe: Probe = window.vcMicProbe = { blocks: 0, dropped: 0, tracks: [], pending: [], cancellations: 0, events: [] };
+    const record = (event: Omit<Probe['events'][number], 'at'>) => { probe.events.push({ ...event, at: performance.now() }); if (probe.events.length > 256) probe.events.shift(); };
+    new PerformanceObserver(list => list.getEntries().forEach(entry => record({ type: 'long-task', processingMs: entry.duration }))).observe({ entryTypes: ['longtask'] });
+    const NativeWorker = Worker;
+    Object.defineProperty(window, 'Worker', { value: class extends NativeWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        this.addEventListener('message', event => { if (event.data.type === 'signal') record({ type: 'vad', sequence: event.data.sequence, processingMs: event.data.processingMs }); });
+      }
+    } });
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     navigator.mediaDevices.getUserMedia = async constraints => {
       const stream = await capture(constraints); probe.tracks.push(...stream.getAudioTracks()); return stream;
@@ -21,7 +35,8 @@ async function fixture(page: Page) {
       constructor(context: BaseAudioContext, name: string, options?: AudioWorkletNodeOptions) {
         super(context, name, options);
         if (name === 'voice-capture') this.port.addEventListener('message', event => {
-          if (event.data.samples) { probe.blocks++; probe.dropped += event.data.dropped || 0; }
+          if (event.data.samples) { probe.blocks++; probe.dropped += event.data.dropped || 0; record({ type: 'capture', sequence: event.data.sequence, endTime: event.data.endTime }); }
+          else if (event.data.type === 'overflow') record({ type: 'overflow' });
         });
       }
     } });
