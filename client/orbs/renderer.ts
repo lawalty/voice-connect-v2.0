@@ -11,7 +11,7 @@ void main(){uv=vec2(position.x*.5+.5,.5-position.y*.5);gl_Position=vec4(position
 const fragment = `precision highp float;
 varying vec2 uv;
 uniform sampler2D atlas,flowMap;
-uniform float hasFlow,cellSize,time,blink,mouth,roundness,wideness,hue,sleeping;
+uniform float hasFlow,cellSize,time,blink,mouth,roundness,wideness,hue,sleeping,phaseColors;
 uniform vec3 expression,turn,color;
 uniform vec2 drift;
 vec2 cell(float id,vec2 p){p=clamp(p,vec2(.5/cellSize),vec2(1.-.5/cellSize));return (vec2(mod(id,3.),floor(id/3.))+p)/3.;}
@@ -50,13 +50,16 @@ void main(){
     result=clamp(result,0.,1.);
     float shimmer=(sin(p.x*12.8+p.y*6.14+time*1.2)+sin(p.x*7.68-p.y*10.24-time*.73))*.018;
     result*=1.+shimmer*smoothstep(.55,1.,radius);
-    vec3 h=hsv(result);h.x=fract(h.x+hue);h.y*=1.-.32*min(1.,abs(hue)*4.);h.y*=1.-sleeping*.65;
-    result=rgb(h)*(1.-sleeping*.16);
+    if(phaseColors>.5){
+      vec3 h=hsv(result);h.x=fract(h.x+hue);h.y*=1.-.32*min(1.,abs(hue)*4.);h.y*=1.-sleeping*.65;
+      result=rgb(h)*(1.-sleeping*.16);
+    }
   }
   float floorGlow=exp(-pow((uv.x-.5-drift.x*.5)/.19,2.)-pow((uv.y-.884)/.018,2.))*.18;
   float halo=exp(-dot((uv-.5)/.36,(uv-.5)/.36))*.025;
   float glow=(floorGlow+halo)*(1.-alpha);
-  gl_FragColor=vec4(result*alpha+color*glow,alpha+glow);
+  vec3 glowColor=phaseColors>.5?color:vec3(.82);
+  gl_FragColor=vec4(result*alpha+glowColor*glow,alpha+glow);
 }`;
 
 export class GlassFaceRenderer {
@@ -106,9 +109,10 @@ export class GlassFaceRenderer {
   private location(name:string){if(!this.locations.has(name))this.locations.set(name,this.gl.getUniformLocation(this.program,name));return this.locations.get(name)!;}
   private number(name:string,value:number){this.gl.uniform1f(this.location(name),value);}
   resize(){const n=Math.max(1,Math.round(this.canvas.clientWidth*Math.min(devicePixelRatio||1,1.5)));if(this.canvas.width!==n||this.canvas.height!==n){this.canvas.width=n;this.canvas.height=n;}this.gl.viewport(0,0,n,n);}
-  draw(p:FaceFrame){
+  draw(p:FaceFrame,phaseColors=true){
     const gl=this.gl;gl.useProgram(this.program);
     for(const [key,value] of Object.entries({time:p.time,blink:p.blink,mouth:p.mouth,roundness:p.round,wideness:p.wide,hue:p.hue,sleeping:p.sleep}))this.number(key,value);
+    this.number('phaseColors',phaseColors?1:0);
     gl.uniform3f(this.location('expression'),p.listen,p.think,p.smile);
     gl.uniform3f(this.location('turn'),p.yaw,p.pitch,p.roll);gl.uniform2f(this.location('drift'),p.driftX,p.driftY);
     gl.uniform3f(this.location('color'),p.color[0],p.color[1],p.color[2]);gl.drawArrays(gl.TRIANGLES,0,6);

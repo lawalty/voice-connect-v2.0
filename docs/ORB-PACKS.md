@@ -2,13 +2,23 @@
 
 The web app has a shared animation runtime and replaceable artwork. Open **Settings → Orb appearance**, select **Luminous Glass**, and adjust Movement. Appearance changes immediately and is saved in that browser. The classic orb remains the default. Silent previews show resting, listening, thinking, and speaking without using a microphone or contacting a voice provider.
 
+For built-in or imported faces, switch **State colors** off to preserve the
+artwork's original colors in every state. This bypasses the added hue,
+saturation, and sleep-color effects and uses a neutral glow. Expressions, head
+movement and lip-sync continue. The preview updates immediately, including with
+reduced motion enabled. Colors baked into individual atlas images remain part
+of those images; use consistent colors across expressions for a natural head.
+State colors defaults to on for existing installations. The choice is saved
+on this device and applies across face packs; it does not alter the exported
+pack or the classic orb.
+
 ## Plugging in a face
 
 1. Export Luminous Glass from Settings, then use the **Save** link to download a complete, portable `.orb.json` file.
 2. Give the copy a unique `id` and `name`; replace its prepared expression atlas. Rebuild or remove the optional flow map when replacing artwork.
 3. Import the new pack. It appears in the same selector and uses the existing animation and speech timing automatically.
 
-Exported built-in artwork is named `my-luminous-glass`, so the export can be imported immediately. Custom packs live in IndexedDB; selection and movement live in localStorage. They are specific to a browser/origin, are not account-synced, and are removed if the browser's site data is cleared. Export packs before clearing site data. Up to eight custom packs are supported.
+Exported built-in artwork is named `my-luminous-glass`, so the export can be imported immediately. Custom packs live in IndexedDB; selection, movement and State colors live in localStorage. They are specific to a browser/origin, are not account-synced, and are removed if the browser's site data is cleared. Export packs before clearing site data. Up to eight custom packs are supported.
 
 This first version accepts **prepared face packs**. It does not generate expressions or a face rig from a single uploaded portrait. A character creator can be built later to output this same format without changing the voice engine.
 
@@ -60,4 +70,4 @@ For another identity, prepare and align its expression sheet first. The current 
 
 ## Acceptance boundaries
 
-The automated suite checks scheduled audio versus arrival time, silence and cancellation, long background playback, stale output callbacks, reduced motion, and import validation. Browser QA covers real WebGL rendering and local pack persistence. The first release still needs a human check with the user's live Fish voice on the intended browser/hardware; silent Settings previews and synthetic PCM tests do not prove that experience.
+The automated suite checks scheduled audio versus arrival time, silence and cancellation, long background playback, stale output callbacks, reduced motion, and import validation. Browser QA covers real WebGL rendering and local pack persistence. The owner accepted the animation, forward gaze, brief waiting glances and improved volume on Android after release `a14258c`. This is device-specific acceptance; silent Settings previews and synthetic PCM tests do not prove that experience on other devices. The subsequent State colors toggle still needs visual acceptance on the owner's custom avatar.

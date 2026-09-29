@@ -61,4 +61,19 @@ gaze plus quiet audio with ineffective volume buttons.
   close/restart/cancel ordering. See `docs/ANDROID-AUDIO-ROUTING.md` for the audio
   correction and its limits. Actual Android volume acceptance remains pending.
 
-final result: passed
+## September 29 State colors toggle
+
+- Added a device-local State colors toggle for all face packs, defaulting to on
+  for existing preferences. Off bypasses added hue/saturation/sleep-color effects
+  and uses a neutral glow. Embedded artwork colors are preserved. Preview and
+  active face receive the same preference; reduced-motion previews invalidate
+  immediately. Voice/audio code is unchanged.
+- React review retained the existing ref-driven frame loop, lazy renderer and
+  stable pack dependency. Changing the toggle does not recreate the renderer;
+  the checkbox has an accessible name and help text.
+- Production build/typecheck and all 319 unit/service tests passed.
+- Visual check pending: the browser-control tool reported no available browser
+  in this session. No new screenshot or live visual acceptance is claimed for
+  this toggle. The owner accepted the preceding gaze/audio update on Android.
+
+final result: prior animation accepted; State colors visual acceptance pending

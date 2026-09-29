@@ -15,5 +15,5 @@ describe('portable face packs',()=>{
     expect(()=>parseOrbPack(JSON.stringify({...custom,atlas:'data:image/png;base64,'+png.toString('base64')}))).toThrow(/1536/);
     expect(()=>parseOrbPack(JSON.stringify({...custom,atlas:atlas.slice(0,-28)}))).toThrow();
   });
-  it('recovers malformed preferences and bounds motion',()=>{expect(restoreOrbPreferences('null')).toEqual({packId:'classic',motion:1});expect(restoreOrbPreferences('{')).toEqual({packId:'classic',motion:1});expect(restoreOrbPreferences('{"packId":"my-face","motion":20}')).toEqual({packId:'my-face',motion:1.5});});
+  it('recovers malformed preferences and bounds motion',()=>{expect(restoreOrbPreferences('null')).toEqual({packId:'classic',motion:1,phaseColors:true});expect(restoreOrbPreferences('{')).toEqual({packId:'classic',motion:1,phaseColors:true});expect(restoreOrbPreferences('{"packId":"my-face","motion":20}')).toEqual({packId:'my-face',motion:1.5,phaseColors:true});});
 });

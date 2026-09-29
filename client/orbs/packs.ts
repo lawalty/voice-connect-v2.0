@@ -12,11 +12,12 @@ export const packSchema = z.object({
 export type OrbPack = z.infer<typeof packSchema>;
 export const LUMINOUS_GLASS: OrbPack = Object.freeze({ version: 1, renderer: PACK_RENDERER, id: 'luminous-glass', name: 'Luminous Glass',
   atlas: '/orb-packs/luminous-glass/atlas.png', flow: '/orb-packs/luminous-glass/flow.png', motion: { yaw: 14, pitch: 7, roll: 7 } });
-export interface OrbPreferences { packId: string; motion: number; }
+export interface OrbPreferences { packId: string; motion: number; phaseColors: boolean; }
 export function restoreOrbPreferences(raw: string | null): OrbPreferences {
   try { const value = JSON.parse(raw || '{}'); return { packId: typeof value?.packId === 'string' && value.packId.length < 60 ? value.packId : 'classic',
-    motion: typeof value?.motion === 'number' && Number.isFinite(value.motion) ? Math.max(0, Math.min(1.5, value.motion)) : 1 }; }
-  catch { return { packId: 'classic', motion: 1 }; }
+    motion: typeof value?.motion === 'number' && Number.isFinite(value.motion) ? Math.max(0, Math.min(1.5, value.motion)) : 1,
+    phaseColors: typeof value?.phaseColors === 'boolean' ? value.phaseColors : true }; }
+  catch { return { packId: 'classic', motion: 1, phaseColors: true }; }
 }
 
 /** Check dimensions before invoking an image decoder; imported packs never fetch URLs. */
