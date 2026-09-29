@@ -1,6 +1,6 @@
 # Orb face packs
 
-The web app has a shared animation runtime and replaceable artwork. Open **Settings → Orb appearance**, select **Luminous Glass**, and adjust Movement. Appearance changes immediately and is saved in that browser. The classic orb remains the default. Silent previews show resting, listening, thinking, and speaking without using a microphone or contacting a voice provider.
+The web app has a shared animation runtime and replaceable artwork. Open **Settings → Orb appearance**, select **Luminous Glass**, and adjust Movement. Appearance changes immediately and saves to this VC installation, so signed-in devices share the selected face, movement, and State colors. The classic orb remains the default. Silent previews show resting, listening, thinking, working, and speaking without using a microphone or contacting a voice provider.
 
 For built-in or imported faces, switch **State colors** off to preserve the
 artwork's original colors in every state. This bypasses the added hue,
@@ -8,8 +8,8 @@ saturation, and sleep-color effects and uses a neutral glow. Expressions, head
 movement and lip-sync continue. The preview updates immediately, including with
 reduced motion enabled. Colors baked into individual atlas images remain part
 of those images; use consistent colors across expressions for a natural head.
-State colors defaults to on for existing installations. The choice is saved
-on this device and applies across face packs; it does not alter the exported
+State colors defaults to on for existing installations. The choice is shared
+across devices and applies across face packs; it does not alter the exported
 pack or the classic orb.
 
 ## Plugging in a face
@@ -18,7 +18,15 @@ pack or the classic orb.
 2. Give the copy a unique `id` and `name`; replace its prepared expression atlas. Rebuild or remove the optional flow map when replacing artwork.
 3. Import the new pack. It appears in the same selector and uses the existing animation and speech timing automatically.
 
-Exported built-in artwork is named `my-luminous-glass`, so the export can be imported immediately. Custom packs live in IndexedDB; selection, movement and State colors live in localStorage. They are specific to a browser/origin, are not account-synced, and are removed if the browser's site data is cleared. Export packs before clearing site data. Up to eight custom packs are supported.
+Exported built-in artwork is named `my-luminous-glass`, so the export can be imported immediately. Custom packs and appearance are stored in the VC server's SQLite database, included in its existing deployment backups, and served only to authenticated sessions. Clearing a browser's site data does not delete server packs. Up to eight custom packs are supported per installation, at most 6 MiB each. Export a portable copy before removing a pack; removal affects all devices.
+
+## Moving existing phone packs to the server
+
+Open or refresh VC in the **original browser on the phone where the pack was imported**, then sign in. The app automatically copies its old IndexedDB packs to the server and keeps the local originals. Open **Settings → Orb appearance** to see progress or **Retry orb sync** if copying fails. Wait for saving to finish, then open or refresh VC on the PC. An offline phone's local storage cannot be retrieved by the server.
+
+If the installation has no saved appearance yet, the selected migrated custom pack also supplies the initial shared selection, movement and color setting. An already-saved shared choice wins over an older device's preferences. Different legacy packs with the same ID receive separate IDs, retries do not duplicate them, and a stale device cannot automatically restore a pack deleted from the installation. Normal imports with a conflicting ID must be renamed.
+
+Devices refresh on sign-in, opening Orb appearance, returning to the tab or reconnecting, and every 30 seconds while visible. Concurrent stale edits show a conflict and restore the server's choice rather than silently overwriting it. Sharing is scoped to one VC installation and its database; separate VC installations connected to the same OpenClaw gateway do not share this storage automatically.
 
 This first version accepts **prepared face packs**. It does not generate expressions or a face rig from a single uploaded portrait. A character creator can be built later to output this same format without changing the voice engine.
 
@@ -54,8 +62,9 @@ Motion values are base amplitudes in degrees: yaw 0–20, pitch/roll 0–12. The
 
 ## Runtime and audio
 
-- `client/orbs/packs.ts` owns the contract and built-in registration.
-- `OrbProvider.tsx` owns preferences and local pack storage.
+- `contract/orb-packs.ts` owns the portable pack contract and built-in registration; `client/orbs/packs.ts` re-exports it.
+- `service/orbs.ts` owns authenticated pack storage, artwork routes, revision-checked appearance writes, and legacy migration. Metadata responses contain private image URLs; portable imported/exported files still contain embedded PNGs.
+- `OrbProvider.tsx` mounts after authentication. `sync.ts` serializes shared preference writes, refreshes state, and transfers legacy browser packs. IndexedDB is retained only for migration and recovery of those older local copies.
 - `FaceOrb.tsx`, `motion.ts`, and `renderer.ts` own rendering, continuous movement, expressions, and cleanup. The renderer loads only when selected, runs at about 30 fps, caps pixel density at 1.5, and suspends animation when hidden/offscreen.
 - `speech.ts` extracts small visual features from the PCM that the existing Fish output already schedules. The face reads those features against the same AudioContext clock. It adds no TTS requests and retains no audio samples. Cancellation, mute, output failure, and end of playback clear mouth movement. Audio cues do not drive the mouth.
 - Browser-native TTS does not expose PCM through this app; it uses an explicitly estimated speaking animation between its playback callbacks.
@@ -70,4 +79,6 @@ For another identity, prepare and align its expression sheet first. The current 
 
 ## Acceptance boundaries
 
-The automated suite checks scheduled audio versus arrival time, silence and cancellation, long background playback, stale output callbacks, reduced motion, and import validation. Browser QA covers real WebGL rendering and local pack persistence. The owner accepted the animation, forward gaze, brief waiting glances and improved volume on Android after release `a14258c`. This is device-specific acceptance; silent Settings previews and synthetic PCM tests do not prove that experience on other devices. The subsequent State colors toggle still needs visual acceptance on the owner's custom avatar.
+The automated suite checks scheduled audio versus arrival time, silence and cancellation, long background playback, stale output callbacks, reduced motion, and import validation. Service tests cover durable shared storage, private artwork access, migration retries, ID collisions, deletion tombstones, limits and revision conflicts. Browser QA covers real WebGL rendering, legacy migration, fresh-browser access, cross-device appearance changes and retained local recovery copies in desktop and Android-sized Chromium contexts.
+
+The owner accepted the animation, forward gaze, brief waiting glances and improved volume on Android after release `a14258c`. This is device-specific acceptance; silent Settings previews and synthetic PCM tests do not prove that experience on other devices. Migration of the owner's actual avatar and its State colors appearance still need confirmation in the original phone browser and on the PC.

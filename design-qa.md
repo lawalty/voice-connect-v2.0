@@ -77,3 +77,38 @@ gaze plus quiet audio with ineffective volume buttons.
   this toggle. The owner accepted the preceding gaze/audio update on Android.
 
 final result: prior animation accepted; State colors visual acceptance pending
+
+## September 29 shared orb installation settings
+
+- Imported packs, selected face, Movement and State colors now persist in the
+  VC installation's SQLite database. Artwork requires authentication and is
+  served with no-store; metadata refreshes do not download embedded artwork or
+  restart the WebGL renderer. The existing voice engine is unchanged.
+- Existing browser packs automatically copy after sign-in. The selected legacy
+  custom pack seeds an unconfigured installation, local originals remain, ID
+  collisions keep both packs, and migration retries cannot resurrect deletions.
+  An existing shared appearance wins over old device preferences.
+- Production build/typecheck passed. All 328 unit/service tests passed, covering
+  restart persistence, private asset access, import limits, concurrent changes,
+  migration retry/deletion behavior, and stale client responses.
+- Eight focused browser cases passed in desktop and Android-sized Chromium:
+  shared voice setup, browser/Fish Messenger regressions, and the new orb flow.
+  The orb flow seeds the exact old IndexedDB format, reloads, opens a fresh
+  browser context with no local packs, verifies shared selection and WebGL,
+  changes State colors from the second context, imports another pack there,
+  verifies it in the first context, and confirms the local recovery copy remains.
+- The existing Messenger test exposed a race between immediate synthetic speech
+  completion and its cancellation assertion. The fixture now holds the first
+  utterance active through typing and view switching, then explicitly ends it.
+  This verifies the intended behavior without racing normal output disposal.
+- Screenshots inspected at `test-results/orb-installation-a-legacy--57618--share-packs-and-appearance-desktop/shared-orb-appearance.png`
+  and the corresponding `android-layout` directory. Shared-storage copy,
+  selector, rendered face, State colors and movement labels are legible; the
+  narrow dialog scrolls vertically. No new layout issue was identified.
+- React review: callbacks used by refresh effects are stable, identical pack
+  metadata retains object identity, updates use optimistic previews with
+  serialized revision-checked saves, and unmount cancels requests and timers.
+
+Final result: automated shared-pack handoff and desktop/mobile-layout checks
+pass. Physical Android acceptance of the user's own avatar migration and color
+appearance remains a user check after opening the original phone browser.

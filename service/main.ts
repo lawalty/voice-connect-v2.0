@@ -23,6 +23,7 @@ import { LibraryClient } from './library.js';
 import { registerLibraryRoutes } from './library-routes.js';
 import { SpeechSettings, speechSelection } from './speech-settings.js';
 import { VoskHost } from './vosk.js';
+import { registerOrbRoutes } from './orbs.js';
 
 const password=z.string().min(12).max(256);
 const id=z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
@@ -83,6 +84,7 @@ export async function buildApp(options:AppOptions={}) {
   app.get('/health',async()=>({ready:true,build:cfg.build,openclaw:gateway.capabilities().connected}));
   app.get('/api/status',async req=>status(req));
   registerLibraryRoutes(app,new LibraryClient(cfg.libraryUrl,cfg.libraryToken));
+  registerOrbRoutes(app,store);
   app.get('/api/diagnostics',async()=>({build:cfg.build,gateway:gateway.capabilities(),deviceId:store.get('gateway-device-id'),timings:gateway.diagnostics?.()??[]}));
   const authRate={rateLimit:{max:12,timeWindow:15*60*1000}};
   app.post('/api/auth/setup',{config:authRate},async(req,reply)=>{
