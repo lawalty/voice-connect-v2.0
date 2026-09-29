@@ -1,3 +1,4 @@
+import { SpeechFaceTimeline, SILENT_MOUTH, type MouthPose } from '../orbs/speech';
 import type { AcousticSignal, RecognizerCapabilities, RecognizerEvents, SpeechOutput, SpeechPreferences, SpeechRecognizer, VoicePhase } from '../../contract/types';
 import { acousticSignal, SentenceStream, Transcript } from './dsp';
 import { BrowserOutput, PremiumOutput, type PlaybackSamples } from './output';
@@ -16,6 +17,11 @@ export interface VoiceCallbacks {
 
 export class VoiceEngine {
   private context?: AudioContext;
+  private faceTimeline = new SpeechFaceTimeline();
+  faceSpeech(): MouthPose {
+    if (this.preferences?.output === 'browser') return this.faceTimeline.sample(0, performance.now());
+    return this.context?.state === 'running' ? this.faceTimeline.sample(this.context.currentTime, performance.now()) : SILENT_MOUTH;
+  }
   private stream?: MediaStream;
   private source?: MediaStreamAudioSourceNode;
   private worklet?: AudioWorkletNode;
@@ -113,7 +119,7 @@ export class VoiceEngine {
     // Silence this reply permanently; unmute never replays its cancelled queue.
     this.responseSilenced = this.responseOpen || this.outputActive;
     ++this.playbackGeneration;
-    this.output?.dispose(); this.output = undefined; this.outputActive = false;
+    this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.outputActive = false;
     this.protectReply(false);
     this.commentaryQueue = [];
     this.setPhase(this.responseOpen ? this.workStage : this.active && this.ready ? 'listening' : 'off');
@@ -146,7 +152,7 @@ export class VoiceEngine {
   private stopCommentary() {
     this.commentaryQueue = [];
     if (this.outputKind !== 'commentary') return;
-    ++this.playbackGeneration; this.output?.cancel(); this.output?.dispose(); this.output = undefined;
+    ++this.playbackGeneration; this.output?.cancel(); this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined;
     this.outputActive = false; this.outputFailed = false; this.outputKind = 'answer';
     if (this.responseOpen) this.setPhase(this.workStage);
   }
@@ -573,18 +579,18 @@ export class VoiceEngine {
       const playbackGeneration = ++this.playbackGeneration;
       this.outputRequestedAt = performance.now();
       const events = {
-        started: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = true; this.outputStartedAt = performance.now(); this.trace.record('output-start', { provider: this.preferences?.output, durationMs: this.outputStartedAt - this.outputRequestedAt }); this.setPhase(this.replyPhase()); },
+        started: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = true; this.outputStartedAt = performance.now(); if (this.preferences?.output === 'browser') this.faceTimeline.nativeStarted(this.outputStartedAt); this.trace.record('output-start', { provider: this.preferences?.output, durationMs: this.outputStartedAt - this.outputRequestedAt }); this.setPhase(this.replyPhase()); },
         ended: () => {
           if (playbackGeneration !== this.playbackGeneration) return;
-          this.outputActive = false; this.trace.record('output-end', { provider: this.preferences?.output, durationMs: this.outputStartedAt ? performance.now() - this.outputStartedAt : 0 });
+          this.outputActive = false; this.faceTimeline.clear(); this.trace.record('output-end', { provider: this.preferences?.output, durationMs: this.outputStartedAt ? performance.now() - this.outputStartedAt : 0 });
           if (this.outputKind === 'commentary') {
-            ++this.playbackGeneration; this.output?.dispose(); this.output = undefined;
+            ++this.playbackGeneration; this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined;
             this.setPhase(this.workStage); this.pumpCommentary();
-          } else if (!this.responseOpen) { this.output?.dispose(); this.output = undefined; this.protectReply(false); this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); }
+          } else if (!this.responseOpen) { this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.protectReply(false); this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); }
         },
-        reference: this.playbackReference,
+        reference: (audio: PlaybackSamples) => { if (playbackGeneration !== this.playbackGeneration) return; this.faceTimeline.schedule(audio, this.context?.currentTime); this.playbackReference(audio); },
         cancelled: (atTime: number) => this.vad?.postMessage({ type: 'cancel-reference', atTime }),
-        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); if (this.outputKind === 'commentary') this.stopCommentary(); } },
+        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.faceTimeline.clear(); this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); if (this.outputKind === 'commentary') this.stopCommentary(); } },
       };
       this.output = this.preferences!.output !== 'browser'
         ? new PremiumOutput(this.warmContext(), this.conversationId, this.preferences!.fishVoice || '', events, this.preferences!.fishDelivery)
@@ -597,7 +603,7 @@ export class VoiceEngine {
     this.stopCommentary(); this.answerStarted = true;
     for (const piece of this.sentences.finish()) this.enqueue(piece);
     this.responseOpen = false;
-    if (this.outputFailed) { ++this.playbackGeneration; this.output?.dispose(); this.output = undefined; this.outputActive = false; this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
+    if (this.outputFailed) { ++this.playbackGeneration; this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.outputActive = false; this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
     else if (this.output) this.output.finish();
     else { this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
   }
@@ -605,7 +611,7 @@ export class VoiceEngine {
     ++this.playbackGeneration;
     const pending = this.outputActive || this.responseOpen || Boolean(this.output);
     const requestedAt = performance.now();
-    this.output?.cancel(); this.output?.dispose(); this.output = undefined;
+    this.output?.cancel(); this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined;
     this.outputActive = false; this.responseOpen = false; this.sentences.reset();
     this.commentary.clear(); this.commentaryQueue = []; this.answerStarted = false; this.outputKind = 'answer'; this.workStage = 'thinking';
     this.protectReply(false);
@@ -632,7 +638,7 @@ export class VoiceEngine {
     if (this.active && this.recognizer?.capabilities.processing !== 'local' && this.preferences?.recognition !== 'deepgram') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.', 'network-offline');
   };
   dispose() {
-    this.disposed = true; ++this.playbackGeneration; this.stop('disposed'); this.output?.dispose(); this.output = undefined; this.cues?.dispose(); this.cues = undefined;
+    this.disposed = true; ++this.playbackGeneration; this.stop('disposed'); this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.cues?.dispose(); this.cues = undefined;
     this.releaseContext();
     document.removeEventListener('visibilitychange', this.visibility); window.removeEventListener('offline', this.offline);
   }

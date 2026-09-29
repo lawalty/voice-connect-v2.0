@@ -1,78 +1,48 @@
-# Orb and messenger UI review
+# Luminous Glass implementation QA
+
+Date: 2026-09-28. Scope: the approved character inside the existing Voice Connect web UI, not a recreation of the standalone video's presentation frame.
+
+## Evidence
+
+- Source visual truth: `.local/orb-concept/luminous-glass-orb-demo-v2-more-motion.mp4`, represented by `.local/orb-concept/preview-v2-0348.jpg` (1280 × 720, speaking).
+- Source character artwork: `design-assets/luminous-glass/expression-source.png`; prepared runtime atlas: `client/public/orb-packs/luminous-glass/atlas.png` (768 × 768).
+- Implementation: isolated fixture at `http://127.0.0.1:5190/`, Settings → Orb appearance → Luminous Glass → Speaking, Lively movement.
+- Desktop evidence: `.local/orb-qa/desktop-speaking-final.png` (1280 × 720). DOM-confirmed CSS viewport: 1280 × 720; screenshot-to-CSS density is 1:1.
+- Narrow evidence: `.local/orb-qa/narrow-speaking.png` (390 × 844). The dialog is deliberately scrolled to its controls; no horizontal overflow or hidden action buttons were observed. Temporary viewport override was reset after QA.
+- Combined full-view and focused comparison: `.local/orb-qa/comparison.png` (1280 × 620). The full views are scaled equally to 640 × 360. Square character crops are normalized to 190 × 190 to compare identity and materials. The demo and app use different animation instants, mouth drivers, and head poses; this is not a pixel-diff claim.
+
+## Findings and iteration history
+
+1. **P2, fixed: Movement label stacked in the center.** Existing settings label rules imposed a column layout. The appearance-specific rule now uses a row with label at left and value at right. Initial evidence: the first browser capture during QA; revised evidence: `desktop-speaking.png`, `narrow-speaking.png`, and the final screenshot.
+2. **P2, fixed: overlapping listening and speaking poses.** A continuously blended listening face shifted the nose/lips while speech morphs used neutral alignment. The focused comparison exposed extra edges around the mouth. Waiting-state eye glances now stay in listening/thinking; speech uses its own mouth shapes. Before: `desktop-speaking-before-blend-fix.png`. After: `desktop-speaking-final.png` and regenerated `comparison.png`, captured at the same desktop viewport, speaking state, and Lively setting. The different instantaneous head angle is expected.
+3. **P3: 2.5D limits remain.** The character is softer at its small Settings preview size than in the large demonstration. Side views, exact phonemes, and a fully modeled 3D head are outside this renderer's contract. These are documented limitations rather than claims of photorealistic accuracy.
+
+No actionable P0/P1/P2 visual findings remain after the final combined comparison.
+
+## Required fidelity surfaces
+
+- **Fonts/typography:** existing Voice Connect fonts, sizes, and heading hierarchy are retained. The film's spaced title and captions are presentation elements, intentionally absent from Settings. Labels and controls remain legible on both tested widths.
+- **Spacing/layout:** character is centered in a dedicated preview area; selector, expression controls, movement, and pack actions follow the settings layout. Small screens wrap actions and scroll vertically. Label alignment was corrected as above.
+- **Colors/tokens:** teal listening, gold thinking, purple speaking, and silver sleeping preserve the approved direction. Existing app background, mint controls, focus rings, borders, and muted text are reused.
+- **Image fidelity:** the actual approved generated artwork is used, with optical-flow morphs and bounded hemisphere turns. It was not replaced with a drawn emoji, CSS face, or unrelated model. Normalized crops confirm the mature male face, reflective rim, and glass material. The demo has a larger face and decorative atmosphere that are intentionally not copied into Settings.
+- **Copy/content:** controls explain immediate device-local saving, silent previews, movement, and prepared expression packs. The interface does not promise automatic portrait-to-avatar conversion or exact lip reading.
+
+## Functional and code checks
+
+- Production build/typecheck passed.
+- Full unit suite: 25 files, 307 tests passed. The final expression-only adjustment was followed by another build and the five relevant speech/motion tests, all passing.
+- Fish feature timing, gaps, mute/interruption, stale callbacks, long offscreen playback, import validation, and reduced-motion behavior are covered by tests.
+- Browser: classic → built-in face; real WebGL readiness; changing head yaw and mouth values; Head still sets yaw to zero while the mouth continues; Lively increases movement; valid pack import; imported selection survives reload; malformed pack rejected; export creates a visible Save link.
+- Export file download could not be confirmed through the in-app browser's download API (timeout). A visible, explicit Save link replaced the original programmatic download. Download completion remains a target-browser check.
+- No warning/error console entries were reported by the browser tool.
+- React review: animation uses refs and GPU uniforms instead of frame-by-frame React state; renderer is lazy-loaded; effects cancel frames/loads and release resources; object URLs are revoked; pack data is bounded and validated; existing ClassicOrb controls remain available.
+
+## Remaining acceptance checks
+
+- Hear and watch a real Fish reply on the user's target browser/hardware. The isolated preview uses synthetic mouth motion and does not contact Fish or request microphone access.
+- Confirm exported-file download in that browser, and assess reduced motion on the target OS.
+- Hardware performance, battery cost, and physical mobile voice behavior are not established by desktop screenshots or unit tests.
+
+The local fixture is left open for visual review. No production deployment was performed.
 
 final result: passed
-
-## Scope and visual truth
-
-The supplied Messenger Style Format screenshot is a layout reference for the existing product. The user's requirements take precedence over a literal clone: preserve the animated orb, existing brand, camera/composer, and voice behavior; give the conversation its own screen; replace microphone mute with agent mute. Standby is excluded.
-
-- Source: `C:/Users/lawal/AppData/Local/Temp/codex-clipboard-ba6dd5f6-4ee5-43c1-9ae6-966d14479003.png` (874 × 744 pixels). The top approximately 56 pixels are window chrome and annotation, leaving approximately 874 × 688 app pixels.
-- Original annotated UI: `C:/Users/lawal/AppData/Local/Temp/codex-clipboard-1dc6562d-978a-4d1c-8d3f-906c84893afd.png`.
-- Implementation: `.local/messenger-qa/desktop-final.png` (874 × 688), `.local/messenger-qa/mobile-final.png` (390 × 844), and `.local/messenger-qa/orb-desktop-final.png` (1440 × 960).
-- CSS viewports matched those implementation dimensions; the in-app browser emitted screenshots at those pixel dimensions without an additional density conversion. Narrow mobile was also inspected at 320 × 740. Browser capture rendering is softer than the supplied screenshot; DOM geometry was checked separately.
-- State: authenticated local fixture, existing conversation, messenger open, orb asleep. Dynamic conversation text, timestamps, and orb animation frame differ from the reference. Controls are functional, including an explicit back button and composer absent from the reference's static lower panel.
-
-## Comparison and corrections
-
-The reference and final desktop screenshot were opened together for a full-view comparison. Both use a small orb/identity rail beside a large conversation panel, assistant bubbles on the left, and blue user bubbles on the right. The product keeps its existing header and adds a shared composer aligned with the message panel. Main orb mode contains no transcript panel at any viewport.
-
-Initial desktop inspection found two P2 issues: the small orb overlapped its identity/control rail because a flex item had zero height, and legacy user-message CSS tinted an entire row. Fixes gave the rail an intrinsic height and explicitly cleared row backgrounds. The final desktop capture shows separated identity, orb, mute, and message bubbles.
-
-The first behavioral browser run found that the large orb could overlap active voice controls. Its sizing now uses available height in a size container, reserving room for state text. Final main-screen capture and desktop interaction tests verify usable controls. Initial typed-interruption testing also found a stale speaking phase; stopping typed playback now returns the inactive engine to its resting phase.
-
-Mobile inspection confirms a compact orb/identity/control row above a scrollable messenger and fixed composer. At 320 CSS pixels, document scroll width equals viewport width, and the mute, back, new-conversation, camera, and send targets measure approximately 44 × 44 CSS pixels. Mobile control captions collapse to accessible icons; long agent names truncate instead of overlapping them.
-
-No additional image-region crop was needed: there are no new raster assets or decorative artwork to compare. Full-view captures and DOM bounds resolve the actual rail, bubble, and control issues. The existing real-time canvas orb and icon library remain in use.
-
-## Interaction evidence and limits
-
-- Provider-specific regression fixtures cover browser speech and Fish output for typed and voice turns in both views, preserving one native conversation and the shared draft.
-- Switching views and focusing the composer preserve ongoing speech. Agent mute stops current playback, fences late callbacks, persists per device, and leaves capture running without aborting the agent run. Unmute applies to future responses; muted audio is not replayed.
-- Keyboard back/Escape, focus restoration, camera attachment, history refresh, cancellation, and connection recovery remain covered. Scrolling up stops automatic following; Latest messages returns to the newest content.
-- In-app browser error log: zero errors during final visual inspection.
-- The initial full regression run exposed an old test that expected the desktop transcript to be visible automatically. It now opens Conversation before checking reconciled history; its speech ownership assertion remains intact.
-- Physical Android sound, hardware routing, and background behavior are not established by browser fixtures. This change does not claim new physical-device acceptance. Existing Markdown remains intact in the log and continues through the existing speech-only cleanup pipeline.
-
-No actionable P0/P1/P2 visual findings remain. Future standby behavior is deliberately outside this change.
-
-## Messenger Auto mode and cue continuity
-
-The Messenger header now has an accessible Auto mode On/Off switch. It uses the
-same selected automatic Vosk or Deepgram capture pipeline as Orb mode. Browser
-tap-to-talk users enter the existing local-model setup when needed. No paid
-provider is selected implicitly. This is an explicit capture control, not the
-future standby or wake-word feature.
-
-Switching views, focusing the composer, and sending typed text leave voice
-capture open. Messenger displays live transcription in the composer. If typing and speech
-overlap, both become one automatically submitted message. Turning Auto off deliberately closes capture, keeps
-unsent speech in the composer, and allows the current agent reply to finish.
-
-Messenger suppresses the supplied listening/sent recordings without changing
-the saved setting. Returning to Orb does not replay cues. Repeated automatic
-turns are checked at the application boundary: listening, sent on submission,
-reply playback, listening after playback completes. Vosk's tentative finalization
-does not close and reopen that cue window when the user continues speaking.
-
-Desktop and Android-layout browser checks cover those transitions using actual
-WAV decoding and capture/AudioWorklet startup, with provider STT and TTS events
-controlled by fixtures. The narrow 320 × 740 layout fits the Auto control without
-horizontal overflow. Evidence: `.local/messenger-qa/auto-mode-mobile.png` and the
-`turn-cadence` browser-test screenshots. Physical Android cue timing and audible
-playback remain a separate check on the owner's device.
-
-## Transcription in the Messenger composer
-
-Messenger no longer renders the floating transcription box or its old placement
-rules. Partial speech appears in the existing message textarea and is replaced
-as recognition revises its hypothesis. Only a completed turn submits. Typed
-additions and corrections survive recognition updates and join the spoken turn,
-as requested. Auto off retains the combined draft for further editing; the draft
-is saved locally for refresh recovery.
-
-The composer grows to 130 pixels, then scrolls, including after viewport width
-changes. Inspection at 320 pixels caught a wrapping issue on resize; a width
-observer now refits the field. The browser checks verify no floating box in
-Messenger, no partial submission, one combined final message, preservation on
-Auto off, and continuity through view switching. Provider fixtures cover device
-and Fish speech output. These checks do not requalify physical Android audio.
