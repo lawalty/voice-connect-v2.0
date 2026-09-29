@@ -21,6 +21,24 @@ not simply accepting an arbitrary API key.
   installation choice; changing providers never changes the conversation mapping.
 - Browser voice, cues, interruption sensitivity, hands-free preference and screen
   wake remain device settings. Muting the agent and ending a session are independent.
+- Allow interruptions defaults on and is saved on the device alongside its
+  sensitivity. Turning it off prevents voice from interrupting an active reply;
+  the microphone stays connected, automatic turns resume afterward, and the
+  manual Interrupt button remains available. The disabled slider retains its value.
+
+## Capture stalls
+
+The worklet sends healthy 32-ms blocks immediately, with eight in flight. It
+reserves up to 32 additional blocks during a consumer stall (1.28 seconds total,
+80 KiB PCM maximum). Capture credit returns after VAD processes each block, keeping
+a UI catch-up burst out of the worker queue. Source timestamps distinguish missing
+audio from late delivery; continuous queued audio is drained without restarting
+capture or cancelling playback. This capacity adds no deliberate steady-state wait.
+
+Sustained overload still fails closed: an early overflow notification fences the
+recognizer, keeps the unsent text, and prevents a late endpoint from committing a
+damaged turn. Larger buffers cannot restore audio that was actually lost. Browser
+stall simulations are regression evidence, not physical-device latency acceptance.
 - A fresh installation requires explicit provider setup. Installing a model or
   saving credentials does not open a microphone or silently choose paid processing.
 

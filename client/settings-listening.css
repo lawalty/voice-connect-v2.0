@@ -37,6 +37,7 @@
   font-size: 10px;
 }
 .interruption-setting .setting-detail { margin-top: 11px; }
+.interruption-setting input[type="range"]:disabled { opacity: .4; cursor: not-allowed; }
 .fish-voice-row { margin-top: 16px; align-items: start; }
 .fish-delivery-control { min-width: 0; }
 .fish-delivery-control select { width: 100%; }

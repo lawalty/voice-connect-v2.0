@@ -70,10 +70,10 @@ class FakeWorker {
   terminate() {}
 }
 class FakeWorklet {
-  port = { onmessage: undefined as ((event: { data: object }) => void) | undefined, postMessage() {} };
+  port = { onmessage: undefined as ((event: { data: object }) => void) | undefined, postMessage: vi.fn() };
   constructor() { capture = this; }
   connect() {} disconnect() {}
-  frame(value = 0.25) { this.port.onmessage?.({ data: { samples: new Float32Array(512).fill(value), dropped: 0 } }); }
+  frame(value = 0.25, endTime?: number, dropped = 0) { this.port.onmessage?.({ data: { samples: new Float32Array(512).fill(value), dropped, endTime } }); }
 }
 async function drain() { for (let i = 0; i < 8; i++) await Promise.resolve(); }
 async function frame(transition: 'start' | 'end' | null = null, value = transition === 'end' ? 0 : 0.25, interruption = false) {
@@ -211,6 +211,88 @@ describe('automatic continuous VoiceEngine orchestration', () => {
       ['voice-start', undefined], ['voice-stop', 'settings'],
     ]);
     expect(events[1]!.values.phase).toBe('speaking'); expect(run.turns).toEqual([]);
+  });
+
+  it('waits for VAD consumption before returning microphone credit', async () => {
+    const run = setup(); await run.engine.start(preferences, 'capture-credit');
+    detector.holdSignals = true;
+    for (let i = 0; i < 8; i++) capture.frame();
+    expect(capture.port.postMessage).not.toHaveBeenCalled();
+    detector.transition(null);
+    expect(capture.port.postMessage).toHaveBeenCalledExactlyOnceWith('ack');
+    expect(run.notices.some(value => value.includes('keep up'))).toBe(false);
+  });
+
+  it('keeps continuous audio after a UI stall and still rejects a real capture gap mid-turn', async () => {
+    vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });
+    const run = setup(); await run.engine.start(preferences, 'delayed-capture');
+    detector.nextTransition = 'start'; capture.frame(.25, 1); await drain();
+    fixture.recognizers[0]!.partial('Keep this unfinished thought');
+    await vi.advanceTimersByTimeAsync(900);
+    capture.frame(.25, 1.032); await drain();
+    expect(run.notices.some(value => value.includes('gap'))).toBe(false);
+    expect(fixture.recognizers[0]!.running).toBe(true);
+    capture.frame(.25, 2.032); await drain();
+    expect(run.notices.at(-1)).toContain('unexpected gap');
+    expect(run.drafts.at(-1)).toBe('Keep this unfinished thought');
+    expect(run.turns).toEqual([]);
+    expect(fixture.recognizers[0]!.running).toBe(false);
+  });
+
+  it.each(['frame', 'overflow'])('preserves the draft and rejects late endpoints after actual audio loss (%s)', async kind => {
+    const sockets = installFluxSocket(), run = setup();
+    await run.engine.start({ ...preferences, recognition: 'deepgram' }, 'lost-audio');
+    sockets[0]!.event({ type: 'stt', text: 'My unfinished sentence', started: true, final: false, turnComplete: false });
+    if (kind === 'frame') capture.frame(.25, 1, 512);
+    else capture.port.onmessage?.({ data: { type: 'overflow', dropped: 512 } });
+    await drain();
+    sockets[0]!.event({ type: 'stt', text: 'Do not send this incomplete turn', final: true, turnComplete: true });
+    expect(run.notices.at(-1)).toContain('Microphone processing fell behind');
+    expect(run.drafts.at(-1)).toBe('My unfinished sentence'); expect(run.turns).toEqual([]);
+  });
+
+  it('disables spoken interruptions for local speech and resumes normal automatic turns after playback', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, allowInterruptions: false }, 'no-barge-local');
+    run.engine.awaitReply(); run.engine.speak('Finish this entire answer.');
+    const output = fixture.outputs[0]!, recognizer = fixture.recognizers[0]!;
+    await frame('start', .5, true);
+    recognizer.events.result({ text: 'Ignore during reply', final: true, turnComplete: true });
+    expect(run.callbacks.onInterrupt).not.toHaveBeenCalled(); expect(output.cancel).not.toHaveBeenCalled();
+    expect(recognizer.frames).toEqual([]); expect(run.turns).toEqual([]);
+    const track = (await microphone.mock.results[0]!.value).getAudioTracks()[0];
+    expect(track.stop).not.toHaveBeenCalled(); expect(track.enabled).toBe(true);
+    run.engine.responseDone(); output.end();
+    expect(run.phases.at(-1)).toBe('listening');
+    await frame('start'); recognizer.finals.push('Now my next whole thought.'); await frame('end');
+    expect(run.turns).toEqual(['Now my next whole thought.']);
+  });
+
+  it('keeps Deepgram alive with silence when interruptions are off and permits manual Interrupt', async () => {
+    const sockets = installFluxSocket(), run = setup();
+    await run.engine.start({ ...preferences, recognition: 'deepgram', allowInterruptions: false }, 'no-barge-premium');
+    run.engine.awaitReply(); run.engine.speak('An answer that should keep playing.');
+    const output = fixture.outputs[0]!;
+    for (let i = 0; i < 4; i++) await frame('start', .5, true);
+    sockets[0]!.event({ type: 'stt', text: 'A stray provider endpoint', started: true, final: true, turnComplete: true });
+    expect(sockets[0]!.pcm().length).toBeGreaterThan(0); expect(sockets[0]!.pcm().every(sample => sample === 0)).toBe(true);
+    expect(run.turns).toEqual([]); expect(output.cancel).not.toHaveBeenCalled();
+    run.engine.interrupt('manual');
+    expect(output.cancel).toHaveBeenCalledOnce(); expect(run.callbacks.onInterrupt).toHaveBeenCalledOnce();
+    sockets[0]!.event({ type: 'stt', text: 'My complete next turn.', started: true, final: true, turnComplete: true });
+    expect(run.turns).toEqual(['My complete next turn.']);
+  });
+
+  it('cannot revive ignored speech from a late VAD result after a non-interruptible reply ends', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, allowInterruptions: false }, 'late-off-barge');
+    run.engine.awaitReply(); run.engine.speak('Wait for this reply.');
+    detector.holdSignals = true; capture.frame(.5);
+    run.engine.responseDone(); fixture.outputs[0]!.end();
+    detector.transition('start', true);
+    expect(fixture.recognizers[0]!.frames).toEqual([]);
+    expect(run.phases.at(-1)).toBe('listening'); expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
+    detector.holdSignals = false; await frame('start');
+    fixture.recognizers[0]!.finals.push('Fresh input after the reply.'); await frame('end');
+    expect(run.turns).toEqual(['Fresh input after the reply.']);
   });
 
   it('reconnects premium recognition during playback without replacing the microphone or cancelling speech', async () => {

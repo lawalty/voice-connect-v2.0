@@ -22,6 +22,7 @@ export function restoreSpeechPreferences(raw: string | null): SpeechPreferences 
       interruptionSensitivity: typeof saved.interruptionSensitivity === 'number' && Number.isFinite(saved.interruptionSensitivity)
         ? Math.min(100, Math.max(0, saved.interruptionSensitivity)) : DEFAULT_SPEECH.interruptionSensitivity,
       audioCues: typeof saved.audioCues === 'boolean' ? saved.audioCues : DEFAULT_SPEECH.audioCues,
+      allowInterruptions: typeof saved.allowInterruptions === 'boolean' ? saved.allowInterruptions : DEFAULT_SPEECH.allowInterruptions,
       handsFree: recognition !== 'browser' && (typeof saved.handsFree === 'boolean' ? saved.handsFree : turnMode !== 'manual'),
       turnMode,
     };
