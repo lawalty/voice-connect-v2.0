@@ -1,6 +1,6 @@
 import { SpeechFaceTimeline, SILENT_MOUTH, type MouthPose } from '../orbs/speech';
 import type { AcousticSignal, RecognizerCapabilities, RecognizerEvents, SpeechOutput, SpeechPreferences, SpeechRecognizer, VoicePhase } from '../../contract/types';
-import { acousticSignal, SentenceStream, Transcript } from './dsp';
+import { acousticSignal, rms, SentenceStream, Transcript } from './dsp';
 import { BrowserOutput, PremiumOutput, type PlaybackSamples } from './output';
 import { CueTransitions, ListeningCues } from './cues';
 import { HostRecognizer } from './vosk';
@@ -74,6 +74,8 @@ export class VoiceEngine {
   private disposed = false;
   private browserMeterSupported = true;
   private lastCaptureAt = 0;
+  private microphoneEnergy = 0;
+  private microphoneEnergyAt = -Infinity;
   private maxTurnTimer?: ReturnType<typeof setTimeout>;
   private protectingReply = false;
   private protectionEpoch = 0;
@@ -88,6 +90,12 @@ export class VoiceEngine {
     window.addEventListener('offline', this.offline);
   }
   diagnostics(): AudioDiagnosticEntry[] { return this.trace.snapshot(); }
+  /** Live capture level, before speech/echo filtering. No extra microphone owner.
+   * Expire stale frames rather than presenting a frozen level as live audio. */
+  microphoneLevel(): number {
+    if (!this.active || !this.ready || this.muted || this.inputPaused || this.gap || this.context?.state !== 'running' || performance.now() - this.microphoneEnergyAt > 200) return 0;
+    return this.microphoneEnergy;
+  }
   hasSpeechOutput(): boolean { return this.outputKind === 'answer' && Boolean(this.output) && !this.outputFailed && !this.responseSilenced; }
   connectionRetry(reason: 'reply-timeout' | 'reply-close', closeCode?: number) { this.trace.record('connection-retry', { reason, closeCode }); }
   capabilities(): RecognizerCapabilities | undefined { return this.lastCapabilities ? { ...this.lastCapabilities } : undefined; }
@@ -293,6 +301,9 @@ export class VoiceEngine {
       const missingMs = (endTime - this.lastCaptureAt - event.data.samples.length / 16000) * 1000;
       if (this.lastCaptureAt && missingMs > 64) { this.trace.record('capture-gap', { reason: 'capture-gap', durationMs: missingMs }); this.captureFailure('Microphone audio had an unexpected gap. Review your draft before sending.', 'capture-gap'); return; }
       this.lastCaptureAt = endTime;
+      // Measure before VAD can suppress echo or classify non-speech sounds.
+      this.microphoneEnergy = Math.min(1, Math.sqrt(rms(event.data.samples as Float32Array) * 5));
+      this.microphoneEnergyAt = performance.now();
       this.process(event.data.samples as Float32Array, endTime, acknowledge);
     };
     this.source.connect(this.worklet); this.worklet.connect(context.destination);
@@ -505,6 +516,7 @@ export class VoiceEngine {
   pauseInput() {
     if (!this.active || (this.inputPaused && !this.recognizer)) return;
     this.inputPaused = true; ++this.inputEpoch; this.ready = false; this.finishing = false;
+    this.microphoneEnergy = 0; this.microphoneEnergyAt = -Infinity;
     clearTimeout(this.maxTurnTimer);
     this.recognizer?.stop(); this.recognizer = undefined;
     this.stream?.getAudioTracks().forEach(track => { track.enabled = false; });
@@ -549,6 +561,7 @@ export class VoiceEngine {
   }
   mute(muted: boolean) {
     this.muted = muted;
+    this.microphoneEnergy = 0; this.microphoneEnergyAt = -Infinity;
     this.vadIgnoreBefore = this.vadSequence;
     this.lastCaptureAt = 0;
     this.stream?.getAudioTracks().forEach((track) => { track.enabled = !muted; });
@@ -595,6 +608,7 @@ export class VoiceEngine {
     this.setPhase(!this.outputActive && !this.responseOpen ? 'off' : this.phase);
   }
   private closeCapture() {
+    this.microphoneEnergy = 0; this.microphoneEnergyAt = -Infinity;
     this.lastCaptureAt = 0;
     this.captureDiscardBefore = 0;
     if (this.vadFence) { clearTimeout(this.vadFence.timeout); this.vadFence.reject(new Error('Capture stopped before the turn boundary was confirmed.')); this.vadFence = undefined; }

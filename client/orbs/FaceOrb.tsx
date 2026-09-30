@@ -48,6 +48,7 @@ export default function FaceOrb(props:FaceOrbProps){
   const standby=phase==='standby',action=standby?onResume:onStandby||onWake,disabled=standby||!onStandby?wakeDisabled:false;
   return <div className={`orb-stage orb-character phase-${phase}${asleep?' orb-sleeping':''}`} data-presence={standby?'standby':waking?'waking':asleep?'sleeping':'awake'} data-orb-pack={pack.id} data-face-ready={ready} data-phase-colors={phaseColors}>
     <canvas ref={canvas} className="orb-canvas" aria-hidden="true"/>
+    {props.children}
     {!ready&&<span className="orb-face-loading" role="status">Loading your orb…</span>}
     {action&&<button type="button" className="orb-wake-button" disabled={disabled} aria-label={standby?'Resume conversation':onStandby?'Enter standby mode':`Wake ${agentName}`} aria-pressed={onStandby||standby?standby:undefined} onClick={action}>
       {!disabled&&<span className="orb-wake-hint" aria-hidden="true">{standby?'Tap to resume':onStandby?'Tap for standby':asleep?'Tap to wake':''}</span>}

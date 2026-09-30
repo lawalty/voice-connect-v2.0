@@ -1,0 +1,31 @@
+.orb-ear-meters {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+.orb-ear-meter {
+  position: absolute;
+  top: 36.5%;
+  width: 9%;
+  height: 27%;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 3%;
+  padding: 1% .7%;
+  border-radius: 2px;
+  background: #070b0c99;
+}
+.orb-ear-left { left: 5.5%; }
+.orb-ear-right { right: 5.5%; }
+.orb-ear-bar {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  background: #c3c8cf;
+  border-radius: .5px;
+}
+.orb-ear-bar.is-lit {
+  background: var(--ear-color);
+  box-shadow: 0 0 5px var(--ear-color), 0 0 11px color-mix(in srgb, var(--ear-color) 45%, transparent);
+}
