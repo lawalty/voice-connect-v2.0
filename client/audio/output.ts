@@ -149,7 +149,11 @@ export class PremiumOutput implements SpeechOutput {
   private playbackWindow = 0;
   private pendingBytes = 0;
   private playedBytes = 0;
+  private inputStarted = false;
   constructor(private context: AudioContext, private conversationId: string, private voice: string, private events: OutputEvents, private delivery?: FishDelivery) {}
+  /** Establish the transport while the first phrase is still arriving. No text,
+   * synthesis, or playback watchdog is started by preparation alone. */
+  prepare() { this.connect(); }
   private connect() {
     if (this.socket || this.failed) return;
     const id = this.generation.current;
@@ -172,7 +176,7 @@ export class PremiumOutput implements SpeechOutput {
           socket.send(JSON.stringify({ type: 'playback', playedBytes: 0 }));
         }
         for (const command of this.commands) socket.send(JSON.stringify(command)); this.commands = [];
-        this.watchPlayback('Premium voice connected but returned no playable audio. Try Test speaker or check the selected voice.', 15000);
+        if (this.inputStarted) this.watchPlayback('Premium voice connected but returned no playable audio. Try Test speaker or check the selected voice.', 15000);
       } else if (event.type === 'speech-done') {
         if (!this.started) { this.fail('Premium voice returned no playable audio. Check the selected voice and try Test speaker.'); return; }
         this.done = true; this.checkDone();
@@ -191,6 +195,7 @@ export class PremiumOutput implements SpeechOutput {
   }
   enqueue(text: string) {
     if (this.failed || !text.trim()) return;
+    this.inputStarted = true;
     this.done = false;
     for (let offset = 0; offset < text.length; offset += 3500) this.send({ type: 'speak', text: text.slice(offset, offset + 3500) });
     if (this.ready) this.watchPlayback('Premium voice returned no audio for the next part of the reply. Please reconnect voice.', Math.max(15000, (this.nextTime - this.context.currentTime) * 1000 + 15000));
@@ -198,13 +203,14 @@ export class PremiumOutput implements SpeechOutput {
   finish() {
     this.complete = true;
     if (this.failed) this.reportEnded();
+    else if (!this.inputStarted) { this.cancel(); this.reportEnded(); }
     else if (this.socket) {
       this.send({ type: 'flush' });
       this.watchPlayback('Premium voice did not finish the reply. Please reconnect voice.', Math.max(15000, (this.nextTime - this.context.currentTime) * 1000 + 15000));
     } else this.reportEnded();
   }
   private play(bytes: ArrayBuffer, id: number) {
-    if (bytes.byteLength % 2 || !this.generation.is(id) || !this.ready || this.done || this.failed) return;
+    if (bytes.byteLength % 2 || !this.generation.is(id) || !this.ready || !this.inputStarted || this.done || this.failed) return;
     const samples = bytes.byteLength / 2;
     if (!samples) return;
     if (this.context.state && this.context.state !== 'running') { this.fail('Browser audio output is suspended. Tap Test speaker to request playback. The reply remains as text.'); return; }
@@ -250,7 +256,13 @@ export class PremiumOutput implements SpeechOutput {
       this.reportEnded();
     }
   }
-  private fail(message: string) { if (this.failed) return; this.failed = true; this.cancel(); this.events.error(message); this.reportEnded(); }
+  private fail(message: string) {
+    if (this.failed) return;
+    // A speculative connection can expire while the agent is still producing
+    // its opening phrase. Retry on real input without failing a silent warmup.
+    if (!this.inputStarted) { this.cancel(); return; }
+    this.failed = true; this.cancel(); this.events.error(message); this.reportEnded();
+  }
   cancel() {
     const offsetMs = this.started ? Math.max(0, (Math.min(this.context.currentTime, this.nextTime) - this.firstTime) * 1000) : 0;
     this.generation.next(); clearTimeout(this.timeout); clearTimeout(this.playbackTimeout);

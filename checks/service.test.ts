@@ -360,6 +360,22 @@ describe('owner boundary',()=>{
   });
 });
 describe('native OpenClaw lifecycle',()=>{
+  it('forwards sparse native deltas immediately without treating item/tool sequence numbers as text loss',async()=>{
+    const f=await fixture(),url=`/api/conversations/${f.conversation.id}/turns`;
+    await f.app.inject({method:'POST',url,headers:f.headers,payload:{id:'sparse-stream',text:'Synthetic sparse streaming test'}});
+    const base={runId:'sparse-stream',sessionKey:`agent:northpointe:vc2:${f.conversation.id}`};
+    const reconciles=f.events.filter(e=>e.type==='reconcile').length;
+    for(let i=0;i<100;i++){
+      f.emit('agent',{...base,seq:i*5+1,stream:'item',data:{kind:'answer_candidate',progressText:'Uncommitted candidate',hideFromChannelProgress:true}});
+      f.emit('chat',{...base,seq:i*5+3,state:'delta',deltaText:`word${i} `});
+    }
+    await expect.poll(()=>f.events.filter(e=>e.type==='assistant').length).toBe(100);
+    expect(f.events.some(e=>e.type==='complete')).toBe(false);
+    expect(f.events.filter(e=>e.type==='reconcile')).toHaveLength(reconciles);
+    expect(JSON.stringify(f.events)).not.toContain('Uncommitted candidate');
+    f.emit('chat',{...base,seq:600,state:'final'});
+    await expect.poll(()=>f.events.find(e=>e.type==='complete')).toMatchObject({text:Array.from({length:100},(_,i)=>`word${i} `).join('')});
+  });
   it('routes native commentary separately, excludes reasoning and stale events, and keeps history final-only',async()=>{
     const f=await fixture(),url=`/api/conversations/${f.conversation.id}`;
     await f.app.inject({method:'POST',url:`${url}/turns`,headers:f.headers,payload:{id:'progress-turn',text:'Synthetic commentary test'}});

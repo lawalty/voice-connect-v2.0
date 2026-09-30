@@ -243,8 +243,10 @@ export class Gateway implements GatewayPort {
     if(p.sessionKey!==this.store.mapping(row.conversationId).sessionKey)return;
     if(!Number.isSafeInteger(p.seq)||p.seq<0||p.seq<=(this.sequence.get(p.runId)??-1))return;
     if(row.cancelRequested||terminal.has(row.delivery))return;
-    const priorSeq=this.sequence.get(p.runId);this.sequence.set(p.runId,p.seq);
-    if(priorSeq!==undefined&&p.seq>priorSeq+1)this.publish({type:'reconcile',conversationId:row.conversationId});
+    // Native seq is shared with item/tool/lifecycle events, and chat deltas are
+    // coalesced. A numeric gap is normal, not a missing text packet. Transport
+    // reconnect and the client's own event revisions still reconcile history.
+    this.sequence.set(p.runId,p.seq);
     this.store.updateTurn(row.id,'accepted',p.runId);
     if(p.state==='delta'){
       if(p.message?.isReasoning===true||assistantPhase(p.message)==='commentary'||['analysis','reasoning','thinking','commentary'].includes(p.phase))return;

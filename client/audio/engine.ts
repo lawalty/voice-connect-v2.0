@@ -40,6 +40,7 @@ export class VoiceEngine {
   private trace = new AudioDiagnostics();
   private outputRequestedAt = 0;
   private outputStartedAt = 0;
+  private outputQueued = false;
   private output?: SpeechOutput;
   private outputKind: 'answer' | 'commentary' = 'answer';
   private commentary = new Map<string, SentenceStream>();
@@ -47,6 +48,8 @@ export class VoiceEngine {
   private answerStarted = false;
   private workStage: 'thinking' | 'working' = 'thinking';
   private sentences = new SentenceStream();
+  private firstPhraseTimer?: ReturnType<typeof setTimeout>;
+  private answerChunked = false;
   private transcript = new Transcript();
   private preferences?: SpeechPreferences;
   private conversationId = '';
@@ -115,6 +118,7 @@ export class VoiceEngine {
   }
   /** The input is committed; wait for its reply without inviting another turn. */
   awaitReply() {
+    clearTimeout(this.firstPhraseTimer); this.firstPhraseTimer = undefined; this.answerChunked = false;
     this.commentary.clear(); this.commentaryQueue = []; this.answerStarted = false; this.workStage = 'thinking';
     this.sentences.reset(); this.outputFailed = false; this.responseOpen = true;
     this.responseSilenced = this.speakerMuted;
@@ -127,6 +131,7 @@ export class VoiceEngine {
   setSpeakerMuted(muted: boolean) {
     this.speakerMuted = muted;
     if (!muted) return;
+    clearTimeout(this.firstPhraseTimer); this.firstPhraseTimer = undefined;
     // Silence this reply permanently; unmute never replays its cancelled queue.
     this.responseSilenced = this.responseOpen || this.outputActive;
     ++this.playbackGeneration;
@@ -620,15 +625,24 @@ export class VoiceEngine {
   speak(text: string, replace = false) {
     if (!this.preferences || !text || this.disposed) return;
     this.stopCommentary(); this.answerStarted = true;
-    if (!this.responseOpen) { this.sentences.reset(); this.outputFailed = false; this.responseOpen = true; this.responseSilenced = this.speakerMuted; this.protectReply(!this.responseSilenced); }
+    if (!this.responseOpen) { this.sentences.reset(); this.answerChunked = false; this.outputFailed = false; this.responseOpen = true; this.responseSilenced = this.speakerMuted; this.protectReply(!this.responseSilenced); }
     const pieces = this.sentences.append(text, replace);
     for (const piece of pieces) this.enqueue(piece);
+    if (!this.answerChunked && !this.outputFailed && !this.speakerMuted && !this.responseSilenced) {
+      // Opening Fish's socket must not wait for the first complete sentence.
+      if (this.preferences.output === 'fish') { this.ensureOutput(); (this.output as PremiumOutput | undefined)?.prepare(); }
+      if (!this.firstPhraseTimer) this.firstPhraseTimer = setTimeout(() => {
+        this.firstPhraseTimer = undefined;
+        if (this.disposed || !this.responseOpen || this.outputFailed || this.speakerMuted || this.responseSilenced) return;
+        for (const phrase of this.sentences.openingPhrase()) this.enqueue(phrase);
+      }, 300);
+    }
   }
-  private enqueue(text: string) {
+  private ensureOutput() {
     if (this.outputFailed || this.speakerMuted || this.responseSilenced) return;
     if (!this.output) {
       const playbackGeneration = ++this.playbackGeneration;
-      this.outputRequestedAt = performance.now();
+      this.outputQueued = false;
       const events = {
         started: () => { if (playbackGeneration !== this.playbackGeneration) return; this.outputActive = true; this.outputStartedAt = performance.now(); if (this.preferences?.output === 'browser') this.faceTimeline.nativeStarted(this.outputStartedAt); this.trace.record('output-start', { provider: this.preferences?.output, durationMs: this.outputStartedAt - this.outputRequestedAt }); this.setPhase(this.replyPhase()); },
         ended: () => {
@@ -647,10 +661,19 @@ export class VoiceEngine {
         ? new PremiumOutput(this.warmContext(), this.conversationId, this.preferences!.fishVoice || '', events, this.preferences!.fishDelivery)
         : new BrowserOutput(this.preferences!, events);
     }
+  }
+  private enqueue(text: string) {
+    if (this.outputFailed || this.speakerMuted || this.responseSilenced) return;
+    this.ensureOutput();
+    if (this.outputKind === 'answer') {
+      this.answerChunked = true; clearTimeout(this.firstPhraseTimer); this.firstPhraseTimer = undefined;
+    }
+    if (!this.outputQueued) { this.outputQueued = true; this.outputRequestedAt = performance.now(); }
     this.trace.record('output-request', { provider: this.preferences?.output });
-    this.output.enqueue(text);
+    this.output!.enqueue(text);
   }
   responseDone() {
+    clearTimeout(this.firstPhraseTimer); this.firstPhraseTimer = undefined;
     this.stopCommentary(); this.answerStarted = true;
     for (const piece of this.sentences.finish()) this.enqueue(piece);
     this.responseOpen = false;
@@ -659,6 +682,7 @@ export class VoiceEngine {
     else { this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
   }
   interrupt(reason: 'manual' | 'speech-onset' = 'manual', resumeListening = true) {
+    clearTimeout(this.firstPhraseTimer); this.firstPhraseTimer = undefined; this.answerChunked = false;
     ++this.playbackGeneration;
     const pending = this.outputActive || this.responseOpen || Boolean(this.output);
     const requestedAt = performance.now();
@@ -689,6 +713,7 @@ export class VoiceEngine {
     if (this.active && this.recognizer?.capabilities.processing !== 'local' && this.preferences?.recognition !== 'deepgram') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.', 'network-offline');
   };
   dispose() {
+    clearTimeout(this.firstPhraseTimer); this.firstPhraseTimer = undefined;
     this.disposed = true; ++this.playbackGeneration; this.stop('disposed'); this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.cues?.dispose(); this.cues = undefined;
     this.releaseContext();
     document.removeEventListener('visibilitychange', this.visibility); window.removeEventListener('offline', this.offline);

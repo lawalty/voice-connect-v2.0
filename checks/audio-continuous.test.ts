@@ -19,6 +19,7 @@ class FakeRecognizer {
 interface OutputEvents { started(): void; ended(): void; error(message: string): void; reference(audio:{samples:Float32Array;sampleRate:number;startTime:number}):void }
 class FakeOutput {
   words: string[] = []; finished = false;
+  prepare = vi.fn();
   readonly events: OutputEvents;
   constructor(_preferences: SpeechPreferences | AudioContext, eventsOrConversation: OutputEvents | string, _voice?: string, premiumEvents?: OutputEvents, readonly delivery?: string) {
     this.events = typeof eventsOrConversation === 'string' ? premiumEvents! : eventsOrConversation; fixture.outputs.push(this);
@@ -116,6 +117,34 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it.each(['browser', 'fish'] as const)('starts an opening phrase before completion through %s and keeps every following word', async output => {
+    vi.useFakeTimers(); const run = setup();
+    run.engine.prepareSpeech({ ...preferences, output }, 'opening-phrase'); run.engine.awaitReply();
+    run.engine.speak('**An imaginary garden is a peaceful place with col');
+    expect(microphone).not.toHaveBeenCalled();
+    if (output === 'fish') expect(fixture.outputs[0]!.prepare).toHaveBeenCalledOnce();
+    expect(fixture.outputs.flatMap(item => item.words)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(299); expect(fixture.outputs.flatMap(item => item.words)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fixture.outputs[0]!.words).toEqual(['An imaginary garden is a peaceful place with']);
+    expect(fixture.outputs[0]!.finished).toBe(false); expect(run.phases.at(-1)).toBe('speaking');
+    run.engine.speak('orful flowers and winding paths.** More to follow'); run.engine.responseDone();
+    expect(fixture.outputs[0]!.words).toEqual(['An imaginary garden is a peaceful place with', 'colorful flowers and winding paths.', 'More to follow']);
+    expect(fixture.outputs).toHaveLength(1); expect(fixture.outputs[0]!.finished).toBe(true);
+    fixture.outputs[0]!.end(); expect(run.phases.at(-1)).toBe('off');
+  });
+  it('cancels a pending opening phrase and fences late warmup callbacks without restarting audio', async () => {
+    vi.useFakeTimers(); const run = setup();
+    run.engine.prepareSpeech({ ...preferences, output: 'fish' }, 'cancel-warmup'); run.engine.awaitReply();
+    run.engine.speak('This opening sentence has enough complete words but no ending yet');
+    const warm = fixture.outputs[0]!;
+    run.engine.interrupt(); warm.events.started(); warm.end();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(warm.words).toEqual([]); expect(warm.cancel).toHaveBeenCalled();
+    expect(run.phases.at(-1)).toBe('off');
+    run.engine.awaitReply(); run.engine.speak('The next turn can speak.'); run.engine.responseDone();
+    expect(fixture.outputs[1]!.words).toEqual(['The next turn can speak.']);
+  });
   it('meters captured sounds before speech filtering and clears muted, paused, stale and stopped input', async () => {
     const run = setup();
     await run.engine.start(preferences, 'meter-conversation');
