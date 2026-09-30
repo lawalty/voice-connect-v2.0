@@ -29,6 +29,17 @@ async function setup(page: import('@playwright/test').Page) {
 
 test('waiting dots exclude commentary; reply follows playback after native completion and across views', async ({ page }, info) => {
   await setup(page);
+  // The deployed Gateway persists assistant rows without the live turn ID.
+  // Reconciliation during audible playback must not replace the word reveal.
+  await page.route('**/api/conversations/*', async route => {
+    if (route.request().method() !== 'GET') { await route.continue(); return; }
+    const response = await route.fetch(), view = await response.json();
+    if (Array.isArray(view.messages)) view.messages = view.messages.map((message: Record<string, unknown>) => {
+      if (message.role !== 'assistant') return message;
+      const { turnId, runId, ...native } = message; return native;
+    });
+    await route.fulfill({ response, json: view });
+  });
   const input = page.getByRole('textbox', { name: 'Message NorthPointe' });
   await input.fill('Progress commentary fixture'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const dots = page.getByRole('status', { name: 'NorthPointe is preparing a reply' });

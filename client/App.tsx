@@ -152,7 +152,8 @@ export default function App() {
     if (!sameWindow) ++historyEpoch.current;
     historyWindow.current = view.history;
     if (!keepEarlier) { earlierLoaded.current = false; olderPage.current = view.history?.before; setOlderCursor(view.history?.before); }
-    setMessages(current => reconcileMessages(current, view, keepEarlier));
+    const playbackTurnId = engine.current?.hasSpeechOutput() ? speakingTurn.current : undefined;
+    setMessages(current => reconcileMessages(current, view, keepEarlier, playbackTurnId));
     setWaitingTurn(current => view.messages.some(message => message.turnId === current && (message.role === 'assistant' || ['complete', 'cancelled', 'failed'].includes(message.delivery || ''))) ? '' : current);
     setActiveTurn(view.activeTurn || null); activeTurnRef.current = view.activeTurn || null;
     const terminal = new Set(view.messages.filter(message => message.turnId && ['complete', 'cancelled', 'failed'].includes(message.delivery || '')).map(message => message.turnId!));

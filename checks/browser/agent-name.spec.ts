@@ -34,6 +34,12 @@ test('an OpenClaw display-name change updates both views without resetting voice
   await page.getByLabel('Message NorthPointe').fill('Name sync fixture.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByRole('article', { name: 'NorthPointe', exact: true })).toBeVisible();
+  // A stream placeholder can precede the fixture's persisted final reply. Name
+  // refresh exercises authoritative history, so wait for that baseline first.
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/conversations/${conversation}`), view = await response.json();
+    return !view.activeTurn && view.messages?.some((message: { role: string }) => message.role === 'assistant');
+  }).toBe(true);
   await page.getByLabel('Message NorthPointe').fill('Preserve this unsent draft.');
   await page.getByRole('switch', { name: 'Auto mode' }).click();
   await expect.poll(() => recognition.length).toBe(1);

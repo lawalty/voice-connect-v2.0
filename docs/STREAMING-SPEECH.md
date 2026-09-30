@@ -91,11 +91,19 @@ word animation. Muting, standby, interruption, output failure, and actual playba
 completion release the full readable reply. Native answer completion alone does
 not end the reveal while queued audio is still playing. History/reload is fully
 readable and never starts a speech replay. View switching preserves the timeline.
+Native persisted assistant rows can omit the live turn ID. During playback only,
+history reconciliation retains the presentation association when exactly one
+identical reply follows the owned user's message, before the next user turn.
+The native row ID remains authoritative; unrelated/repeated answers cannot claim
+the association. Actual playback completion releases it, and reload stays silent.
 
 `checks/speech-caption.test.ts`, `checks/audio-output.test.ts`, and
 `checks/browser/messenger-typing.spec.ts` cover cumulative corrections, repeated
 words across chunks, invalid metadata, actual playback clock/underruns, cancellation,
 waiting/commentary separation, view continuity, drafts, standby, and reduced motion.
+`checks/history.test.ts` covers native rows without turn IDs, duplicate answers,
+and next-turn boundaries. The real-socket pacing test also checks full caption
+coverage alongside all three minutes of PCM.
 
 Timestamp protocol reference:
 https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech-live-with-timestamps

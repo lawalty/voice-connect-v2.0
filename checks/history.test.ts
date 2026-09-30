@@ -72,6 +72,20 @@ describe('native history pages', () => {
 
 const message = (id: string, createdAt: number, text = id, extra: Partial<Message> = {}): Message => ({ id, createdAt, text, role: 'assistant', ...extra });
 describe('history display reconciliation', () => {
+  it('preserves the audible reply association when native history omits assistant turn IDs', () => {
+    const current = [message('assistant-owned', 300, 'The final reply.', { turnId: 'owned', runId: 'run' })];
+    const rows = [message('prior', 100, 'The final reply.'), message('native:user', 200, 'Question', { role: 'user', turnId: 'owned' }), message('native:answer', 300, 'The final reply.')];
+    const view = { conversation: { id: 'c', title: '', createdAt: 0, updatedAt: 0 }, messages: rows };
+    const synced = reconcileMessages(current, view, false, 'owned');
+    expect(synced.map(m => m.id)).toEqual(rows.map(m => m.id));
+    expect(synced.at(-1)).toMatchObject({ id: 'native:answer', turnId: 'owned', runId: 'run' });
+    expect(synced[0]!.turnId).toBeUndefined();
+    expect(reconcileMessages(current, { ...view, messages: [rows[0]!, rows[1]!, { ...rows[2]!, runId: 'different-run' }] }, false, 'owned').at(-1)?.turnId).toBeUndefined();
+    expect(reconcileMessages(synced, view, false)).toEqual(rows); // completed/reloaded history is unmodified
+    expect(reconcileMessages(current, { ...view, messages: [...rows, message('duplicate', 301, 'The final reply.')] }, false, 'owned').at(-1)?.turnId).toBeUndefined();
+    const anotherUser = message('next:user', 250, 'Next question', { role: 'user', turnId: 'next' });
+    expect(reconcileMessages(current, { ...view, messages: [rows[0]!, rows[1]!, anotherUser, rows[2]!] }, false, 'owned').at(-1)?.turnId).toBeUndefined();
+  });
   it('keeps the latest stream when an older page overlaps it and sorts failed turns correctly', () => {
     const current = [message('assistant-owned', 300, 'latest stream', { turnId: 'owned' })];
     const older = [message('failed', 100, 'old question', { role: 'user', delivery: 'failed' }), message('native', 300, 'older snapshot', { turnId: 'owned' }), message('middle', 200)];
