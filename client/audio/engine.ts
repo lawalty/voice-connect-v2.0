@@ -13,6 +13,7 @@ export interface VoiceCallbacks {
   onSignal(signal: AcousticSignal): void; onError(message: string): void;
   onInterrupt(): void; onNotice(message: string): void;
   onInputConnection?(recovering: boolean): void;
+  onSpokenText?(text: string | null): void;
 }
 
 export class VoiceEngine {
@@ -100,6 +101,7 @@ export class VoiceEngine {
     return this.microphoneEnergy;
   }
   hasSpeechOutput(): boolean { return this.outputKind === 'answer' && Boolean(this.output) && !this.outputFailed && !this.responseSilenced; }
+  canRevealSpeech(): boolean { return Boolean(this.preferences && !this.speakerMuted && !this.responseSilenced && !this.outputFailed); }
   connectionRetry(reason: 'reply-timeout' | 'reply-close', closeCode?: number) { this.trace.record('connection-retry', { reason, closeCode }); }
   capabilities(): RecognizerCapabilities | undefined { return this.lastCapabilities ? { ...this.lastCapabilities } : undefined; }
   /** A typed send unlocks the selected output without requesting a microphone. */
@@ -131,6 +133,7 @@ export class VoiceEngine {
   setSpeakerMuted(muted: boolean) {
     this.speakerMuted = muted;
     if (!muted) return;
+    this.callbacks.onSpokenText?.(null);
     clearTimeout(this.firstPhraseTimer); this.firstPhraseTimer = undefined;
     // Silence this reply permanently; unmute never replays its cancelled queue.
     this.responseSilenced = this.responseOpen || this.outputActive;
@@ -652,10 +655,12 @@ export class VoiceEngine {
             ++this.playbackGeneration; this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined;
             this.setPhase(this.workStage); this.pumpCommentary();
           } else if (!this.responseOpen) { this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.protectReply(false); this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); }
+          if (this.outputKind === 'answer') this.callbacks.onSpokenText?.(null);
         },
+        progress: (text: string) => { if (playbackGeneration === this.playbackGeneration && this.outputKind === 'answer') this.callbacks.onSpokenText?.(text); },
         reference: (audio: PlaybackSamples) => { if (playbackGeneration !== this.playbackGeneration) return; this.faceTimeline.schedule(audio, this.context?.currentTime); this.playbackReference(audio); },
         cancelled: (atTime: number) => this.vad?.postMessage({ type: 'cancel-reference', atTime }),
-        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.faceTimeline.clear(); this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); if (this.outputKind === 'commentary') this.stopCommentary(); } },
+        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.faceTimeline.clear(); this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); if (this.outputKind === 'commentary') this.stopCommentary(); else this.callbacks.onSpokenText?.(null); } },
       };
       this.output = this.preferences!.output !== 'browser'
         ? new PremiumOutput(this.warmContext(), this.conversationId, this.preferences!.fishVoice || '', events, this.preferences!.fishDelivery)
@@ -682,6 +687,7 @@ export class VoiceEngine {
     else { this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
   }
   interrupt(reason: 'manual' | 'speech-onset' = 'manual', resumeListening = true) {
+    this.callbacks.onSpokenText?.(null);
     clearTimeout(this.firstPhraseTimer); this.firstPhraseTimer = undefined; this.answerChunked = false;
     ++this.playbackGeneration;
     const pending = this.outputActive || this.responseOpen || Boolean(this.output);
@@ -713,6 +719,7 @@ export class VoiceEngine {
     if (this.active && this.recognizer?.capabilities.processing !== 'local' && this.preferences?.recognition !== 'deepgram') this.captureFailure('Network disconnected. Your unsent draft is preserved. Tap to reconnect when online.', 'network-offline');
   };
   dispose() {
+    this.callbacks.onSpokenText?.(null);
     clearTimeout(this.firstPhraseTimer); this.firstPhraseTimer = undefined;
     this.disposed = true; ++this.playbackGeneration; this.stop('disposed'); this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.cues?.dispose(); this.cues = undefined;
     this.releaseContext();

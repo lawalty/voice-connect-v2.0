@@ -61,7 +61,46 @@ Interruption stops local sources and invalidates callbacks before closing the
 provider connection. Pending audio is discarded, never drained after cancellation.
 Old cached clients can still use the bridge; refreshed clients negotiate pacing.
 
-## Verification
+## Messenger speech presentation
+
+Messenger shows an ephemeral three-dot waiting bubble from submission until the
+first public answer text. Tool/work commentary remains outside message history;
+active voice/Auto mode can speak it using its separate output queue. An empty
+answer bubble with a caret replaces the dots while its first audio is preparing.
+
+Refreshed clients request `timing=words`. The bridge uses Fish's streaming
+`/v1/tts/live/with-timestamp` endpoint and forwards validated cumulative alignment
+snapshots, including corrections carried in empty audio frames. PCM still flows
+immediately through the same four-second credit window. Old clients retain the
+existing endpoint. No second transcription request or full-answer buffer is used.
+
+Word offsets map onto concatenated PCM and then onto the AudioContext's actual
+scheduled buffers. Underruns and suspension cannot advance the text using wall
+time. Replaced snapshots cannot rewind already revealed words. Provider content
+maps to the speech text after delivery cues/Markdown cleanup; Messenger retains
+the original Markdown. If the provider verbalizes a numeral differently, that
+unaligned portion becomes readable at its completed chunk boundary. Timestamps
+can arrive after their audio, so an initial word or late correction can catch up;
+this does not claim sample-accurate phoneme synchronization.
+
+Browser speech uses native word-boundary callbacks when provided by the selected
+OS voice. Voices that omit them reveal coherent utterances at playback rather
+than fake per-word timing. Reduced motion displays the available full text and
+static dots. Screen readers receive the original available text, not each visual
+word animation. Muting, standby, interruption, output failure, and actual playback
+completion release the full readable reply. Native answer completion alone does
+not end the reveal while queued audio is still playing. History/reload is fully
+readable and never starts a speech replay. View switching preserves the timeline.
+
+`checks/speech-caption.test.ts`, `checks/audio-output.test.ts`, and
+`checks/browser/messenger-typing.spec.ts` cover cumulative corrections, repeated
+words across chunks, invalid metadata, actual playback clock/underruns, cancellation,
+waiting/commentary separation, view continuity, drafts, standby, and reduced motion.
+
+Timestamp protocol reference:
+https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech-live-with-timestamps
+
+## Regression coverage
 
 Speech chunks remove common emphasis markers (`**`, `*`, `__`, `_`, `~~`)
 and heading, quote, and bullet prefixes before either speech provider receives
@@ -74,7 +113,7 @@ code and escaped symbols remain literal content.
   delivery, long chunks, snapshot corrections, abbreviations and literal symbols.
 - `checks/browser/markdown-speech.spec.ts`: browser speech and Fish transport
   receive clean sentences before completion; persisted history retains Markdown.
-- `checks/browser/early-speech.spec.ts`: the actual Messenger/engine path displays
+- `checks/browser/early-speech.spec.ts`: the actual Messenger/engine path receives
   partial native text and sends an opening Fish phrase before completion, without
   redundant history reads or replaying speech on refresh.
 - `checks/audio-continuous.test.ts`: the opening deadline preserves the suffix

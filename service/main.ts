@@ -206,9 +206,10 @@ export async function buildApp(options:AppOptions={}) {
   });
   app.get('/api/audio',{websocket:true},(socket,req)=>{
     const conversationId=bindSocket(socket,req);if(!conversationId)return;
-    const q=z.object({kind:z.enum(['stt','tts']),provider:z.enum(['deepgram','fish','vosk']).default('deepgram'),voice:id.optional(),fishDelivery:z.enum(FISH_DELIVERIES).optional(),conversationId:id}).strict().safeParse(req.query);
+    const q=z.object({kind:z.enum(['stt','tts']),provider:z.enum(['deepgram','fish','vosk']).default('deepgram'),voice:id.optional(),fishDelivery:z.enum(FISH_DELIVERIES).optional(),timing:z.literal('words').optional(),conversationId:id}).strict().safeParse(req.query);
     const unavailable=(message:string)=>{socket.send(JSON.stringify({type:'error',message}));socket.close(1008,'Speech unavailable');};
     if(!q.success){unavailable('Choose a supported speech provider and voice in Settings.');return;}
+    if(q.data.timing && (q.data.provider!=='fish'||q.data.kind!=='tts')){unavailable('Word timing is available for Fish Audio output only.');return;}
     if(q.data.fishDelivery && (q.data.provider!=='fish'||q.data.kind!=='tts')){unavailable('Delivery cues are available for Fish Audio speech output only.');return;}
     if(q.data.provider==='vosk'){
       if(q.data.kind!=='stt'||q.data.voice){unavailable('Vosk supports recognition only.');return;}
@@ -219,7 +220,7 @@ export async function buildApp(options:AppOptions={}) {
       if(q.data.kind!=='tts'||!q.data.voice){unavailable('Fish Audio needs a voice ID and supports speech output only.');return;}
       const key=store.fishKey();if(!key){unavailable('Save your Fish Audio API key in Settings before testing or using this voice.');return;}
       sockets.get(socket)!.provider='fish';
-      bridgeFishAudio(socket,key,q.data.voice,()=>Boolean(session(req)),undefined,{model:cfg.fishModel,cue:q.data.fishDelivery??speechSettings.read().fishDelivery??DEFAULT_FISH_DELIVERY});return;
+      bridgeFishAudio(socket,key,q.data.voice,()=>Boolean(session(req)),undefined,{model:cfg.fishModel,cue:q.data.fishDelivery??speechSettings.read().fishDelivery??DEFAULT_FISH_DELIVERY},q.data.timing==='words');return;
     }
     if(q.data.kind!=='stt'){unavailable('Deepgram is used for recognition only. Choose Fish Audio or Device voices for speech output.');return;}
     if(q.data.voice){unavailable('Deepgram recognition does not use an output voice.');return;}
