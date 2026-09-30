@@ -1,12 +1,12 @@
 import { useAgentName } from '../agent-name';
 import { useEffect, useRef, useState } from 'react';
 import ClassicOrb, { type OrbProps } from './ClassicOrb';
-import type { OrbPack } from './packs';
+import type { FacePack } from './packs';
 import { GlassFaceRenderer } from './renderer';
 import { FaceMotion } from './motion';
 import { SILENT_MOUTH, type MouthPose } from './speech';
 
-export interface FaceOrbProps extends OrbProps { pack:OrbPack; motion:number; phaseColors:boolean; getSpeech?:()=>MouthPose; }
+export interface FaceOrbProps extends OrbProps { pack:FacePack; motion:number; phaseColors:boolean; getSpeech?:()=>MouthPose; }
 export default function FaceOrb(props:FaceOrbProps){
   const agentName = useAgentName();
   const {pack,motion:strength,phaseColors,phase,asleep=false,waking=false,onWake,wakeDisabled=false,onStandby,onResume}=props;

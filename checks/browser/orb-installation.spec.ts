@@ -6,6 +6,9 @@ import { waitForFixtureBudget } from './fixture-budget';
 import { LUMINOUS_GLASS, type InstallationOrbs } from '../../contract/orb-packs';
 
 test.beforeEach(waitForFixtureBudget);
+// This scenario verifies storage across two simultaneous devices. Keep real
+// WebGL rendering, but avoid continuous GPU work while closing those contexts.
+test.use({ reducedMotion: 'reduce' });
 test('a legacy phone avatar migrates to the installation and fresh devices share packs and appearance', async ({ page, browser, context }, info) => {
   const suffix = randomUUID().slice(0, 8), id = `legacy-${suffix}`;
   const pack = { ...LUMINOUS_GLASS, id, name: 'Shared personal avatar',
@@ -50,7 +53,7 @@ test('a legacy phone avatar migrates to the installation and fresh devices share
     }
     await expect(page.locator('.orb-pack-preview [data-face-ready="true"]')).toBeVisible();
     await expect.poll(async () => await page.evaluate(() => localStorage.getItem('vc2:orb-server-migration-v1'))).toBe('done');
-    second = await browser.newContext({ baseURL: origin, storageState: { cookies: await context.cookies(), origins: [] } });
+    second = await browser.newContext({ baseURL: origin, reducedMotion: 'reduce', storageState: { cookies: await context.cookies(), origins: [] } });
     const pc = await second.newPage(); await pc.goto('/'); await appearance(pc);
     await expect(pc.getByRole('combobox', { name: 'Orb style', exact: true })).toHaveValue(id);
     await expect(pc.locator('.orb-pack-preview [data-face-ready="true"]')).toBeVisible();

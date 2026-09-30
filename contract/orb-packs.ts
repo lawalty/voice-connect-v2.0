@@ -3,15 +3,31 @@ import { z } from 'zod';
 export const MAX_PACK_BYTES = 6 * 1024 * 1024;
 export const MAX_CUSTOM_PACKS = 8;
 export const PACK_RENDERER = 'glass-face-v1';
-export const packSchema = z.object({
-  version: z.literal(1), renderer: z.literal(PACK_RENDERER),
+const identity = {
   id: z.string().regex(/^[a-z][a-z0-9-]{1,47}$/), name: z.string().trim().min(1).max(48),
+};
+export const facePackSchema = z.object({
+  version: z.literal(1), renderer: z.literal(PACK_RENDERER),
+  ...identity,
   atlas: z.string().max(MAX_PACK_BYTES), flow: z.string().max(MAX_PACK_BYTES).optional(),
   motion: z.object({ yaw: z.number().min(0).max(20), pitch: z.number().min(0).max(12), roll: z.number().min(0).max(12) }).strict(),
 }).strict();
+export const ORB_STATES = ['idle', 'standby', 'connecting', 'listening', 'thinking', 'working', 'speaking', 'error'] as const;
+export type OrbState = typeof ORB_STATES[number];
+export const statusPackSchema = z.object({
+  version: z.literal(1), renderer: z.literal('status-orb-v1'), ...identity,
+  colors: z.record(z.enum(ORB_STATES), z.string().regex(/^#[0-9a-fA-F]{6}$/)),
+}).strict();
+export const packSchema = z.discriminatedUnion('renderer', [facePackSchema, statusPackSchema]);
 export type OrbPack = z.infer<typeof packSchema>;
-export const LUMINOUS_GLASS: OrbPack = Object.freeze({ version: 1, renderer: PACK_RENDERER, id: 'luminous-glass', name: 'Luminous Glass',
+export type FacePack = z.infer<typeof facePackSchema>;
+export type StatusPack = z.infer<typeof statusPackSchema>;
+export const LUMINOUS_GLASS: FacePack = Object.freeze({ version: 1, renderer: PACK_RENDERER, id: 'luminous-glass', name: 'Luminous Glass',
   atlas: '/orb-packs/luminous-glass/atlas.png', flow: '/orb-packs/luminous-glass/flow.png', motion: { yaw: 14, pitch: 7, roll: 7 } });
+export const VOICE_CONNECT_V1: StatusPack = Object.freeze({ version: 1, renderer: 'status-orb-v1', id: 'voice-connect-v1', name: 'Voice Connect v1',
+  colors: { idle: '#27272a', standby: '#27272a', connecting: '#52525c', listening: '#00bc7d', thinking: '#fe9a00', working: '#ff6900', speaking: '#8e51ff', error: '#e7000b' } });
+export const BUILTIN_PACKS: readonly OrbPack[] = [LUMINOUS_GLASS, VOICE_CONNECT_V1];
+export const isBuiltinPack = (id: string) => BUILTIN_PACKS.some(pack => pack.id === id);
 export interface OrbPreferences { packId: string; motion: number; phaseColors: boolean; }
 export const orbPreferencesSchema = z.object({
   packId: z.string().regex(/^[a-z][a-z0-9-]{1,47}$/),
@@ -54,7 +70,8 @@ export function parseOrbPack(text: string): OrbPack {
   if (new TextEncoder().encode(text).byteLength > MAX_PACK_BYTES) throw new Error('Orb packs must be smaller than 6 MB.');
   let pack: OrbPack;
   try { pack = packSchema.parse(JSON.parse(text)); } catch { throw new Error('This is not a supported version 1 orb pack.'); }
-  if (pack.id === 'classic' || pack.id === LUMINOUS_GLASS.id) throw new Error('Give your custom pack a unique ID before importing it.');
+  if (pack.id === 'classic' || isBuiltinPack(pack.id)) throw new Error('Give your custom pack a unique ID before importing it.');
+  if (pack.renderer === 'status-orb-v1') return pack;
   const size = pngDimensions(pack.atlas);
   if (pack.flow && pngDimensions(pack.flow) !== size) throw new Error('The atlas and motion map must have the same dimensions.');
   return pack;

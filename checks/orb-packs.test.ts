@@ -5,7 +5,7 @@ const atlas='data:image/png;base64,'+readFileSync('client/public/orb-packs/lumin
 const flow='data:image/png;base64,'+readFileSync('client/public/orb-packs/luminous-glass/flow.png').toString('base64');
 const custom={...LUMINOUS_GLASS,id:'my-own-orb',name:'My own orb',atlas,flow};
 describe('portable face packs',()=>{
-  it('accepts a prepared face without any application or voice changes',()=>{expect(parseOrbPack(JSON.stringify(custom))).toEqual(custom);expect(parseOrbPack(JSON.stringify({...custom,flow:undefined})).flow).toBeUndefined();});
+  it('accepts a prepared face without any application or voice changes',()=>{expect(parseOrbPack(JSON.stringify(custom))).toEqual(custom);expect(parseOrbPack(JSON.stringify({...custom,flow:undefined}))).not.toHaveProperty('flow');});
   it('rejects URLs, executable content, unsupported renderers, and reserved identities',()=>{
     for(const patch of [{atlas:'https://example.org/face.png'},{atlas:'data:image/svg+xml;base64,PHN2Zy8+'},{script:'alert(1)'},{renderer:'external-js'},{id:'classic'},{id:'luminous-glass'},{id:'__proto__'},{motion:{yaw:999,pitch:7,roll:7}}])expect(()=>parseOrbPack(JSON.stringify({...custom,...patch}))).toThrow();
   });

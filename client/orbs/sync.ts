@@ -29,7 +29,7 @@ export class OrbSync {
     if (this.disposed || (this.remote && next.revision < this.remote.revision)) return;
     this.remote = next;
     // Stable references avoid rebuilding WebGL after a settings refresh.
-    const packs = next.packs.map(pack => this.view.packs.find(old => old.id === pack.id && old.atlas === pack.atlas) ?? pack);
+    const packs = next.packs.map(pack => this.view.packs.find(old => old.id === pack.id && JSON.stringify(old) === JSON.stringify(pack)) ?? pack);
     this.emit({ packs, preferences: { ...next.preferences, ...this.pending } });
   }
   async refresh() {
