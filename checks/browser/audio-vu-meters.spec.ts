@@ -107,7 +107,7 @@ for (const style of ['classic', LUMINOUS_GLASS.id]) test(`${style} ears mirror a
   await page.screenshot({ path: info.outputPath('vu-quiet-orb.png') });
   await observeEarMovement(page);
   await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   if (style === 'classic') await expect.poll(() => earMovement(page, 'width')).toBeGreaterThan(.004);
   else await expect.poll(async () => Math.max(await earMovement(page, 'x'), await earMovement(page, 'y'))).toBeGreaterThan(.002);
   await sound(page, .05); await segments(page, 8);

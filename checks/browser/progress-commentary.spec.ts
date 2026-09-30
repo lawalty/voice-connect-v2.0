@@ -62,7 +62,7 @@ for (const [mode, output] of [['voice-orb', 'browser'], ['voice-messenger', 'bro
     await expect.poll(() => subscribed.has(conversationId)).toBe(true);
     if (mode !== 'text-messenger') {
       await page.getByRole('button', { name: 'Wake NorthPointe' }).click();
-      await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+      await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     }
     if (mode !== 'voice-orb') await page.getByRole('button', { name: /^Conversation/ }).click();
     if (mode === 'text-messenger') {

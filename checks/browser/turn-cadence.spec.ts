@@ -55,7 +55,7 @@ test('automatic turns keep cue order and one capture session across orb, messeng
     return { cues: p.cues, captures: p.captures, capturing: p.tracks.some(track => track.readyState === 'live' && track.enabled), spoken: p.spoken.length, cancellations: p.cancellations };
   });
   const endPlayback = async () => {
-    await expect(page.getByText('NorthPointe is speaking', { exact: true })).toBeVisible();
+    await expect(page.locator('.orb-stage.phase-speaking')).toBeVisible();
     await page.evaluate(async () => { const p = (window as unknown as { vcCadence: { pending: SpeechSynthesisUtterance[] } }).vcCadence; while (p.pending.length) { await Promise.resolve(); p.pending.shift()!.onend?.(new Event('end') as SpeechSynthesisEvent); } });
   };
   const speak = (text: string) => {
@@ -69,7 +69,7 @@ test('automatic turns keep cue order and one capture session across orb, messeng
   const id = (await (await created).json()).id as string;
   await expect.poll(() => subscribed.has(id)).toBe(true);
   await page.getByRole('button', { name: 'Wake NorthPointe' }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible({ timeout: 30000 });
   const expected = ['listening'];
   expect((await state()).cues).toEqual(expected);
   for (const text of ['First automatic thought.', 'A second automatic thought.']) {
@@ -126,7 +126,7 @@ test('automatic turns keep cue order and one capture session across orb, messeng
   expect((await state()).capturing).toBe(false); expect((await state()).cancellations).toBe(cancels);
   await endPlayback(); expect((await state()).cues).toEqual(expected);
   await page.getByRole('switch', { name: 'Auto mode' }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('switch', { name: 'Auto mode' })).toBeChecked();
   expect((await state()).captures).toBe(2); expect(sockets).toHaveLength(2); expect((await state()).cues).toEqual(expected);
   await page.screenshot({ path: info.outputPath('messenger-auto-mode.png') });
@@ -157,7 +157,7 @@ test('automatic turns keep cue order and one capture session across orb, messeng
   await page.getByRole('button', { name: 'Back to orb' }).click();
   for (let attempt = 0; attempt < 2; attempt++) {
     await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
-    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+    await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     expected.push('listening'); expect((await state()).cues).toEqual(expected);
     const submitted = turns.length;
     await page.getByRole('button', { name: 'End voice session', exact: true }).click();

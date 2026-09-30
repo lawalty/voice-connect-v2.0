@@ -38,7 +38,7 @@ async function setup(page: Page, output: 'browser' | 'fish' = 'browser') {
   await page.getByRole('button', { name: 'NorthPointe', exact: true }).click();
   await page.getByRole('button', { name: 'Begin a new conversation', exact: true }).click();
   await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
 }
 
 async function state(page: Page) {
@@ -95,7 +95,7 @@ test('standby is grey, releases capture, keeps the draft and session, and resume
   await expect(resume(page)).toBeEnabled();
   expect((await state(page)).starts).toBe(1);
   await resume(page).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   await expect.poll(() => turns).toEqual(['standby', 'resume']);
   expect((await state(page)).starts).toBe(2);
   expect((await state(page)).live).toBeGreaterThan(0);
@@ -130,7 +130,7 @@ for (const output of ['browser', 'fish'] as const) test(`${output}: standby canc
   if (output === 'fish') await expect.poll(() => closed.length).toBeGreaterThan(0);
   else expect((await state(page)).cancels).toBeGreaterThan(cancelled);
   await resume(page).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   await page.waitForTimeout(650);
   expect(await spoken()).toBe(count);
   await say(page, 'A second message after returning');
@@ -159,7 +159,7 @@ test('a pending send cannot overtake standby and resume notices or restart old s
   expect((await state(page)).live).toBe(0);
   expect(aborts).toHaveLength(0);
   await resume(page).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   release();
   await expect.poll(() => turns).toEqual(['Receipt delayed fixture', 'standby', 'resume']);
   await expect.poll(() => aborts.length).toBeGreaterThan(0);
@@ -187,7 +187,7 @@ test('notification or microphone failure leaves standby private and keyboard res
   expect(turns).toEqual(['standby']);
   await page.evaluate(() => { (window as any).standbyProbe.fail = false; });
   await resume(page).focus(); await page.keyboard.press('Enter');
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   await expect.poll(() => turns).toEqual(['standby', 'resume']);
   await page.getByRole('button', { name: 'End voice session' }).click();
 });
@@ -221,7 +221,7 @@ test('a typed message queued during standby stays silent even if listening resum
   await page.getByRole('textbox', { name: 'Message NorthPointe' }).fill('A quiet typed message');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await resume(page).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   release();
   await expect.poll(() => turns).toEqual(['standby', 'A quiet typed message', 'resume']);
   await page.waitForTimeout(650);

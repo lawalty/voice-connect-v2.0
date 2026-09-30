@@ -36,7 +36,7 @@ test('indexed PDF pill is below the orb, persists through download and reload, a
   await enterFixtureSession(page);
   await expect(page.getByRole('button',{name:'Wake NorthPointe'})).toBeEnabled();
   await expect(page.getByRole('region',{name:'Document downloads'})).toHaveCount(0);
-  const layoutSelectors=['.orb-stage','.voice-state','.voice-bottom','.conversation-heading','.conversation-toggle'];
+  const layoutSelectors=['.orb-stage','.voice-bottom','.conversation-heading','.conversation-toggle'];
   const before=await Promise.all(layoutSelectors.map(selector=>page.locator(selector).boundingBox()));
   state={...document,status:'ready',chunk_count:0};
   await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
@@ -106,14 +106,14 @@ for(const viewport of [{width:768,height:768},{width:390,height:664}]) {
     await expect(page.locator('.orb-stage[data-face-ready="true"]')).toBeVisible();
     await page.getByRole('button',{name:'Wake NorthPointe',exact:true}).click();
     // Cold speech-detector startup has its own 20s deadline; this checks layout, not startup speed.
-    await expect(page.getByText('Listening to you',{exact:true})).toBeVisible({timeout:30000});
-    const selectors=['.orb-stage','.orb-canvas','.voice-state','.voice-bottom','.conversation-toggle'];
+    await expect(page.locator('.orb-stage.phase-listening')).toBeVisible({timeout:30000});
+    const selectors=['.orb-stage','.orb-canvas','.voice-bottom','.conversation-toggle'];
     const before=await Promise.all(selectors.map(selector=>page.locator(selector).boundingBox()));
     await page.screenshot({path:info.outputPath('face-before-download.png')});
     ready=true;await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
     const pill=page.locator('.document-download-pill');await expect(pill).toBeVisible();
     for(const [index,selector] of selectors.entries()) expect(await page.locator(selector).boundingBox()).toEqual(before[index]);
-    const bounds=(await pill.boundingBox())!,orb=before[0]!,controls=before[3]!;
+    const bounds=(await pill.boundingBox())!,orb=before[0]!,controls=before[2]!;
     expect(bounds.y).toBeGreaterThanOrEqual(orb.y+orb.height);
     expect(bounds.y+bounds.height).toBeLessThan(controls.y);
     await page.screenshot({path:info.outputPath('face-with-download.png')});

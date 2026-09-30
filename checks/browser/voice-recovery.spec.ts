@@ -37,7 +37,7 @@ async function setup(page: Page) {
   await expect(page.getByRole('button', { name: 'Wake NorthPointe' })).toBeEnabled();
   await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
   await page.getByRole('switch', { name: 'Auto mode' }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   const state = () => page.evaluate(() => {
     const p = (window as unknown as { voiceRecovery: Probe }).voiceRecovery;
     return { captures: p.tracks.length, live: p.tracks.filter(t => t.readyState === 'live' && t.enabled).length, spoken: p.spoken, cancelled: p.cancelled };
@@ -62,10 +62,10 @@ test('a microphone failure during speech remains visible in diagnostics after wa
     probe.tracks[0]!.dispatchEvent(new Event('mute'));
   });
   await expect(page.getByText('Microphone capture was interrupted. Review your draft before sending.')).toBeVisible();
-  await expect(page.getByText('NorthPointe is speaking', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-speaking')).toBeVisible();
   await page.getByRole('button', { name: 'End voice session' }).click();
   await page.getByRole('switch', { name: 'Auto mode' }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByText('Device diagnostics', { exact: true }).click();
   const events = page.getByRole('list', { name: 'Recent voice events' });
@@ -105,7 +105,7 @@ for (const fault of ['reply connection', 'recognition connection'] as const) {
     await finishSentence(page);
     await expect.poll(async () => (await p.state()).spoken.join(' ')).toBe('Your conversation stays together. I’m here with you.');
     await finishSentence(page);
-    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+    await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     // The next normal voice turn is accepted exactly once on the same session.
     p.recognition.at(-1)!.send(JSON.stringify({ type: 'stt', text: 'A second synthetic message.', started: true, final: true, turnComplete: true }));
     await expect(page.getByRole('article', { name: 'NorthPointe', exact: true }).last()).toContainText('Your second message is in the same conversation.');

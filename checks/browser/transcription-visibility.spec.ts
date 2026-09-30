@@ -48,21 +48,21 @@ test('saved transcription visibility only controls the orb popup, never automati
   await page.screenshot({ path: info.outputPath('show-transcriptions-default-off.png') });
   await page.getByRole('button', { name: 'Close Make yourself at home', exact: true }).click();
   await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   partial('A complete thought without a popup.');
-  await expect(page.getByText('I’m hearing you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-hearing')).toBeVisible();
   await expect(page.locator('.heard-draft')).toHaveCount(0);
   expect(turns).toEqual([]);
   finish('A complete thought without a popup.');
   await expect.poll(() => turns).toEqual(['A complete thought without a popup.']);
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
 
   await openSettings(); await toggle.check(); await save(true);
   await page.reload();
   await openSettings(); await expect(toggle).toBeChecked();
   await page.getByRole('button', { name: 'Close Make yourself at home', exact: true }).click();
   await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   partial('Words visible in the orb and composer.');
   await expect(page.locator('.heard-draft')).toContainText('Words visible in the orb and composer.');
   await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
@@ -71,7 +71,7 @@ test('saved transcription visibility only controls the orb popup, never automati
   finish('Words visible in the orb and composer.');
   await expect.poll(() => turns.at(-1)).toBe('Words visible in the orb and composer.');
   await expect(page.getByRole('textbox', { name: 'Message NorthPointe' })).toHaveValue('');
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
 
   await openSettings(); await toggle.uncheck(); await save(false);
   await page.reload(); await openSettings(); await expect(toggle).not.toBeChecked();
@@ -79,7 +79,7 @@ test('saved transcription visibility only controls the orb popup, never automati
   // Messenger transcription remains available even with the orb popup disabled.
   await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
   await page.getByRole('switch', { name: 'Auto mode' }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   partial('Still visible in Messenger.');
   await expect(page.getByRole('textbox', { name: 'Message NorthPointe' })).toHaveValue('Still visible in Messenger.');
   await expect(page.locator('.heard-draft')).toHaveCount(0);
