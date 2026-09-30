@@ -84,7 +84,8 @@ for(const viewport of [{width:768,height:768},{width:390,height:664}]) {
     await enterFixtureSession(page);
     await expect(page.locator('.orb-stage[data-face-ready="true"]')).toBeVisible();
     await page.getByRole('button',{name:'Wake NorthPointe',exact:true}).click();
-    await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
+    // Cold speech-detector startup has its own 20s deadline; this checks layout, not startup speed.
+    await expect(page.getByText('Listening to you',{exact:true})).toBeVisible({timeout:30000});
     const selectors=['.orb-stage','.orb-canvas','.voice-state','.voice-bottom','.conversation-toggle'];
     const before=await Promise.all(selectors.map(selector=>page.locator(selector).boundingBox()));
     await page.screenshot({path:info.outputPath('face-before-download.png')});
