@@ -64,5 +64,8 @@ source = base / "releases" / release / "integrations/openclaw-library/document-l
 shutil.copyfile(source, skill)
 os.chmod(skill, 0o644)
 os.chown(skill, 1000, 1000)
-native("plugins", "reload", "vc-shared-library", "--accept-capabilities", "--json")
+# A config-selected local path needs a matching native install record before
+# package-maintenance commands can resolve its authoritative owner. Re-linking
+# registers this exact reviewed package and applies it to the running Gateway.
+native("plugins", "install", "--link", new_path, "--force", "--accept-capabilities")
 print(json.dumps({"plugin_release": release, "native_plugin_reloaded": True, "skill_sha256": hashlib.sha256(skill.read_bytes()).hexdigest(), "backup": str(backup), "unrelated_config_preserved": True}))
