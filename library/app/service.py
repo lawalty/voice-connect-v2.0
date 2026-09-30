@@ -279,6 +279,7 @@ class RagService:
         *,
         title: str | None,
         markdown: str,
+        conversation_id: UUID | None = None,
     ) -> GeneratedDocumentAccepted:
         document = await self.repository.get_document(owner_id, document_id)
         if document is None:
@@ -313,6 +314,11 @@ class RagService:
             size_bytes=len(encoded),
             sha256=hashlib.sha256(encoded).hexdigest(),
         )
+        if conversation_id:
+            metadata = dict(document.source_metadata)
+            conversations = metadata.get("vc_conversation_ids", [])
+            metadata["vc_conversation_ids"] = list(dict.fromkeys([*conversations, str(conversation_id)]))
+            await self.repository.update_document_source_metadata(owner_id, document.id, metadata)
         if document.storage_bucket and document.storage_path:
             try:
                 await self.storage.remove(
@@ -597,6 +603,8 @@ class RagService:
                         "Generated document is missing canonical Markdown or title"
                     )
                 chunks = chunk_markdown(document.body_markdown, document.title)
+                # A ready generated document promises both searchable text and a usable PDF.
+                await self.render_generated_pdf(owner_id, document.id)
             else:
                 if not document.storage_bucket or not document.storage_path:
                     raise ValueError(
@@ -796,12 +804,22 @@ class RagService:
         )
 
     async def list_documents(
-        self, owner_id: UUID, group_identifier: str | None, limit: int
+        self, owner_id: UUID, group_identifier: str | None, limit: int,
+        conversation_id: UUID | None = None,
     ) -> list[Document]:
         group_id = None
         if group_identifier:
             group_id = (await self.resolve_group(owner_id, group_identifier)).id
-        return await self.repository.list_documents(owner_id, group_id, limit)
+        return await self.repository.list_documents(owner_id, group_id, limit, conversation_id)
+
+    async def generated_source(self, owner_id: UUID, document_id: UUID) -> Document:
+        document = await self.repository.get_document(owner_id, document_id)
+        if document is None:
+            raise LookupError("Generated document not found")
+        self._require_agent_managed(document, "read as Markdown")
+        if document.document_kind != "generated" or document.archived_at or not document.body_markdown:
+            raise ValueError("This document has no active generated Markdown source")
+        return document
 
     async def signed_link(
         self, owner_id: UUID, document_id: UUID, expires_in: int | None
@@ -846,6 +864,7 @@ class RagService:
             raise ValueError(
                 "Only Hermes-generated Markdown documents can be rendered as PDF"
             )
-        return document, render_markdown_pdf(
-            document.title, document.body_markdown, document.updated_at
+        return document, await asyncio.to_thread(render_markdown_pdf,
+            document.title, document.body_markdown, document.updated_at,
+            author=str(document.source_metadata.get("authored_by") or "NorthPointe"),
         )

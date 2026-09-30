@@ -422,13 +422,16 @@ class FakeRepository:
         return None
 
     async def list_documents(
-        self, owner_id: UUID, group_id: UUID | None, limit: int
+        self, owner_id: UUID, group_id: UUID | None, limit: int,
+        conversation_id: UUID | None = None,
     ) -> list[Document]:
         output = []
         for document in self.documents.values():
             if document.owner_id != owner_id or (
                 group_id and document.group_id != group_id
             ):
+                continue
+            if conversation_id and (document.document_kind != "generated" or document.archived_at or str(conversation_id) not in document.source_metadata.get("vc_conversation_ids", [])):
                 continue
             hydrated = await self.get_document(owner_id, document.id)
             if hydrated is not None:

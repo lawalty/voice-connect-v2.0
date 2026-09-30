@@ -419,7 +419,8 @@ class SupabaseRepository(_SupabaseHttp):
         return self._document(rows[0]) if rows else None
 
     async def list_documents(
-        self, owner_id: UUID, group_id: UUID | None, limit: int
+        self, owner_id: UUID, group_id: UUID | None, limit: int,
+        conversation_id: UUID | None = None,
     ) -> list[Document]:
         params: dict[str, Any] = {
             "owner_id": f"eq.{owner_id}",
@@ -429,6 +430,11 @@ class SupabaseRepository(_SupabaseHttp):
         }
         if group_id:
             params["group_id"] = f"eq.{group_id}"
+        if conversation_id:
+            params["source_metadata->vc_conversation_ids"] = 'cs.["' + str(conversation_id) + '"]'
+            params["document_kind"] = "eq.generated"
+            params["archived_at"] = "is.null"
+            params["order"] = "updated_at.desc"
         response = await self.request("GET", "/rest/v1/rag_documents", params=params)
         rows = response.json()
         if not rows:

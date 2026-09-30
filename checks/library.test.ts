@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { buildApp } from '../service/main.js';
 import { LibraryClient } from '../service/library.js';
-import { createLibraryTools, libraryToolDefinitions } from '../service/library-tools.js';
+import { createLibraryTools, libraryToolDefinitions, conversationFromSessionKey } from '../service/library-tools.js';
 
 const groupId='1ead712b-26ab-4c4c-a0f1-2acb9f5d0f15',documentId='316db01a-3ed9-4be4-b3fb-1ded70bd5bfc',chunkId='481c04d1-bffa-4e4f-8a3d-890c7b26d79d';
 const groups=[{id:groupId,name:'Work',slug:'work',description:'Work reference material',owner_id:'private-owner'}];
@@ -38,6 +38,44 @@ async function fixture() {
 }
 
 describe('shared library authentication and exact API contract',()=>{
+  it('binds generated documents to native conversation context and rejects model-supplied routing',async()=>{
+    const conversation='a2b9932b-c213-4aef-ab04-cb507ffba502';
+    expect(conversationFromSessionKey(`agent:northpointe:vc2:${conversation}`)).toBe(conversation);
+    expect(conversationFromSessionKey(`agent:northpointe:vc2:${conversation}:child`)).toBeUndefined();
+    const fetcher=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({document_id:documentId,job_id:chunkId,title:'QA notes',status:'pending',revision:1})));
+    const tools=createLibraryTools(new LibraryClient('https://library.example',secret,fetcher),`agent:northpointe:vc2:${conversation}`);
+    const write=tools.find(tool=>tool.name==='vc_library_write_document')!;
+    const result=await write.execute('write',{title:'QA notes',markdown:'## Decision\n\nInspect the bridge.'});
+    expect(result).toMatchObject({details:{status:'pending',document_id:documentId}});
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({title:'QA notes',markdown:'## Decision\n\nInspect the bridge.',conversation_id:conversation});
+    expect(await write.execute('bad',{title:'QA',markdown:'x',conversation_id:chunkId})).toMatchObject({isError:true});
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('resolves a title before reading complete source and rejects ambiguous ID/title requests',async()=>{
+    const fetcher=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({id:documentId}))).mockResolvedValueOnce(new Response(JSON.stringify({id:documentId,title:'QA notes',body_markdown:'Full source.',revision:3,status:'ready'})));
+    const client=new LibraryClient('https://library.example',secret,fetcher);
+    expect(await client.readDocument({title:'QA notes'})).toMatchObject({body_markdown:'Full source.',revision:3});
+    expect(fetcher.mock.calls[1][0]).toBe(`https://library.example/v1/generated-documents/${documentId}/source`);
+    await expect(client.readDocument({title:'QA',document_id:documentId})).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it('protects the generated feed and stable download route with owner authentication and validates conversation IDs',async()=>{
+    const f=await fixture();
+    expect((await f.app.inject({url:`/api/library/generated?conversation_id=${documentId}`})).statusCode).toBe(401);
+    expect((await f.app.inject({url:`/api/library/documents/${documentId}/download`})).statusCode).toBe(401);
+    expect((await f.app.inject({url:`/api/library/generated?conversation_id=${documentId}`,headers:f.headers})).statusCode).toBe(404);
+    expect((await f.app.inject({url:'/api/library/generated?conversation_id=invalid',headers:f.headers})).statusCode).toBe(400);
+    expect(f.calls).toHaveLength(0);
+  });
+  it('downloads only validated PDF bytes and never follows a credential-bearing redirect',async()=>{
+    const good=new LibraryClient('https://library.example',secret,vi.fn().mockResolvedValue(new Response('%PDF-1.4\nfixture',{headers:{'content-type':'application/pdf'}})));
+    expect((await good.downloadPdf(documentId)).subarray(0,5).toString()).toBe('%PDF-');
+    for(const body of ['<html>error</html>','']){
+      const bad=new LibraryClient('https://library.example',secret,vi.fn().mockResolvedValue(new Response(body,{headers:{'content-type':'application/pdf'}})));
+      await expect(bad.downloadPdf(documentId)).rejects.toMatchObject({statusCode:502});
+    }
+    const f=await fixture();f.redirect();await expect(new LibraryClient(f.url,secret).downloadPdf(documentId)).rejects.toMatchObject({statusCode:502});
+  });
   it('uses the existing API paths and keeps credentials and storage internals server-side',async()=>{
     const f=await fixture();
     const list=await f.app.inject({url:'/api/library/documents?group=Work&limit=200',headers:f.headers});

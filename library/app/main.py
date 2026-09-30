@@ -298,6 +298,7 @@ def create_app(
                 source_metadata={
                     "authored_by": "NorthPointe",
                     "canonical_format": "markdown",
+                    "vc_conversation_ids": [str(body.conversation_id)] if body.conversation_id else [],
                 },
             )
             if settings.inline_worker:
@@ -338,12 +339,24 @@ def create_app(
                 document_id,
                 title=body.title,
                 markdown=body.markdown,
+                conversation_id=body.conversation_id,
             )
             if settings.inline_worker:
                 background_tasks.add_task(
                     service.process_job, identity.owner_id, accepted.job_id
                 )
             return accepted
+        except Exception as exc:
+            raise as_http_error(exc) from exc
+
+    @app.get("/v1/generated-documents/{document_id}/source")
+    async def generated_source(
+        document_id: UUID,
+        identity: Principal = Depends(agent_principal),
+    ) -> dict[str, Any]:
+        try:
+            document = await service.generated_source(identity.owner_id, document_id)
+            return document.model_dump(mode="json", include={"id", "title", "body_markdown", "revision", "status"})
         except Exception as exc:
             raise as_http_error(exc) from exc
 
@@ -470,9 +483,10 @@ def create_app(
         identity: Principal = Depends(principal),
         group: str | None = Query(default=None, max_length=80),
         limit: int = Query(default=50, ge=1, le=200),
+        conversation_id: UUID | None = Query(default=None),
     ) -> list[dict[str, Any]]:
         try:
-            documents = await service.list_documents(identity.owner_id, group, limit)
+            documents = await service.list_documents(identity.owner_id, group, limit, conversation_id)
             return [
                 document.model_dump(
                     mode="json",
