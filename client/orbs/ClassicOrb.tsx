@@ -103,6 +103,8 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
         return gradient;
       };
       const r = radius * (1 - sleepBlend * .12 + Math.sin(t * 1.2) * (.019 - sleepBlend * .007) + shape.expansion * (1 - sleepBlend) + wakeBloom * .18 + sleepExhale * .055);
+      // The ears share the body's exact wake, sleep, breath and acoustic scale.
+      canvas.parentElement?.style.setProperty('--orb-ear-transform', `scale(${r / radius})`);
       ctx.clearRect(0, 0, size, size);
       ctx.save(); ctx.translate(size / 2, size / 2);
       const outer = Math.min(size * .475, r * (1.55 + voice * .18));

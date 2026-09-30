@@ -61,6 +61,33 @@ async function segments(page: Page, count: number) {
   for (const side of ['left', 'right']) await expect(page.locator(`.voice-center .orb-ear-${side}`)).toHaveAttribute('data-lit-segments', String(count));
 }
 
+async function observeEarMovement(page: Page) {
+  await page.evaluate(() => {
+    const stage = document.querySelector('.voice-center .orb-stage') as HTMLElement;
+    const ears = stage.querySelector('.orb-ear-meters') as HTMLElement;
+    const left = stage.querySelector('.orb-ear-left') as HTMLElement;
+    const samples: { width: number; x: number; y: number }[] = [];
+    Object.assign(window, { vuEarMovement: samples });
+    const sample = () => {
+      const bounds = stage.getBoundingClientRect(), ear = left.getBoundingClientRect();
+      samples.push({ width: ear.width / bounds.width, x: (ear.x + ear.width / 2 - bounds.x) / bounds.width, y: (ear.y + ear.height / 2 - bounds.y) / bounds.height });
+      if (samples.length > 200) samples.shift();
+    };
+    sample();
+    new MutationObserver(sample).observe(stage, { attributes: true, attributeFilter: ['style'] });
+    // Verify the renderer's transform reaches the visible ear layer.
+    if (getComputedStyle(ears).transform === 'none') throw new Error('Ear motion is not attached');
+  });
+}
+
+async function earMovement(page: Page, axis: 'width' | 'x' | 'y') {
+  return page.evaluate(axis => {
+    const samples = (window as unknown as { vuEarMovement: Record<string, number>[] }).vuEarMovement;
+    const values = samples.map(value => value[axis]);
+    return Math.max(...values) - Math.min(...values);
+  }, axis);
+}
+
 for (const style of ['classic', LUMINOUS_GLASS.id]) test(`${style} ears mirror all microphone sounds in Orb and Messenger; standby and End clear them`, async ({ page }, info) => {
   const errors: string[] = [], turns: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -76,9 +103,13 @@ for (const style of ['classic', LUMINOUS_GLASS.id]) test(`${style} ears mirror a
   if (style !== 'classic') await expect(page.locator('.voice-center [data-face-ready="true"]')).toBeVisible();
   await segments(page, 0);
   const inactive = page.locator('.voice-center .orb-ear-bar').first();
-  await expect(inactive).toHaveCSS('background-color', 'rgb(195, 200, 207)');
+  await expect(inactive).toHaveCSS('background-color', 'rgb(83, 97, 107)');
+  await page.screenshot({ path: info.outputPath('vu-quiet-orb.png') });
+  await observeEarMovement(page);
   await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
   await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  if (style === 'classic') await expect.poll(() => earMovement(page, 'width')).toBeGreaterThan(.004);
+  else await expect.poll(async () => Math.max(await earMovement(page, 'x'), await earMovement(page, 'y'))).toBeGreaterThan(.002);
   await sound(page, .05); await segments(page, 8);
   await sound(page, .2); await segments(page, 16);
   await expect(page.locator('.voice-center .orb-ear-left .orb-ear-bar').first()).toHaveCSS('background-color', 'rgb(255, 50, 29)');

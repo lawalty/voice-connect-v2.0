@@ -3,26 +3,30 @@
   inset: 0;
   z-index: 5;
   pointer-events: none;
+  transform: var(--orb-ear-transform, scale(1));
+  transform-origin: center;
 }
 .orb-ear-meter {
   position: absolute;
-  top: 36.5%;
-  width: 9%;
-  height: 27%;
+  top: 40%;
+  width: 5.5%;
+  height: 20%;
   display: flex;
   flex-direction: column-reverse;
   gap: 3%;
-  padding: 1% .7%;
+  padding: .6% .4%;
   border-radius: 2px;
   background: #070b0c99;
 }
-.orb-ear-left { left: 5.5%; }
-.orb-ear-right { right: 5.5%; }
+.orb-ear-left { left: 10%; }
+.orb-ear-right { right: 10%; }
+.orb-character .orb-ear-left { left: 7%; }
+.orb-character .orb-ear-right { right: 7%; }
 .orb-ear-bar {
   display: block;
   flex: 1;
   min-height: 0;
-  background: #c3c8cf;
+  background: #53616b;
   border-radius: .5px;
 }
 .orb-ear-bar.is-lit {

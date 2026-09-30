@@ -25,6 +25,8 @@ export default function FaceOrb(props:FaceOrbProps){
       const current=latest.current,speech=current.getSpeech?.()||SILENT_MOUTH;
       const pose=motion.sample(time,current.phase,Boolean(current.asleep),media.matches,current.motion,current.pack,speech);
       renderer!.draw(pose,current.phaseColors);
+      // Match the shader's screen-space drift and roll, including reduced motion.
+      surface.parentElement?.style.setProperty('--orb-ear-transform',`translate(${pose.driftX*100}%,${pose.driftY*100}%) rotate(${pose.roll}rad)`);
       surface.dataset.mouthOpen=pose.mouth.toFixed(2);surface.dataset.yaw=pose.yaw.toFixed(3);surface.dataset.speechSource=speech.source;
       if(!media.matches)schedule();
     };
