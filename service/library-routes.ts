@@ -16,11 +16,9 @@ export function registerLibraryRoutes(app:FastifyInstance, library:LibraryClient
   });
   app.get<{Params:{id:string}}>('/api/library/documents/:id/download',{config:{rateLimit:{max:20,timeWindow:60000}}},async(req,reply)=>run(reply,async()=>{
     const id=libraryDocumentId.parse(req.params.id);
-    const source=await library.readDocument({document_id:id});
-    if(source.status!=='ready')throw new LibraryError(409,'This document is still being indexed. Please try again shortly.');
-    const payload=await library.downloadPdf(id);
-    const filename=`${source.title.replace(/[^a-zA-Z0-9._ -]/g,'_').trim().slice(0,100)||'Document'}.pdf`;
-    return reply.header('Content-Type','application/pdf').header('Content-Disposition',`attachment; filename="${filename}"`).send(payload);
+    const {payload,filename,contentType}=await library.downloadDocument(id);
+    const encoded=encodeURIComponent(filename).replace(/['()*]/g,value=>`%${value.charCodeAt(0).toString(16).toUpperCase()}`);
+    return reply.header('Content-Type',contentType).header('Content-Disposition',`attachment; filename*=UTF-8''${encoded}`).header('Cache-Control','private, no-store').header('X-Content-Type-Options','nosniff').send(payload);
   }));
   app.get('/api/library/groups',async(_req,reply)=>run(reply,()=>library.groups()));
   app.get('/api/library/documents',async(req,reply)=>run(reply,()=>library.documents(libraryDocumentsInput.parse(req.query))));

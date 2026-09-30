@@ -31,6 +31,14 @@ authority comes from the authenticated owner session. The agent retains its
 separate existing credential and four tools: `vc_library_groups`,
 `vc_library_documents`, `vc_library_search`, `vc_library_download`.
 
+The `vc_library_download` tool offers any ready, indexed document in its current
+Voice Connect conversation. It returns a stable owner-authenticated application
+URL, keeping storage tokens out of model results. The overlay can download
+original PDF, DOCX, Markdown, text, and HTML uploads; generated Markdown is
+rendered as PDF. Asking again restores a dismissed pill. Delivery associations
+reuse document metadata without changing content, revisions, chunks, or agent
+edit/delete authority. Direct Library management signed links remain available.
+
 The backend is in `library/`. See its README for source provenance and tests.
 Legacy database values such as `hermes-generated-documents` remain for schema
 compatibility; they do not cause calls to Hermes.

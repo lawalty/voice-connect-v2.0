@@ -67,6 +67,11 @@ class Repository(Protocol):
         document_id: UUID,
         source_metadata: dict[str, Any],
     ) -> None: ...
+    async def compare_document_source_metadata(
+        self, owner_id: UUID, document_id: UUID,
+        expected: dict[str, Any], replacement: dict[str, Any],
+    ) -> bool: ...
+    async def document_chunk_count(self, owner_id: UUID, document_id: UUID) -> int: ...
     async def create_generated_document_job(
         self,
         *,

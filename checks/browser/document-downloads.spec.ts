@@ -8,6 +8,27 @@ test.beforeEach(waitForFixtureBudget);
 const id='9cfa53a1-b0fa-4be0-8264-28e77b96fabc';
 const document={id,title:'Meeting notes — next steps',revision:1,status:'pending',chunk_count:0};
 
+for(const [extension,mime,body] of [['pdf','application/pdf','%PDF-1.4\nOriginal sermon'],['docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document','PK-original'],['txt','text/plain','Complete original notes']]) {
+  test(`existing uploaded ${extension} downloads in its original format and can be offered again after dismissal`,async({page})=>{
+    let offered={...document,title:'Existing Library document',filename:`Original.${extension}`,mime_type:mime,status:'ready',chunk_count:2,offer_id:'2b156c69-7df3-4817-b95a-3bd8870bd170'};
+    await page.route('**/api/library/generated?*',route=>route.fulfill({json:[offered]}));
+    await page.route(`**/api/library/documents/${id}/download`,route=>route.fulfill({contentType:mime,body}));
+    await enterFixtureSession(page);
+    const link=page.getByRole('link',{name:`Download Existing Library document (${extension.toUpperCase()})`});
+    await expect(link).toBeVisible();
+    const pending=page.waitForEvent('download');await link.click();
+    expect((await pending).suggestedFilename()).toBe(`Original.${extension}`);
+    await expect(link).toBeVisible();
+    await page.getByRole('button',{name:'Dismiss download for Existing Library document'}).click();
+    await page.reload();await expect(link).toHaveCount(0);
+    offered={...offered,offer_id:'c03861a3-81aa-4a7f-a5a0-7f1f2eb59b3c'};
+    await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await expect(link).toBeVisible();
+    await expect(page.getByRole('region',{name:'Document downloads'}).getByRole('link')).toHaveCount(1);
+    await page.reload();await expect(link).toBeVisible();
+  });
+}
+
 test('indexed PDF pill is below the orb, persists through download and reload, and closes only with its X',async({page},info)=>{
   let state={...document};
   await page.route('**/api/library/generated?*',route=>route.fulfill({json:[state]}));

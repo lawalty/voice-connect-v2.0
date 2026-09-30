@@ -29,6 +29,7 @@ from app.models import (
     AgentDocumentAccepted,
     AgentDocumentArchive,
     Document,
+    DocumentDownloadOffer,
     GeneratedDocumentAccepted,
     GeneratedDocumentCreate,
     GeneratedDocumentUpdate,
@@ -494,6 +495,29 @@ def create_app(
                 )
                 for document in documents
             ]
+        except Exception as exc:
+            raise as_http_error(exc) from exc
+
+    @app.post("/v1/documents/{document_id}/offer-download")
+    async def offer_download(
+        document_id: UUID, body: DocumentDownloadOffer,
+        identity: Principal = Depends(agent_principal),
+    ) -> dict[str, Any]:
+        try:
+            return await service.offer_document_download(identity.owner_id, document_id, body.conversation_id)
+        except Exception as exc:
+            raise as_http_error(exc) from exc
+
+    @app.get("/v1/documents/{document_id}/download")
+    async def download_document(
+        document_id: UUID, identity: Principal = Depends(principal),
+    ) -> Response:
+        try:
+            document, payload, media_type = await service.download_document(identity.owner_id, document_id)
+            return Response(payload, media_type=media_type, headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(service.download_filename(document), safe='')}",
+                "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+            })
         except Exception as exc:
             raise as_http_error(exc) from exc
 

@@ -821,6 +821,68 @@ class RagService:
             raise ValueError("This document has no active generated Markdown source")
         return document
 
+    async def downloadable_document(self, owner_id: UUID, document_id: UUID) -> Document:
+        document = await self.repository.get_document(owner_id, document_id)
+        if document is None or document.archived_at:
+            raise LookupError("Document not found")
+        if document.status != "ready" or not await self.repository.document_chunk_count(owner_id, document_id):
+            raise ValueError("This document has not finished indexing")
+        if document.document_kind == "generated":
+            if not document.body_markdown or not document.title:
+                raise ValueError("This document has no downloadable source")
+        elif not document.storage_bucket or not document.storage_path:
+            raise ValueError("This document has no downloadable original")
+        return document
+
+    @staticmethod
+    def download_filename(document: Document) -> str:
+        name = pdf_filename(document.title or document.filename) if document.document_kind == "generated" else document.filename
+        return re.sub(r'[\\/\x00-\x1f\x7f]', '_', name)
+
+    async def offer_document_download(
+        self, owner_id: UUID, document_id: UUID, conversation_id: UUID | None,
+    ) -> dict[str, Any]:
+        # Only delivery metadata changes. Upload contents and agent edit/delete protections stay intact.
+        offer_id = str(uuid4())
+        for _ in range(3):
+            document = await self.downloadable_document(owner_id, document_id)
+            if not conversation_id:
+                break
+            metadata = dict(document.source_metadata)
+            metadata["vc_conversation_ids"] = list(dict.fromkeys([
+                *metadata.get("vc_conversation_ids", []), str(conversation_id),
+            ]))
+            metadata["vc_download_offers"] = {
+                **metadata.get("vc_download_offers", {}), str(conversation_id): offer_id,
+            }
+            if await self.repository.compare_document_source_metadata(
+                owner_id, document_id, document.source_metadata, metadata,
+            ):
+                break
+        else:
+            raise ValueError("The document changed while offering the download; please retry")
+        return {
+            "document_id": str(document.id), "title": document.title or document.filename,
+            "filename": self.download_filename(document), "status": "ready",
+            "url": f"{self.settings.public_base_url}/api/library/documents/{document.id}/download",
+            "requires_sign_in": True, "offered_in_conversation": bool(conversation_id),
+            "offer_id": offer_id if conversation_id else None,
+        }
+
+    async def download_document(self, owner_id: UUID, document_id: UUID) -> tuple[Document, bytes, str]:
+        document = await self.downloadable_document(owner_id, document_id)
+        if document.document_kind == "generated":
+            # Render the checked snapshot, even if another turn starts revising it meanwhile.
+            payload = await asyncio.to_thread(
+                render_markdown_pdf, document.title, document.body_markdown, document.updated_at,
+                author=str(document.source_metadata.get("authored_by") or "NorthPointe"),
+            )
+            return document, payload, "application/pdf"
+        payload = await self.storage.download(document.storage_bucket, document.storage_path)
+        if len(payload) > self.settings.max_upload_bytes:
+            raise ValueError("This document exceeds the download size limit")
+        return document, payload, document.mime_type or "application/octet-stream"
+
     async def signed_link(
         self, owner_id: UUID, document_id: UUID, expires_in: int | None
     ) -> SignedLink:
