@@ -57,7 +57,7 @@ worker.onmessage = (event) => {
       state = Float32Array.from(outputs.stateN!.data as Float32Array);
       context.set(samples.subarray(samples.length - 64));
       const noise = echo ? floor.value : floor.observe(level, probability);
-      const interruption = protecting && gate.update(probability, level, noise, evidence);
+      const interruption = protecting && message.allowInterruptions !== false && gate.update(probability, level, noise, evidence);
       // Suppress only high-confidence reference matches without a foreground
       // residual. Ambiguous overlap passes through; this is not speaker identity.
       const transition = detector.update(echo ? 0 : probability, echo ? 0 : level, noise);

@@ -32,7 +32,7 @@ export class VoiceEngine {
   private vadIgnoreBefore = 0;
   private vadProcessed = -1;
   private vadFence?: { sequence: number; resolve(): void; reject(error: Error): void; timeout: ReturnType<typeof setTimeout> };
-  private analysisBuffer: number[] = [];
+  private captureAcknowledgements = new Map<number, () => void>();
   private prebuffer: Float32Array[] = [];
   private prebufferSamples = 0;
   private recognizer?: SpeechRecognizer;
@@ -77,6 +77,8 @@ export class VoiceEngine {
   private maxTurnTimer?: ReturnType<typeof setTimeout>;
   private protectingReply = false;
   private protectionEpoch = 0;
+  private interruptionDrainEpoch = -1;
+  private captureDiscardBefore = 0;
   private cues?: ListeningCues;
   private cueTransitions = new CueTransitions();
   private cuesSuppressed = false;
@@ -121,7 +123,7 @@ export class VoiceEngine {
     this.responseSilenced = this.responseOpen || this.outputActive;
     ++this.playbackGeneration;
     this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.outputActive = false;
-    this.protectReply(false);
+    this.protectReply(this.preferences?.allowInterruptions === false && this.responseOpen);
     this.commentaryQueue = [];
     this.setPhase(this.responseOpen ? this.workStage : this.active && this.ready ? 'listening' : 'off');
   }
@@ -168,8 +170,10 @@ export class VoiceEngine {
     const cue = this.cueTransitions.update(listening, !this.cuesSuppressed && this.preferences?.audioCues !== false, turnSubmitted);
     if (cue) this.cues?.play(cue);
   }
-  private protectReply(protecting: boolean) {
+  private protectReply(protecting: boolean, drainInterruption = false) {
     if (this.protectingReply === protecting) return;
+    this.interruptionDrainEpoch = !protecting && drainInterruption ? this.protectionEpoch : -1;
+    if (!protecting && !drainInterruption && this.preferences?.allowInterruptions === false) this.captureDiscardBefore = this.context?.currentTime ?? 0;
     this.protectingReply = protecting; ++this.protectionEpoch;
     this.lastBlockedReason = '';
     this.prebuffer = []; this.prebufferSamples = 0;
@@ -274,14 +278,22 @@ export class VoiceEngine {
     this.source = context.createMediaStreamSource(stream);
     const worklet = this.worklet = new AudioWorkletNode(context, 'voice-capture');
     worklet.port.onmessage = (event) => {
-      worklet.port.postMessage('ack');
-      if (generation !== this.generation || !this.active) return;
-      if (event.data.dropped > 0 && this.ready) { this.trace.record('backpressure', { reason: 'capture-backlog', pendingFrames: Math.ceil(event.data.dropped / 512) }); this.captureFailure('Microphone processing fell behind. Review your draft; incomplete audio was not sent.', 'capture-backlog'); return; }
-      if (this.muted || !this.ready) return;
-      const now = performance.now();
-      if (this.lastCaptureAt && now - this.lastCaptureAt > 500) { this.trace.record('capture-gap', { reason: 'capture-gap', durationMs: now - this.lastCaptureAt }); this.captureFailure('Microphone audio had an unexpected gap. Review your draft before sending.', 'capture-gap'); return; }
-      this.lastCaptureAt = now;
-      this.process(event.data.samples as Float32Array, event.data.endTime ?? context.currentTime);
+      if (event.data.type === 'overflow') {
+        if (generation === this.generation && this.active && this.ready) this.captureBacklog(event.data.dropped);
+        return;
+      }
+      const acknowledge = () => worklet.port.postMessage('ack');
+      if (generation !== this.generation || !this.active) { acknowledge(); return; }
+      if (event.data.dropped > 0 && this.ready) { this.captureBacklog(event.data.dropped); return; }
+      if (this.muted || !this.ready) { acknowledge(); return; }
+      const endTime = event.data.endTime ?? context.currentTime;
+      if (this.captureDiscardBefore > 0 && endTime <= this.captureDiscardBefore) { this.lastCaptureAt = 0; acknowledge(); return; }
+      // Delivery can be late while all captured samples remain continuous.
+      // Compare source timestamps, not time spent waiting on the UI thread.
+      const missingMs = (endTime - this.lastCaptureAt - event.data.samples.length / 16000) * 1000;
+      if (this.lastCaptureAt && missingMs > 64) { this.trace.record('capture-gap', { reason: 'capture-gap', durationMs: missingMs }); this.captureFailure('Microphone audio had an unexpected gap. Review your draft before sending.', 'capture-gap'); return; }
+      this.lastCaptureAt = endTime;
+      this.process(event.data.samples as Float32Array, endTime, acknowledge);
     };
     this.source.connect(this.worklet); this.worklet.connect(context.destination);
     try { await this.startVad(generation); }
@@ -304,6 +316,8 @@ export class VoiceEngine {
           if (!ready) reject(new Error(event.data.message));
           else this.captureFailure('Speech detection stopped. Review your draft before restarting.', 'vad-error');
         } else if (event.data.type === 'signal') {
+          const acknowledge = this.captureAcknowledgements.get(event.data.sequence);
+          this.captureAcknowledgements.delete(event.data.sequence); acknowledge?.();
           this.vadPending = Math.max(0, this.vadPending - 1);
           this.vadProcessed = Math.max(this.vadProcessed, event.data.sequence);
           if (this.vadFence && this.vadProcessed >= this.vadFence.sequence) {
@@ -313,14 +327,14 @@ export class VoiceEngine {
           // Accepted interruption changes policy immediately, but already captured
           // frames still contain the rest of the user's words. Drain that exact
           // previous epoch; never let older input cross into a new protected reply.
-          if (event.data.epoch !== this.protectionEpoch && !(!this.protectingReply && event.data.epoch === this.protectionEpoch - 1)) return;
+          if (event.data.epoch !== this.protectionEpoch && !(!this.protectingReply && event.data.epoch === this.interruptionDrainEpoch)) return;
           this.callbacks.onSignal(event.data.signal as AcousticSignal);
           const reason = event.data.echoRejected ? 'playback-echo' : event.data.gate?.reason;
           if (this.protectingReply && reason !== this.lastBlockedReason) {
             this.lastBlockedReason = reason;
             if (reason === 'playback-echo' || reason === 'background' || reason === 'low-confidence') this.trace.record('barge-in-blocked', { reason });
           }
-          if (event.data.interruption && this.protectingReply && this.acceptsInput()) this.trace.record('barge-in', { provider: this.preferences?.recognition, reason: 'speech-onset', durationMs: event.data.gate?.accumulatedMs });
+          if (event.data.interruption && this.protectingReply && !this.interruptionsBlocked() && this.acceptsInput()) this.trace.record('barge-in', { provider: this.preferences?.recognition, reason: 'speech-onset', durationMs: event.data.gate?.accumulatedMs });
           this.consumeFrame(event.data.samples as Float32Array, event.data.transition, event.data.interruption === true);
         }
       };
@@ -340,18 +354,19 @@ export class VoiceEngine {
     });
   }
   private acceptsInput() { return this.active && !this.inputPaused && !this.gap && !this.muted && !this.finishing && (this.phase === 'listening' || this.phase === 'hearing' || Boolean(this.preferences?.handsFree && this.recognizer?.capabilities.handsFree)); }
-  private process(samples: Float32Array, endTime: number) {
-    if (!samples.length) return;
-    if (!this.vad) this.callbacks.onSignal(acousticSignal(samples, 0, 0.008));
+  private interruptionsBlocked() { return this.preferences?.allowInterruptions === false && (this.responseOpen || this.outputActive || Boolean(this.output)); }
+  private process(samples: Float32Array, endTime: number, acknowledge: () => void) {
+    if (!samples.length) { acknowledge(); return; }
+    if (!this.vad) { this.callbacks.onSignal(acousticSignal(samples, 0, 0.008)); acknowledge(); }
     else {
-      this.analysisBuffer.push(...samples);
-      while (this.analysisBuffer.length >= 512) {
-        const frame = Float32Array.from(this.analysisBuffer.splice(0, 512));
-        if (this.vadPending >= 12) { this.trace.record('backpressure', { reason: 'vad-backlog', pendingFrames: this.vadPending }); this.captureFailure('This device could not keep up with speech detection. Nothing incomplete was sent.', 'vad-backlog'); return; }
-        const frameEnd = endTime - this.analysisBuffer.length / 16000;
-        this.vadPending++; this.vad!.postMessage({ type: 'frame', samples: frame, sequence: this.vadSequence++, endTime: frameEnd,
-          protecting: this.protectingReply, epoch: this.protectionEpoch, turnActive: this.turnAudio }, [frame.buffer]);
-      }
+      if (this.vadPending >= 12) { this.trace.record('backpressure', { reason: 'vad-backlog', pendingFrames: this.vadPending }); this.captureFailure('This device could not keep up with speech detection. Nothing incomplete was sent.', 'vad-backlog'); return; }
+      // Capture already supplies 512-sample blocks. Return credit only after
+      // VAD consumes one, so a UI catch-up burst cannot overload the worker.
+      const sequence = this.vadSequence++;
+      this.captureAcknowledgements.set(sequence, acknowledge);
+      this.vadPending++; this.vad.postMessage({ type: 'frame', samples, sequence, endTime,
+        protecting: this.protectingReply, epoch: this.protectionEpoch, turnActive: this.turnAudio,
+        allowInterruptions: this.preferences?.allowInterruptions !== false }, [samples.buffer]);
     }
   }
   private consumeFrame(samples: Float32Array, transition: 'start' | 'end' | null, interruption: boolean) {
@@ -364,6 +379,11 @@ export class VoiceEngine {
       return;
     }
     if (!this.acceptsInput()) return;
+    if (this.interruptionsBlocked()) {
+      this.prebuffer = []; this.prebufferSamples = 0;
+      if (this.recognizer?.capabilities.endpointing === 'provider-turn') this.recognizer.push(new Float32Array(samples.length));
+      return;
+    }
     this.prebuffer.push(samples.slice()); this.prebufferSamples += samples.length;
     while (this.prebufferSamples > 8000 && this.prebuffer.length > 1) this.prebufferSamples -= this.prebuffer.shift()!.length;
     const hadTurn = this.turnAudio;
@@ -384,7 +404,7 @@ export class VoiceEngine {
     if (transition === 'end' && this.recognizer?.capabilities.endpointing === 'local-vad' && this.preferences?.handsFree && this.turnAudio) void this.finish('automatic');
   }
   private speechStarted(approvedInterruption = false) {
-    if (!this.acceptsInput() || this.recognizer?.capabilities.input === 'browser-managed') return;
+    if (!this.acceptsInput() || this.interruptionsBlocked() || this.recognizer?.capabilities.input === 'browser-managed') return;
     if (this.protectingReply && !approvedInterruption) return;
     const buffered = this.prebuffer;
     if (this.outputActive || this.responseOpen) this.interrupt('speech-onset');
@@ -416,7 +436,7 @@ export class VoiceEngine {
       result: (result) => {
         if (generation !== this.generation || inputEpoch !== this.inputEpoch || this.inputPaused || !this.active || this.gap || this.muted) return;
         // A remote onset/result cannot bypass the local playback-aware decision.
-        if (this.protectingReply) return;
+        if (this.protectingReply || this.interruptionsBlocked()) return;
         if (result.started && this.preferences?.handsFree) this.speechStarted();
         this.callbacks.onDraft(this.transcript.update(result.text, result.final));
         if (result.text && !this.finishing) this.setPhase('hearing');
@@ -490,7 +510,7 @@ export class VoiceEngine {
     this.stream?.getAudioTracks().forEach(track => { track.enabled = false; });
     this.vadIgnoreBefore = this.vadSequence; this.lastCaptureAt = 0;
     this.transcript.clear(); this.turnAudio = false;
-    this.prebuffer = []; this.prebufferSamples = 0; this.analysisBuffer = [];
+    this.prebuffer = []; this.prebufferSamples = 0;
     this.deferredAudio = []; this.deferredSamples = 0; this.deferredOnset = false; this.deferredEndpoint = false;
     this.cues?.cancel(); this.callbacks.onDraft('');
     this.callbacks.onSignal({ energy: 0, speechProbability: 0, noiseFloor: 0, pitch: null, confidence: 0 });
@@ -541,6 +561,10 @@ export class VoiceEngine {
     } else if (this.recognizer?.capabilities.input === 'browser-managed' || this.gap) this.callbacks.onNotice('Tap the microphone to start a new recording. Your draft is preserved.');
     else if (this.active && this.ready) { this.vad?.postMessage({ type: 'reset' }); this.setPhase(this.outputActive || this.responseOpen ? this.replyPhase() : 'listening'); }
   }
+  private captureBacklog(dropped: number) {
+    this.trace.record('backpressure', { reason: 'capture-backlog', pendingFrames: Math.ceil(dropped / 512) });
+    this.captureFailure('Microphone processing fell behind. Review your draft; incomplete audio was not sent.', 'capture-backlog');
+  }
   private captureFailure(message: string, reason: AudioDiagnosticReason) {
     if (!this.active || this.gap) return;
     this.trace.record('input-failure', { reason, phase: this.phase, provider: this.preferences?.recognition });
@@ -563,7 +587,7 @@ export class VoiceEngine {
     this.cues?.cancel();
     clearTimeout(this.maxTurnTimer); this.recognizer?.stop(); this.recognizer = undefined;
     this.closeCapture();
-    this.prebuffer = []; this.prebufferSamples = 0; this.analysisBuffer = []; this.turnAudio = false;
+    this.prebuffer = []; this.prebufferSamples = 0; this.turnAudio = false;
     this.deferredAudio = []; this.deferredSamples = 0; this.deferredOnset = false; this.deferredEndpoint = false;
     this.protectReply(false);
     void this.wakeLock?.release().catch(() => {}); this.wakeLock = undefined;
@@ -572,8 +596,10 @@ export class VoiceEngine {
   }
   private closeCapture() {
     this.lastCaptureAt = 0;
+    this.captureDiscardBefore = 0;
     if (this.vadFence) { clearTimeout(this.vadFence.timeout); this.vadFence.reject(new Error('Capture stopped before the turn boundary was confirmed.')); this.vadFence = undefined; }
     this.vad?.terminate(); this.vad = undefined; this.vadPending = 0;
+    this.captureAcknowledgements.clear();
     this.worklet?.disconnect(); this.worklet = undefined; this.source?.disconnect(); this.source = undefined;
     this.stream?.getTracks().forEach((track) => { track.onended = null; track.onmute = null; track.stop(); }); this.stream = undefined;
   }
@@ -625,7 +651,7 @@ export class VoiceEngine {
     this.output?.cancel(); this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined;
     this.outputActive = false; this.responseOpen = false; this.sentences.reset();
     this.commentary.clear(); this.commentaryQueue = []; this.answerStarted = false; this.outputKind = 'answer'; this.workStage = 'thinking';
-    this.protectReply(false);
+    this.protectReply(false, reason === 'speech-onset');
     if (pending) this.trace.record('output-interrupt', { provider: this.preferences?.output, durationMs: performance.now() - requestedAt, reason });
     if (pending) this.callbacks.onInterrupt();
     if (this.active && resumeListening) this.setPhase(this.ready && this.recognizer?.running ? 'listening' : 'paused');

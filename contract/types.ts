@@ -14,6 +14,8 @@ export interface SpeechPreferences {
   keepAwake: boolean;
   /** Device-local interruption threshold: 0 is least sensitive, 100 is most sensitive. */
   interruptionSensitivity?: number;
+  /** Device-local opt-out from voice-triggered interruption; manual Interrupt remains available. */
+  allowInterruptions?: boolean;
   /** Brief sounds when ready for a turn and when that listening window closes. */
   audioCues?: boolean;
   /** Installation-wide visibility of live transcription over the orb. */
@@ -21,7 +23,7 @@ export interface SpeechPreferences {
 }
 export const DEFAULT_SPEECH: SpeechPreferences = {
   recognition: 'vosk', output: 'browser', browserVoice: '', fishVoice: '', handsFree: true, turnMode: 'automatic', keepAwake: true,
-  interruptionSensitivity: 50, audioCues: true, fishDelivery: DEFAULT_FISH_DELIVERY, showTranscriptions: false,
+  interruptionSensitivity: 50, allowInterruptions: true, audioCues: true, fishDelivery: DEFAULT_FISH_DELIVERY, showTranscriptions: false,
 };
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }
 export interface HarnessCapabilities { connected: boolean; images: boolean; cancellation: boolean; approvals: boolean; version: string; reason?: string; }
