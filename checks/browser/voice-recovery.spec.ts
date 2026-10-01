@@ -97,7 +97,7 @@ for (const fault of ['reply connection', 'recognition connection'] as const) {
       p.recognition[0]!.close();
       await expect.poll(() => p.recognition.length).toBe(2);
     } else await expect.poll(() => connections).toBe(initialConnections + 1);
-    await expect(page.locator('.site-header .connection-pill')).toHaveText('Connected');
+    await expect(page.locator('.session-footer .connection-pill')).toHaveText('Connected');
     await expect(page.getByRole('switch', { name: 'Auto mode' })).toBeChecked();
     // Available text is accessible immediately; visual words now follow the
     // held utterance's playback. Do not require unsaid words on screen yet.

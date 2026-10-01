@@ -5,11 +5,11 @@ import { enterFixtureSession } from './fixture-session';
 test.beforeEach(waitForFixtureBudget);
 
 for (const endpoint of ['settings', 'conversations']) {
-  test(`a failed initial ${endpoint} read recovers in the header without a stale notice`, async ({ page }) => {
+  test(`a failed initial ${endpoint} read recovers in the footer without a stale notice`, async ({ page }) => {
     let failing = true;
     await page.route(`**/api/${endpoint}`, route => failing ? route.abort('failed') : route.continue());
     await enterFixtureSession(page);
-    const connection = page.locator('.site-header .connection-pill');
+    const connection = page.locator('.session-footer .connection-pill');
     await expect(connection).toHaveText('Reconnecting');
     await expect(page.locator('.notice')).toHaveCount(0);
     // The agent's name is unavailable until the initial conversation load succeeds.
@@ -36,7 +36,7 @@ test('history and gateway recovery clear only connection errors after the subscr
     });
   });
   await enterFixtureSession(page);
-  const connection = page.locator('.site-header .connection-pill');
+  const connection = page.locator('.session-footer .connection-pill');
   await expect(connection).toHaveText('Reconnecting');
   await expect(page.locator('.notice')).toHaveCount(0);
   failing = false;
@@ -54,7 +54,8 @@ test('history and gateway recovery clear only connection errors after the subscr
   await expect(page.locator('.notice')).toHaveCount(0);
   await page.screenshot({ path: info.outputPath('reconnecting.png'), fullPage: true });
   const bounds = await connection.boundingBox();
-  expect(bounds!.y).toBeLessThan(100);
+  expect(bounds!.y).toBeGreaterThan(page.viewportSize()!.height - 100);
+  expect(Math.abs(bounds!.x + bounds!.width / 2 - page.viewportSize()!.width / 2)).toBeLessThan(1);
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   socket!.send(JSON.stringify({ type: 'connection', connected: true }));
   await expect(connection).toHaveText('Connected');
