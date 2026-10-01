@@ -1,3 +1,4 @@
+import { DEFAULT_TRANSCRIPT_RULES } from '../contract/transcript-normalization';
 import type { VoiceStopReason } from './audio/diagnostics';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowDown, ArrowRight, BookOpen, Camera as CameraIcon, Clipboard as ClipboardIcon, Check, ChevronDown, CircleStop, Headphones, LockKeyhole, MessageSquare, Mic, Plus, Send, Settings2, Square, WifiOff, X } from 'lucide-react';
@@ -629,8 +630,8 @@ export default function App() {
   function saveDevicePreferences(value: SpeechPreferences) { setPreferences(value); try { localStorage.setItem(preferenceKey, JSON.stringify(value)); } catch {} }
   async function savePreferences(value: SpeechPreferences) {
     if (!settings) throw new Error('Wait for installation settings to load.');
-    if (settings.speech.setupComplete && value.recognition === settings.speech.recognition && value.output === settings.speech.output && (value.fishVoice || '') === settings.speech.fishVoice && (value.fishDelivery ?? DEFAULT_FISH_DELIVERY) === (settings.speech.fishDelivery ?? DEFAULT_FISH_DELIVERY) && (value.showTranscriptions ?? false) === (settings.speech.showTranscriptions ?? false)) { saveDevicePreferences(value); return; }
-    const saved = await api<InstallationSpeech>('/api/settings/speech', { method: 'PUT', body: JSON.stringify({ revision: settings.speech.revision, recognition: value.recognition, output: value.output, fishVoice: value.fishVoice || '', fishDelivery: value.fishDelivery ?? DEFAULT_FISH_DELIVERY, showTranscriptions: value.showTranscriptions ?? false }) });
+    if (settings.speech.setupComplete && value.recognition === settings.speech.recognition && value.output === settings.speech.output && (value.fishVoice || '') === settings.speech.fishVoice && (value.fishDelivery ?? DEFAULT_FISH_DELIVERY) === (settings.speech.fishDelivery ?? DEFAULT_FISH_DELIVERY) && (value.showTranscriptions ?? false) === (settings.speech.showTranscriptions ?? false) && JSON.stringify(value.transcriptRules ?? DEFAULT_TRANSCRIPT_RULES) === JSON.stringify(settings.speech.transcriptRules ?? DEFAULT_TRANSCRIPT_RULES)) { saveDevicePreferences(value); return; }
+    const saved = await api<InstallationSpeech>('/api/settings/speech', { method: 'PUT', body: JSON.stringify({ revision: settings.speech.revision, recognition: value.recognition, output: value.output, fishVoice: value.fishVoice || '', fishDelivery: value.fishDelivery ?? DEFAULT_FISH_DELIVERY, showTranscriptions: value.showTranscriptions ?? false, transcriptRules: value.transcriptRules ?? DEFAULT_TRANSCRIPT_RULES }) });
     setSettings(previous => previous ? { ...previous, speech: saved } : previous);
     saveDevicePreferences(installationPreferences(value, saved));
   }

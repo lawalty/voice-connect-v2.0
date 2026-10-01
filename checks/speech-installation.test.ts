@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { SpeechSettings } from '../service/speech-settings';
 import { installationPreferences } from '../client/speech-preferences';
+import { DEFAULT_TRANSCRIPT_RULES } from '../contract/transcript-normalization';
 import { DEFAULT_SPEECH } from '../contract/types';
 import { buildApp } from '../service/main';
 
@@ -16,11 +17,33 @@ function settings() {
   return { dir, saved: new SpeechSettings(dir) };
 }
 describe('installation speech choices', () => {
+  it('migrates transcript rules, persists edits and empty lists, and protects them from older clients', () => {
+    const { dir, saved } = settings();
+    const selection = { recognition: 'browser', output: 'browser', fishVoice: '' } as const;
+    expect(saved.read().transcriptRules).toEqual(DEFAULT_TRANSCRIPT_RULES);
+    const rules = [{ from: 'North Point', to: 'NorthPointe Church', context: 'name' }] as const;
+    const edited = saved.save({ ...selection, transcriptRules: [...rules] }, 0);
+    expect(new SpeechSettings(dir).read().transcriptRules).toEqual(rules);
+    expect(installationPreferences({ ...DEFAULT_SPEECH, transcriptRules: [] }, edited).transcriptRules).toEqual(rules);
+    expect(saved.save(selection, 1).transcriptRules).toEqual(rules);
+    const removed = saved.save({ ...selection, transcriptRules: [] }, 2);
+    expect(new SpeechSettings(dir).read().transcriptRules).toEqual([]);
+    expect(installationPreferences(DEFAULT_SPEECH, removed).transcriptRules).toEqual([]);
+    expect(saved.save(selection, 3).transcriptRules).toEqual([]);
+    expect(() => saved.save({ ...selection, transcriptRules: [{ from: 'North Point', to: 'NorthPointe', context: 'unknown' }] } as never, 4)).toThrow();
+    for (const invalid of [[{ from: '', to: 'Name' }], [{ from: 'Name', to: '' }], [{ from: 'x'.repeat(81), to: 'Name' }], [{ from: 'Name', to: 'One' }, { from: ' Name ', to: 'Two' }], Array.from({ length: 21 }, (_, i) => ({ from: `Name ${i}`, to: 'Name' }))]) {
+      expect(() => saved.save({ ...selection, transcriptRules: invalid }, 4)).toThrow();
+      expect(saved.read().transcriptRules).toEqual([]);
+    }
+    const unrestricted = saved.save({ ...selection, transcriptRules: [{ from: 'north point', to: 'NorthPointe', context: 'any' }] }, 4);
+    expect(new SpeechSettings(dir).read().transcriptRules).toEqual(unrestricted.transcriptRules);
+    expect(installationPreferences(DEFAULT_SPEECH, unrestricted).transcriptRules?.[0]?.context).toBe('any');
+  });
   it('defaults old settings to restrained delivery and preserves Off across devices and older clients', () => {
     const { saved } = settings();
     const legacy = { version: 1, revision: 7, setupComplete: true, recognition: 'browser', output: 'fish', fishVoice: 'legacy-voice' };
     writeFileSync(saved.path, JSON.stringify(legacy));
-    expect(saved.read()).toEqual({ ...legacy, fishDelivery: 'restrained', showTranscriptions: false });
+    expect(saved.read()).toEqual({ ...legacy, fishDelivery: 'restrained', showTranscriptions: false, transcriptRules: DEFAULT_TRANSCRIPT_RULES });
     expect(JSON.parse(readFileSync(saved.path, 'utf8'))).toEqual(legacy);
     const off = saved.save({ recognition: 'browser', output: 'fish', fishVoice: 'legacy-voice', fishDelivery: 'off' }, 7);
     expect(installationPreferences({ ...DEFAULT_SPEECH, fishDelivery: 'happy' }, off).fishDelivery).toBe('off');
@@ -87,9 +110,11 @@ describe('installation speech choices', () => {
     expect(current.fishModel).toBe('s2.1-pro');
     expect(current.speech.fishDelivery).toBe('restrained');
     expect(current.speech.showTranscriptions).toBe(false);
-    const changed = await app.inject({ method: 'PUT', url: '/api/settings/speech', headers, payload: { ...payload, revision: 1, fishDelivery: 'soft', showTranscriptions: true } });
+    const changed = await app.inject({ method: 'PUT', url: '/api/settings/speech', headers, payload: { ...payload, revision: 1, fishDelivery: 'soft', showTranscriptions: true, transcriptRules: [{ from: ' North Point ', to: ' NorthPointe ', context: 'name' }] } });
     expect(changed.statusCode).toBe(200); expect(changed.json().fishDelivery).toBe('soft');
     expect((await app.inject({ url: '/api/settings', headers: { cookie } })).json().speech.showTranscriptions).toBe(true);
+    expect((await app.inject({ url: '/api/settings', headers: { cookie } })).json().speech.transcriptRules).toEqual([{ from: 'North Point', to: 'NorthPointe', context: 'name' }]);
+    expect((await app.inject({ method: 'PUT', url: '/api/settings/speech', headers, payload: { ...payload, revision: 2, transcriptRules: [{ from: '', to: 'Name' }] } })).statusCode).toBe(400);
     expect((await app.inject({ method: 'PUT', url: '/api/settings/speech', headers, payload: { ...payload, revision: 2, fishDelivery: '(bad tag)' } })).statusCode).toBe(400);
     expect(current.vosk.state).toBe('unavailable');
   });

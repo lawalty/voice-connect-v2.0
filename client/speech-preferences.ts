@@ -1,5 +1,6 @@
 import { DEFAULT_SPEECH, type InstallationSpeech, type RecognizerKind, type SpeechPreferences } from '../contract/types';
 import { DEFAULT_FISH_DELIVERY, FISH_DELIVERIES } from '../contract/fish-delivery';
+import { DEFAULT_TRANSCRIPT_RULES } from '../contract/transcript-normalization';
 
 export function restoreSpeechPreferences(raw: string | null): SpeechPreferences {
   try {
@@ -36,5 +37,5 @@ export function selectRecognizer(prefs: SpeechPreferences, recognition: Recogniz
 
 /** Installation choices override stale device selections, never the other way around. */
 export function installationPreferences(device: SpeechPreferences, saved: InstallationSpeech): SpeechPreferences {
-  return selectRecognizer({ ...device, output: saved.output, fishVoice: saved.fishVoice, fishDelivery: saved.fishDelivery ?? DEFAULT_FISH_DELIVERY, showTranscriptions: saved.showTranscriptions ?? false }, saved.recognition);
+  return selectRecognizer({ ...device, output: saved.output, fishVoice: saved.fishVoice, fishDelivery: saved.fishDelivery ?? DEFAULT_FISH_DELIVERY, showTranscriptions: saved.showTranscriptions ?? false, transcriptRules: saved.transcriptRules ?? DEFAULT_TRANSCRIPT_RULES }, saved.recognition);
 }
