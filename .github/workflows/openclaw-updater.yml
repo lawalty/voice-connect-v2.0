@@ -1,0 +1,27 @@
+name: OpenClaw host updater
+on:
+  pull_request:
+    paths:
+      - 'integrations/openclaw-updater/**'
+      - 'ops/openclaw-updater/**'
+      - '.github/workflows/openclaw-updater.yml'
+  push:
+    paths:
+      - 'integrations/openclaw-updater/**'
+      - 'ops/openclaw-updater/**'
+      - '.github/workflows/openclaw-updater.yml'
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: python ops/openclaw-updater/test_updater.py
+      - run: node --test integrations/openclaw-updater/tools.test.mjs
+      - run: node --check integrations/openclaw-updater/index.mjs
