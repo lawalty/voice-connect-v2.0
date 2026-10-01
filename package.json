@@ -15,7 +15,13 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "prepare:assets": "node ops/prepare-assets.mjs",
-    "bootstrap": "tsx service/bootstrap.ts"
+    "bootstrap": "tsx service/bootstrap.ts",
+    "orb:validate": "tsx ops/vector-pack.ts validate",
+    "orb:compile": "tsx ops/vector-pack.ts compile",
+    "orb:extract": "tsx ops/vector-pack.ts extract",
+    "orb:schema": "tsx ops/vector-pack.ts schema",
+    "orb:preview": "tsx ops/vector-pack.ts preview",
+    "orb:evidence": "tsx ops/vector-evidence.ts"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",

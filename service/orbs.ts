@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import sharp from 'sharp';
 import { z } from 'zod';
 import { digest, type Store } from './store.js';
-import { isBuiltinPack, MAX_CUSTOM_PACKS, MAX_PACK_BYTES, orbPreferencesSchema, parseOrbPack, restoreOrbPreferences, type InstallationOrbs, type OrbPack, type OrbPreferences, type FacePack, type StatusPack } from '../contract/orb-packs.js';
+import { isBuiltinPack, MAX_CUSTOM_PACKS, MAX_PACK_BYTES, orbPreferencesSchema, parseOrbPack, restoreOrbPreferences, type InstallationOrbs, type OrbPack, type OrbPreferences, type FacePack } from '../contract/orb-packs.js';
 
 class OrbError extends Error { constructor(message: string, readonly statusCode: number) { super(message); } }
 const savedSchema = z.object({ revision: z.number().int().nonnegative(), configured: z.boolean(), preferences: orbPreferencesSchema }).strict();
@@ -22,8 +22,8 @@ export class OrbSettings {
   }
   read(): InstallationOrbs {
     const packs = (this.store.db.prepare('SELECT id, hash, manifest FROM orb_packs ORDER BY rowid').all() as unknown as PackRow[]).map(row => {
-      const manifest = JSON.parse(row.manifest) as (Omit<FacePack, 'atlas' | 'flow'> & { hasFlow: boolean }) | StatusPack;
-      if (manifest.renderer === 'status-orb-v1') return manifest;
+      const manifest = JSON.parse(row.manifest) as (Omit<FacePack, 'atlas' | 'flow'> & { hasFlow: boolean }) | Exclude<OrbPack, FacePack>;
+      if (manifest.renderer !== 'glass-face-v1') return manifest;
       const { hasFlow, ...pack } = manifest, root = `/api/orbs/packs/${row.id}`;
       return { ...pack, atlas: `${root}/atlas.png?v=${row.hash}`, ...(hasFlow ? { flow: `${root}/flow.png?v=${row.hash}` } : {}) };
     });

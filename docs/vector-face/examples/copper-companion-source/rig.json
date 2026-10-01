@@ -1,0 +1,1498 @@
+{
+  "version": 1,
+  "renderer": "vector-face-v1",
+  "id": "copper-companion",
+  "name": "Copper Companion",
+  "colors": {
+    "idle": "#27272a",
+    "standby": "#27272a",
+    "connecting": "#52525b",
+    "listening": "#10b981",
+    "thinking": "#f59e0b",
+    "working": "#f97316",
+    "speaking": "#8b5cf6",
+    "error": "#dc2626"
+  },
+  "ink": {
+    "features": "#fff1d6",
+    "pupils": "#102530"
+  },
+  "motion": {
+    "yaw": 10,
+    "pitch": 6,
+    "roll": 7
+  },
+  "rig": {
+    "leftEye": {
+      "outline": "eye-left",
+      "pupils": [
+        "pupil-left",
+        "catchlight-a-left",
+        "catchlight-b-left"
+      ]
+    },
+    "rightEye": {
+      "outline": "eye-right",
+      "pupils": [
+        "pupil-right",
+        "catchlight-a-right",
+        "catchlight-b-right"
+      ]
+    },
+    "brows": {
+      "left": "brow-left",
+      "right": "brow-right"
+    },
+    "mouth": {
+      "outline": "mouth",
+      "tongue": "tongue"
+    }
+  },
+  "poses": {
+    "idle": {
+      "channels": {
+        "sleep": 1,
+        "zzz": 1
+      }
+    },
+    "standby": {
+      "channels": {
+        "blinkLeft": 0.48,
+        "blinkRight": 0.48,
+        "sleep": 0.15,
+        "smile": 0.18
+      }
+    },
+    "connecting": {
+      "channels": {
+        "browLeft": 0.25,
+        "browRight": 0.25
+      }
+    },
+    "listening": {
+      "channels": {
+        "browLeft": 0.2,
+        "browRight": 0.2,
+        "ears": 1,
+        "smile": 0.12
+      }
+    },
+    "thinking": {
+      "channels": {
+        "thought": 1
+      },
+      "variants": [
+        {
+          "channels": {
+            "gazeX": 0.7,
+            "gazeY": -0.75,
+            "browLeft": 0.7,
+            "browRight": -0.2,
+            "focus": 0.3
+          },
+          "holdMs": 2100
+        },
+        {
+          "channels": {
+            "gazeX": 0.1,
+            "gazeY": -0.1,
+            "focus": 0.8,
+            "browInnerLeft": 0.5,
+            "browInnerRight": 0.5
+          },
+          "holdMs": 1700
+        },
+        {
+          "channels": {
+            "gazeX": -0.7,
+            "gazeY": -0.6,
+            "browLeft": -0.2,
+            "browRight": 0.6,
+            "focus": 0.35
+          },
+          "holdMs": 2600
+        },
+        {
+          "channels": {
+            "gazeX": 0,
+            "gazeY": -0.15,
+            "browLeft": 0.75,
+            "browRight": 0.75,
+            "smile": 0.7
+          },
+          "holdMs": 1900
+        }
+      ]
+    },
+    "working": {
+      "channels": {
+        "focus": 0.4,
+        "browInnerLeft": 0.45,
+        "browInnerRight": 0.45,
+        "work": 1
+      },
+      "variants": [
+        {
+          "channels": {
+            "gazeX": -0.6,
+            "gazeY": 0.1,
+            "focus": 0.5
+          },
+          "holdMs": 1500
+        },
+        {
+          "channels": {
+            "gazeX": 0.6,
+            "gazeY": 0.1,
+            "focus": 0.65
+          },
+          "holdMs": 1800
+        },
+        {
+          "channels": {
+            "gazeX": 0.1,
+            "gazeY": -0.6,
+            "browLeft": 0.2,
+            "focus": 0.3
+          },
+          "holdMs": 2000
+        }
+      ]
+    },
+    "speaking": {
+      "channels": {
+        "smile": 0.2,
+        "mouthOpen": 0.2
+      }
+    },
+    "error": {
+      "channels": {
+        "error": 1,
+        "browInnerLeft": -0.6,
+        "browInnerRight": -0.6
+      }
+    }
+  },
+  "animation": {
+    "head": {
+      "fill": "@gradient:shell",
+      "layer": "body",
+      "stroke": "$state",
+      "strokeWidth": 4
+    },
+    "shell-highlight": {
+      "fill": "none",
+      "layer": "body",
+      "stroke": "#ffe6bd",
+      "strokeWidth": 2,
+      "opacity": 0.6
+    },
+    "brow-left": {
+      "fill": "$features",
+      "morphs": {
+        "browLeft": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              18,
+              21.6
+            ],
+            [
+              "Q",
+              29.5,
+              15.38,
+              41,
+              22.1
+            ],
+            [
+              "L",
+              41,
+              27.9
+            ],
+            [
+              "Q",
+              29.5,
+              20.745,
+              18,
+              24.4
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "browInnerLeft": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              18,
+              25.6
+            ],
+            [
+              "Q",
+              29.5,
+              23.020000000000003,
+              41,
+              28.1
+            ],
+            [
+              "L",
+              41,
+              33.9
+            ],
+            [
+              "Q",
+              29.5,
+              28.385,
+              18,
+              28.4
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "sleep": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              18,
+              29.6
+            ],
+            [
+              "Q",
+              29.5,
+              26.560000000000002,
+              41,
+              28.1
+            ],
+            [
+              "L",
+              41,
+              33.9
+            ],
+            [
+              "Q",
+              29.5,
+              31.925,
+              18,
+              32.4
+            ],
+            [
+              "Z"
+            ]
+          ]
+        }
+      },
+      "bindings": [
+        {
+          "channel": "vowel",
+          "property": "y",
+          "amount": -1.15
+        },
+        {
+          "channel": "breath",
+          "property": "y",
+          "amount": -0.35
+        }
+      ]
+    },
+    "eye-left": {
+      "fill": "$features",
+      "morphs": {
+        "blinkLeft": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              21,
+              46
+            ],
+            [
+              "C",
+              21,
+              45.6,
+              24,
+              45.6,
+              32,
+              45.6
+            ],
+            [
+              "C",
+              40,
+              45.6,
+              43,
+              45.6,
+              43,
+              46
+            ],
+            [
+              "C",
+              43,
+              46.4,
+              40,
+              46.4,
+              32,
+              46.4
+            ],
+            [
+              "C",
+              24,
+              46.4,
+              21,
+              46.4,
+              21,
+              46
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "sleep": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              21,
+              46
+            ],
+            [
+              "C",
+              21,
+              48,
+              24,
+              48,
+              32,
+              48
+            ],
+            [
+              "C",
+              40,
+              48,
+              43,
+              48,
+              43,
+              46
+            ],
+            [
+              "C",
+              43,
+              48.8,
+              40,
+              48.8,
+              32,
+              48.8
+            ],
+            [
+              "C",
+              24,
+              48.8,
+              21,
+              48.8,
+              21,
+              46
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "focus": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              21,
+              46
+            ],
+            [
+              "C",
+              21,
+              43,
+              24,
+              43,
+              32,
+              43
+            ],
+            [
+              "C",
+              40,
+              43,
+              43,
+              43,
+              43,
+              46
+            ],
+            [
+              "C",
+              43,
+              50,
+              40,
+              50,
+              32,
+              50
+            ],
+            [
+              "C",
+              24,
+              50,
+              21,
+              50,
+              21,
+              46
+            ],
+            [
+              "Z"
+            ]
+          ]
+        }
+      },
+      "bindings": [
+        {
+          "channel": "error",
+          "property": "opacity",
+          "amount": -1
+        }
+      ]
+    },
+    "pupil-left": {
+      "fill": "$pupils",
+      "clip": "eye-left",
+      "bindings": [
+        {
+          "channel": "gazeX",
+          "property": "x",
+          "amount": 4.1
+        },
+        {
+          "channel": "gazeY",
+          "property": "y",
+          "amount": 3.3
+        },
+        {
+          "channel": "error",
+          "property": "opacity",
+          "amount": -1
+        },
+        {
+          "channel": "sleep",
+          "property": "opacity",
+          "amount": -1
+        }
+      ]
+    },
+    "catchlight-a-left": {
+      "fill": "$features",
+      "opacity": 1,
+      "clip": "eye-left",
+      "bindings": [
+        {
+          "channel": "gazeX",
+          "property": "x",
+          "amount": 4.1
+        },
+        {
+          "channel": "gazeY",
+          "property": "y",
+          "amount": 3.3
+        },
+        {
+          "channel": "error",
+          "property": "opacity",
+          "amount": -1
+        },
+        {
+          "channel": "sleep",
+          "property": "opacity",
+          "amount": -1
+        }
+      ]
+    },
+    "catchlight-b-left": {
+      "fill": "$features",
+      "opacity": 0.8,
+      "clip": "eye-left",
+      "bindings": [
+        {
+          "channel": "gazeX",
+          "property": "x",
+          "amount": 4.1
+        },
+        {
+          "channel": "gazeY",
+          "property": "y",
+          "amount": 3.3
+        },
+        {
+          "channel": "error",
+          "property": "opacity",
+          "amount": -1
+        },
+        {
+          "channel": "sleep",
+          "property": "opacity",
+          "amount": -1
+        }
+      ]
+    },
+    "brow-right": {
+      "fill": "$features",
+      "morphs": {
+        "browRight": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              82,
+              21.6
+            ],
+            [
+              "Q",
+              70.5,
+              15.38,
+              59,
+              22.1
+            ],
+            [
+              "L",
+              59,
+              27.9
+            ],
+            [
+              "Q",
+              70.5,
+              20.745,
+              82,
+              24.4
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "browInnerRight": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              82,
+              25.6
+            ],
+            [
+              "Q",
+              70.5,
+              23.020000000000003,
+              59,
+              28.1
+            ],
+            [
+              "L",
+              59,
+              33.9
+            ],
+            [
+              "Q",
+              70.5,
+              28.385,
+              82,
+              28.4
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "sleep": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              82,
+              29.6
+            ],
+            [
+              "Q",
+              70.5,
+              26.560000000000002,
+              59,
+              28.1
+            ],
+            [
+              "L",
+              59,
+              33.9
+            ],
+            [
+              "Q",
+              70.5,
+              31.925,
+              82,
+              32.4
+            ],
+            [
+              "Z"
+            ]
+          ]
+        }
+      },
+      "bindings": [
+        {
+          "channel": "vowel",
+          "property": "y",
+          "amount": -1.15
+        },
+        {
+          "channel": "breath",
+          "property": "y",
+          "amount": -0.35
+        }
+      ]
+    },
+    "eye-right": {
+      "fill": "$features",
+      "morphs": {
+        "blinkRight": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              58,
+              46
+            ],
+            [
+              "C",
+              58,
+              45.6,
+              61,
+              45.6,
+              69,
+              45.6
+            ],
+            [
+              "C",
+              77,
+              45.6,
+              80,
+              45.6,
+              80,
+              46
+            ],
+            [
+              "C",
+              80,
+              46.4,
+              77,
+              46.4,
+              69,
+              46.4
+            ],
+            [
+              "C",
+              61,
+              46.4,
+              58,
+              46.4,
+              58,
+              46
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "sleep": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              58,
+              46
+            ],
+            [
+              "C",
+              58,
+              48,
+              61,
+              48,
+              69,
+              48
+            ],
+            [
+              "C",
+              77,
+              48,
+              80,
+              48,
+              80,
+              46
+            ],
+            [
+              "C",
+              80,
+              48.8,
+              77,
+              48.8,
+              69,
+              48.8
+            ],
+            [
+              "C",
+              61,
+              48.8,
+              58,
+              48.8,
+              58,
+              46
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "focus": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              58,
+              46
+            ],
+            [
+              "C",
+              58,
+              43,
+              61,
+              43,
+              69,
+              43
+            ],
+            [
+              "C",
+              77,
+              43,
+              80,
+              43,
+              80,
+              46
+            ],
+            [
+              "C",
+              80,
+              50,
+              77,
+              50,
+              69,
+              50
+            ],
+            [
+              "C",
+              61,
+              50,
+              58,
+              50,
+              58,
+              46
+            ],
+            [
+              "Z"
+            ]
+          ]
+        }
+      },
+      "bindings": [
+        {
+          "channel": "error",
+          "property": "opacity",
+          "amount": -1
+        }
+      ]
+    },
+    "pupil-right": {
+      "fill": "$pupils",
+      "clip": "eye-right",
+      "bindings": [
+        {
+          "channel": "gazeX",
+          "property": "x",
+          "amount": 4.1
+        },
+        {
+          "channel": "gazeY",
+          "property": "y",
+          "amount": 3.3
+        },
+        {
+          "channel": "error",
+          "property": "opacity",
+          "amount": -1
+        },
+        {
+          "channel": "sleep",
+          "property": "opacity",
+          "amount": -1
+        }
+      ]
+    },
+    "catchlight-a-right": {
+      "fill": "$features",
+      "opacity": 1,
+      "clip": "eye-right",
+      "bindings": [
+        {
+          "channel": "gazeX",
+          "property": "x",
+          "amount": 4.1
+        },
+        {
+          "channel": "gazeY",
+          "property": "y",
+          "amount": 3.3
+        },
+        {
+          "channel": "error",
+          "property": "opacity",
+          "amount": -1
+        },
+        {
+          "channel": "sleep",
+          "property": "opacity",
+          "amount": -1
+        }
+      ]
+    },
+    "catchlight-b-right": {
+      "fill": "$features",
+      "opacity": 0.8,
+      "clip": "eye-right",
+      "bindings": [
+        {
+          "channel": "gazeX",
+          "property": "x",
+          "amount": 4.1
+        },
+        {
+          "channel": "gazeY",
+          "property": "y",
+          "amount": 3.3
+        },
+        {
+          "channel": "error",
+          "property": "opacity",
+          "amount": -1
+        },
+        {
+          "channel": "sleep",
+          "property": "opacity",
+          "amount": -1
+        }
+      ]
+    },
+    "x-eyes": {
+      "fill": "none",
+      "stroke": "$features",
+      "strokeWidth": 5,
+      "opacity": 0,
+      "bindings": [
+        {
+          "channel": "error",
+          "property": "opacity",
+          "amount": 1
+        }
+      ]
+    },
+    "nose": {
+      "fill": "none",
+      "stroke": "$features",
+      "strokeWidth": 2.6
+    },
+    "mouth-fill": {
+      "fill": "#261d16",
+      "opacity": 0,
+      "morphs": {
+        "mouthOpen": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              28,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              64.428,
+              72,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              98.972,
+              28,
+              67.388
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "mouthRound": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              42.56,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              67.628,
+              57.44,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              68.972,
+              42.56,
+              67.388
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "mouthWide": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              29.849999999999998,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              67.628,
+              70.15,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              68.972,
+              29.849999999999998,
+              67.388
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "smile": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              32.95,
+              64.94
+            ],
+            [
+              "Q",
+              50,
+              70.94,
+              67.05,
+              64.94
+            ],
+            [
+              "Q",
+              50,
+              72.86,
+              32.95,
+              64.94
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "focus": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              39.7,
+              68.272
+            ],
+            [
+              "Q",
+              52.1,
+              66.432,
+              64.5,
+              68.272
+            ],
+            [
+              "Q",
+              52.1,
+              67.568,
+              39.7,
+              68.272
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "error": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              36.05,
+              69.7
+            ],
+            [
+              "Q",
+              50,
+              64.5,
+              63.95,
+              69.7
+            ],
+            [
+              "Q",
+              50,
+              65.3,
+              36.05,
+              69.7
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "sleep": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              43.683,
+              67.83
+            ],
+            [
+              "Q",
+              50,
+              66.886,
+              56.317,
+              67.83
+            ],
+            [
+              "Q",
+              50,
+              69.61999999999999,
+              43.683,
+              67.83
+            ],
+            [
+              "Z"
+            ]
+          ]
+        }
+      },
+      "bindings": [
+        {
+          "channel": "mouthOpen",
+          "property": "opacity",
+          "amount": 12
+        },
+        {
+          "channel": "sleep",
+          "property": "opacity",
+          "amount": 0.5
+        }
+      ]
+    },
+    "tongue": {
+      "fill": "#d66c74",
+      "opacity": 0,
+      "clip": "mouth",
+      "morphs": {
+        "mouthOpen": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              38,
+              79
+            ],
+            [
+              "Q",
+              50,
+              86,
+              62,
+              79
+            ],
+            [
+              "Q",
+              50,
+              77.4,
+              38,
+              79
+            ],
+            [
+              "Z"
+            ]
+          ]
+        }
+      },
+      "bindings": [
+        {
+          "channel": "mouthOpen",
+          "property": "opacity",
+          "amount": 2.8
+        },
+        {
+          "channel": "sleep",
+          "property": "opacity",
+          "amount": -1
+        }
+      ]
+    },
+    "mouth": {
+      "fill": "none",
+      "stroke": "$features",
+      "strokeWidth": 2.7,
+      "morphs": {
+        "mouthOpen": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              28,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              64.428,
+              72,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              98.972,
+              28,
+              67.388
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "mouthRound": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              42.56,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              67.628,
+              57.44,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              68.972,
+              42.56,
+              67.388
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "mouthWide": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              29.849999999999998,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              67.628,
+              70.15,
+              67.388
+            ],
+            [
+              "Q",
+              50,
+              68.972,
+              29.849999999999998,
+              67.388
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "smile": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              32.95,
+              64.94
+            ],
+            [
+              "Q",
+              50,
+              70.94,
+              67.05,
+              64.94
+            ],
+            [
+              "Q",
+              50,
+              72.86,
+              32.95,
+              64.94
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "focus": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              39.7,
+              68.272
+            ],
+            [
+              "Q",
+              52.1,
+              66.432,
+              64.5,
+              68.272
+            ],
+            [
+              "Q",
+              52.1,
+              67.568,
+              39.7,
+              68.272
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "error": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              36.05,
+              69.7
+            ],
+            [
+              "Q",
+              50,
+              64.5,
+              63.95,
+              69.7
+            ],
+            [
+              "Q",
+              50,
+              65.3,
+              36.05,
+              69.7
+            ],
+            [
+              "Z"
+            ]
+          ]
+        },
+        "sleep": {
+          "kind": "path",
+          "commands": [
+            [
+              "M",
+              43.683,
+              67.83
+            ],
+            [
+              "Q",
+              50,
+              66.886,
+              56.317,
+              67.83
+            ],
+            [
+              "Q",
+              50,
+              69.61999999999999,
+              43.683,
+              67.83
+            ],
+            [
+              "Z"
+            ]
+          ]
+        }
+      }
+    },
+    "cheek-left": {
+      "fill": "#f08a82",
+      "opacity": 0,
+      "bindings": [
+        {
+          "channel": "smile",
+          "property": "opacity",
+          "amount": 0.35
+        }
+      ]
+    },
+    "cheek-right": {
+      "fill": "#f08a82",
+      "opacity": 0,
+      "bindings": [
+        {
+          "channel": "smile",
+          "property": "opacity",
+          "amount": 0.35
+        }
+      ]
+    },
+    "accent-zzz": {
+      "fill": "none",
+      "layer": "accent",
+      "stroke": "$features",
+      "strokeWidth": 2.6,
+      "opacity": 0,
+      "bindings": [
+        {
+          "channel": "zzz",
+          "property": "opacity",
+          "amount": 0.45
+        },
+        {
+          "channel": "accentPulse",
+          "when": "zzz",
+          "property": "opacity",
+          "amount": 0.4
+        },
+        {
+          "channel": "accentRise",
+          "property": "y",
+          "amount": -2.5
+        }
+      ]
+    },
+    "accent-ears": {
+      "fill": "none",
+      "layer": "accent",
+      "stroke": "$features",
+      "strokeWidth": 2.6,
+      "opacity": 0,
+      "bindings": [
+        {
+          "channel": "ears",
+          "property": "opacity",
+          "amount": 0.45
+        },
+        {
+          "channel": "accentPulse",
+          "when": "ears",
+          "property": "opacity",
+          "amount": 0.4
+        }
+      ]
+    },
+    "accent-thought": {
+      "fill": "$features",
+      "layer": "accent",
+      "strokeWidth": 2.6,
+      "opacity": 0,
+      "bindings": [
+        {
+          "channel": "thought",
+          "property": "opacity",
+          "amount": 0.45
+        },
+        {
+          "channel": "accentPulse",
+          "when": "thought",
+          "property": "opacity",
+          "amount": 0.4
+        },
+        {
+          "channel": "accentRise",
+          "property": "y",
+          "amount": -2.5
+        }
+      ]
+    },
+    "accent-work": {
+      "fill": "none",
+      "layer": "accent",
+      "stroke": "$features",
+      "strokeWidth": 2.6,
+      "opacity": 0,
+      "bindings": [
+        {
+          "channel": "work",
+          "property": "opacity",
+          "amount": 0.45
+        },
+        {
+          "channel": "accentPulse",
+          "when": "work",
+          "property": "opacity",
+          "amount": 0.4
+        }
+      ]
+    },
+    "accent-error": {
+      "fill": "none",
+      "layer": "accent",
+      "stroke": "$features",
+      "strokeWidth": 2.6,
+      "opacity": 0,
+      "bindings": [
+        {
+          "channel": "error",
+          "property": "opacity",
+          "amount": 0.45
+        },
+        {
+          "channel": "accentPulse",
+          "when": "error",
+          "property": "opacity",
+          "amount": 0.4
+        },
+        {
+          "channel": "accentPulse",
+          "property": "x",
+          "amount": 4
+        }
+      ]
+    }
+  }
+}

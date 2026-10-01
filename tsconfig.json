@@ -6,5 +6,5 @@
     "esModuleInterop": true, "resolveJsonModule": true, "allowImportingTsExtensions": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["client", "service", "contract", "checks", "vite.config.ts", "playwright.config.ts"]
+  "include": ["client", "service", "contract", "checks", "ops/vector-pack.ts", "ops/vector-preview.ts", "ops/vector-evidence.ts", "vite.config.ts", "playwright.config.ts"]
 }

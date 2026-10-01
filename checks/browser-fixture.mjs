@@ -73,7 +73,10 @@ gateway.on('connection',ws=>{
         const base={sessionKey:p.sessionKey,runId};
         const progress=(seq,itemId,text)=>event('agent',{...base,seq,stream:'assistant',data:{phase:'commentary',itemId,text,replace:true}});
         const work=(seq,phase)=>event('agent',{...base,seq,stream:'tool',data:{phase,toolCallId:'fixture-tool'}});
-        const schedule=(delay,callback)=>setTimeout(callback,delay);
+        // Give the vector rig's recording test enough time to inspect a complete
+        // color blend and live speaking pose; other fixtures retain their timing.
+        const pace=p.message.includes('Vector rig')?2:1;
+        const schedule=(delay,callback)=>setTimeout(callback,delay*pace);
         const group=[
           schedule(100,()=>progress(1,'first','I will check the configuration.')),
           schedule(400,()=>work(2,'start')),

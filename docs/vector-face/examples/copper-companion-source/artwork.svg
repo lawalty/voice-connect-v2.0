@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<defs><radialGradient id="shell" gradientUnits="userSpaceOnUse" cx="42" cy="38" r="65" fx="32" fy="25"><stop offset="0" stop-color="#f7c487"/><stop offset="0.55" stop-color="#b86639"/><stop offset="1" stop-color="#392b38"/></radialGradient></defs>
+<path id="head" d="M 25 8 Q 50 0 75 8 Q 94 22 92 53 Q 94 78 72 89 Q 50 98 28 89 Q 6 78 8 53 Q 6 22 25 8 Z" fill="url(#shell)" stroke="#fff1d6" stroke-width="4" />
+<path id="shell-highlight" d="M 24 14 Q 48 7 74 14" fill="none" stroke="#ffe6bd" stroke-width="2" opacity="0.6" />
+<path id="brow-left" d="M 18 26.6 Q 29.5 20.700000000000003 41 25.1 L 41 30.9 Q 29.5 26.065 18 29.4 Z" fill="#fff1d6" />
+<path id="eye-left" d="M 21 46 C 21 39 24 39 32 39 C 40 39 43 39 43 46 C 43 53 40 53 32 53 C 24 53 21 53 21 46 Z" fill="#fff1d6" />
+<ellipse id="pupil-left" cx="32" cy="46" rx="4.3" ry="4.988" fill="#102530" />
+<circle id="catchlight-a-left" cx="30.624" cy="44.194" r="1.29" fill="#fff1d6" opacity="1" />
+<circle id="catchlight-b-left" cx="33.462" cy="47.892" r="0.688" fill="#fff1d6" opacity="0.8" />
+<path id="brow-right" d="M 82 26.6 Q 70.5 20.700000000000003 59 25.1 L 59 30.9 Q 70.5 26.065 82 29.4 Z" fill="#fff1d6" />
+<path id="eye-right" d="M 58 46 C 58 39 61 39 69 39 C 77 39 80 39 80 46 C 80 53 77 53 69 53 C 61 53 58 53 58 46 Z" fill="#fff1d6" />
+<ellipse id="pupil-right" cx="69" cy="46" rx="4.3" ry="4.988" fill="#102530" />
+<circle id="catchlight-a-right" cx="67.624" cy="44.194" r="1.29" fill="#fff1d6" opacity="1" />
+<circle id="catchlight-b-right" cx="70.462" cy="47.892" r="0.688" fill="#fff1d6" opacity="0.8" />
+<path id="x-eyes" d="M 24 40 L 40 55 M 40 40 L 24 55 M 61 40 L 77 55 M 77 40 L 61 55" fill="none" stroke="#fff1d6" stroke-width="5" opacity="0" />
+<path id="nose" d="M 47 54 L 53 54 L 53 59 L 47 59 Z" fill="none" stroke="#fff1d6" stroke-width="2.6" />
+<path id="mouth-fill" d="M 34.5 67.388 Q 50 67.628 65.5 67.388 Q 50 68.972 34.5 67.388 Z" fill="#261d16" opacity="0" />
+<path id="tongue" d="M 41.3 68.8 Q 50 71 58.7 68.8 Q 50 67.4 41.3 68.8 Z" fill="#d66c74" opacity="0" />
+<path id="mouth" d="M 34.5 67.388 Q 50 67.628 65.5 67.388 Q 50 68.972 34.5 67.388 Z" fill="none" stroke="#fff1d6" stroke-width="2.7" />
+<ellipse id="cheek-left" cx="22" cy="58" rx="7.2" ry="3.6" fill="#f08a82" opacity="0" />
+<ellipse id="cheek-right" cx="79" cy="58" rx="7.2" ry="3.6" fill="#f08a82" opacity="0" />
+<path id="accent-zzz" d="M 72 24 L 79 24 L 72 31 L 80 31 M 80 15 L 85 15 L 80 20 L 86 20" fill="none" stroke="#fff1d6" stroke-width="2.6" opacity="0" />
+<path id="accent-ears" d="M 14 44 Q 10 48 14 52 M 86 43 Q 91 48 86 53" fill="none" stroke="#fff1d6" stroke-width="2.6" opacity="0" />
+<path id="accent-thought" d="M 74 17 C 74 14 78 14 78 17 C 78 20 74 20 74 17 Z M 81 12 C 81 8 87 8 87 12 C 87 16 81 16 81 12 Z M 89 6 C 89 1 96 1 96 6 C 96 11 89 11 89 6 Z" fill="#fff1d6" stroke-width="2.6" opacity="0" />
+<path id="accent-work" d="M 13 37 L 9 34 M 12 45 L 6 45 M 87 37 L 91 34 M 88 45 L 94 45" fill="none" stroke="#fff1d6" stroke-width="2.6" opacity="0" />
+<path id="accent-error" d="M 26 17 Q 35 10 44 17 Q 52 24 61 17 Q 69 11 77 17" fill="none" stroke="#fff1d6" stroke-width="2.6" opacity="0" />
+</svg>

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { vectorArtworkSchema, vectorRigSchema, vectorPoseSchema, vectorResourcesSchema, validateVectorArtwork } from './vector-art.js';
+import expressiveArtwork from './expressive-face.json' with { type: 'json' };
 
 export const MAX_PACK_BYTES = 6 * 1024 * 1024;
 export const MAX_CUSTOM_PACKS = 8;
@@ -18,15 +20,26 @@ export const statusPackSchema = z.object({
   version: z.literal(1), renderer: z.literal('status-orb-v1'), ...identity,
   colors: z.record(z.enum(ORB_STATES), z.string().regex(/^#[0-9a-fA-F]{6}$/)),
 }).strict();
-export const packSchema = z.discriminatedUnion('renderer', [facePackSchema, statusPackSchema]);
+export const vectorFacePackSchema = z.object({
+  version: z.literal(1), renderer: z.literal('vector-face-v1'), ...identity,
+  colors: z.record(z.enum(ORB_STATES), z.string().regex(/^#[0-9a-fA-F]{6}$/)),
+  ink: z.object({ features: z.string().regex(/^#[0-9a-fA-F]{6}$/), pupils: z.string().regex(/^#[0-9a-fA-F]{6}$/) }).strict(),
+  motion: z.object({ yaw: z.number().min(0).max(20), pitch: z.number().min(0).max(12), roll: z.number().min(0).max(12) }).strict(),
+  artwork: vectorArtworkSchema, rig: vectorRigSchema,
+  resources: vectorResourcesSchema.optional(),
+  poses: z.record(z.enum(ORB_STATES), vectorPoseSchema),
+}).strict().superRefine(validateVectorArtwork);
+export const packSchema = z.discriminatedUnion('renderer', [facePackSchema, statusPackSchema, vectorFacePackSchema]);
 export type OrbPack = z.infer<typeof packSchema>;
 export type FacePack = z.infer<typeof facePackSchema>;
 export type StatusPack = z.infer<typeof statusPackSchema>;
+export type VectorFacePack = z.infer<typeof vectorFacePackSchema>;
 export const LUMINOUS_GLASS: FacePack = Object.freeze({ version: 1, renderer: PACK_RENDERER, id: 'luminous-glass', name: 'Luminous Glass',
   atlas: '/orb-packs/luminous-glass/atlas.png', flow: '/orb-packs/luminous-glass/flow.png', motion: { yaw: 14, pitch: 7, roll: 7 } });
 export const VOICE_CONNECT_V1: StatusPack = Object.freeze({ version: 1, renderer: 'status-orb-v1', id: 'voice-connect-v1', name: 'Voice Connect v1',
   colors: { idle: '#27272a', standby: '#27272a', connecting: '#52525c', listening: '#00bc7d', thinking: '#fe9a00', working: '#ff6900', speaking: '#8e51ff', error: '#e7000b' } });
-export const BUILTIN_PACKS: readonly OrbPack[] = [LUMINOUS_GLASS, VOICE_CONNECT_V1];
+export const EXPRESSIVE_FACE: VectorFacePack = vectorFacePackSchema.parse(expressiveArtwork);
+export const BUILTIN_PACKS: readonly OrbPack[] = [LUMINOUS_GLASS, VOICE_CONNECT_V1, EXPRESSIVE_FACE];
 export const isBuiltinPack = (id: string) => BUILTIN_PACKS.some(pack => pack.id === id);
 export interface OrbPreferences { packId: string; motion: number; phaseColors: boolean; }
 export const orbPreferencesSchema = z.object({
@@ -71,7 +84,7 @@ export function parseOrbPack(text: string): OrbPack {
   let pack: OrbPack;
   try { pack = packSchema.parse(JSON.parse(text)); } catch { throw new Error('This is not a supported version 1 orb pack.'); }
   if (pack.id === 'classic' || isBuiltinPack(pack.id)) throw new Error('Give your custom pack a unique ID before importing it.');
-  if (pack.renderer === 'status-orb-v1') return pack;
+  if (pack.renderer !== 'glass-face-v1') return pack;
   const size = pngDimensions(pack.atlas);
   if (pack.flow && pngDimensions(pack.flow) !== size) throw new Error('The atlas and motion map must have the same dimensions.');
   return pack;

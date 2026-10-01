@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { buildApp } from '../service/main';
-import { LUMINOUS_GLASS, VOICE_CONNECT_V1, MAX_PACK_BYTES } from '../contract/orb-packs';
+import { LUMINOUS_GLASS, VOICE_CONNECT_V1, EXPRESSIVE_FACE, MAX_PACK_BYTES } from '../contract/orb-packs';
 
 const atlas = readFileSync('client/public/orb-packs/luminous-glass/atlas.png');
 const flow = readFileSync('client/public/orb-packs/luminous-glass/flow.png');
@@ -24,6 +24,24 @@ async function fixture() {
 }
 
 describe('installation-wide orb packs', () => {
+  it('shares vector artwork without PNG URLs, survives restart and removes it without affecting glass packs', async () => {
+    const run = await fixture();
+    const vector = { ...EXPRESSIVE_FACE, id:'my-expressive-face',name:'My Expressive Face' };
+    const glass = await run.app.inject({method:'POST',url:'/api/orbs/packs',headers:run.phone,payload:pack});
+    expect(glass.statusCode).toBe(200);
+    const imported = await run.app.inject({method:'POST',url:'/api/orbs/packs',headers:run.phone,payload:vector});
+    expect(imported.statusCode).toBe(200);
+    const state=imported.json().state;
+    expect(state.packs.find((p:any)=>p.id===vector.id)).toEqual(vector);
+    expect(state.preferences.packId).toBe(vector.id);
+    await run.restart();
+    expect((await run.app.inject({url:'/api/orbs',headers:run.pc})).json()).toEqual(state);
+    for(const asset of ['atlas.png','flow.png']) expect((await run.app.inject({url:`/api/orbs/packs/${vector.id}/${asset}`,headers:run.pc})).statusCode).toBe(404);
+    const removed=await run.app.inject({method:'DELETE',url:`/api/orbs/packs/${vector.id}`,headers:run.pc,payload:{revision:state.revision}});
+    expect(removed.statusCode).toBe(200);expect(removed.json().preferences.packId).toBe('classic');
+    expect(removed.json().packs).toHaveLength(1);expect(removed.json().packs[0].renderer).toBe('glass-face-v1');
+    expect((await run.app.inject({method:'POST',url:'/api/orbs/packs',headers:run.phone,payload:{...vector,id:'expressive-face'}})).statusCode).toBe(400);
+  });
   it('shares the built-in status selection and imported palettes across devices and restart', async () => {
     const run = await fixture();
     const selected = await run.app.inject({ method: 'PATCH', url: '/api/orbs/preferences', headers: run.phone, payload: { revision: 0, patch: { packId: VOICE_CONNECT_V1.id } } });
