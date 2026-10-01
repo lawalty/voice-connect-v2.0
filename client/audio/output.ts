@@ -2,13 +2,14 @@ import type { AudioEvent, SpeechOutput, SpeechPreferences } from '../../contract
 import { Generation } from './dsp';
 import { PLAYBACK_WINDOW_BYTES } from '../../contract/audio-flow';
 import type { FishDelivery } from '../../contract/fish-delivery';
+import { SpeechCaptionTimeline } from './speech-caption';
 
 export function audioURL(kind: 'stt' | 'tts', conversationId: string, voice?: string, delivery?: FishDelivery) {
   const url = new URL('/api/audio', location.href);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('kind', kind); url.searchParams.set('conversationId', conversationId);
   if (voice) url.searchParams.set('voice', voice);
-  if (kind === 'tts') url.searchParams.set('provider', 'fish');
+  if (kind === 'tts') { url.searchParams.set('provider', 'fish'); url.searchParams.set('timing', 'words'); }
   if (kind === 'tts' && delivery) url.searchParams.set('fishDelivery', delivery);
   return url.href;
 }
@@ -18,10 +19,13 @@ export interface OutputEvents {
   /** Scheduled PCM on the shared AudioContext clock, never provider arrival time. */
   reference?(audio: PlaybackSamples): void;
   cancelled?(atTime: number): void;
+  /** Cumulative spoken text, advanced by actual playback rather than arrival. */
+  progress?(text: string): void;
 }
 
 export class BrowserOutput implements SpeechOutput {
-  private queue: string[] = [];
+  private queue: { text: string; end: number }[] = [];
+  private captionText = '';
   private active = false;
   private complete = false;
   private failed = false;
@@ -29,6 +33,7 @@ export class BrowserOutput implements SpeechOutput {
   private generation = new Generation();
   private utterance?: SpeechSynthesisUtterance;
   private watchdog?: ReturnType<typeof setTimeout>;
+  private captionFallback?: ReturnType<typeof setTimeout>;
   private stopVoiceWait?: () => void;
   private waitedForVoices = false;
   constructor(private preferences: Pick<SpeechPreferences, 'browserVoice'>, private events: OutputEvents) {}
@@ -36,7 +41,11 @@ export class BrowserOutput implements SpeechOutput {
     if (this.failed || !text.trim()) return;
     // Short utterances reduce platform-specific long-utterance hangs.
     const pieces = text.match(/.{1,220}(?:\s|$)|\S{1,220}/g) ?? [text];
-    this.queue.push(...pieces); this.complete = false; this.ended = false; this.pump();
+    for (const piece of pieces) {
+      this.captionText += (this.captionText ? ' ' : '') + piece.trim();
+      this.queue.push({ text: piece.trim(), end: this.captionText.length });
+    }
+    this.complete = false; this.ended = false; this.pump();
   }
   private pump() {
     if (this.active || this.failed || this.stopVoiceWait) return;
@@ -68,7 +77,7 @@ export class BrowserOutput implements SpeechOutput {
     }
     // An empty list alone does not prove speech is unavailable: some browsers
     // can still use their OS default voice. Start/error watchdogs verify the attempt.
-    const text = this.queue.shift()!;
+    const item = this.queue.shift()!, text = item.text, from = item.end - text.length;
     const id = this.generation.current;
     try {
       const utterance = this.utterance = new SpeechSynthesisUtterance(text.trim());
@@ -77,7 +86,7 @@ export class BrowserOutput implements SpeechOutput {
       const preferred = saved ?? voices.find(voice => localEnglish(voice) && voice.default) ?? voices.find(localEnglish);
       if (preferred) utterance.voice = preferred;
       utterance.lang = preferred?.lang ?? 'en-US'; utterance.volume = 1;
-      this.active = true; let started = false;
+      this.active = true; let started = false, boundaries = false;
       const current = () => this.generation.is(id) && this.utterance === utterance;
       this.watchdog = setTimeout(() => {
         if (current()) this.fail('Browser speech did not report a start. Try Test speaker, then check device text-to-speech and sound settings. The reply remains as text.');
@@ -89,11 +98,21 @@ export class BrowserOutput implements SpeechOutput {
           if (current()) this.fail('Browser speech stopped responding before it finished. Try Test speaker or choose another voice. The full reply remains as text.');
         }, Math.min(60000, Math.max(15000, text.length * 180 + 5000)));
         this.events.started();
+        // Not every OS voice reports word boundaries. In that case reveal the
+        // spoken utterance as a phrase, never invent word-to-audio precision.
+        this.captionFallback = setTimeout(() => { if (current() && !boundaries) this.events.progress?.(this.captionText.slice(0, item.end)); }, 500);
+      };
+      utterance.onboundary = event => {
+        if (!current() || !started || event.name !== 'word' || !Number.isFinite(event.charIndex)) return;
+        boundaries = true; clearTimeout(this.captionFallback);
+        const index = Math.max(0, Math.min(text.length, event.charIndex));
+        const word = text.slice(index).match(/^\S+/)?.[0] ?? '';
+        this.events.progress?.(this.captionText.slice(0, from + index + word.length));
       };
       utterance.onend = () => {
         if (!current()) return;
         if (!started) { this.fail('Browser speech ended without reporting a start. Try Test speaker to check this device. The reply remains as text.'); return; }
-        clearTimeout(this.watchdog); this.active = false; this.utterance = undefined; this.pump();
+        clearTimeout(this.watchdog); clearTimeout(this.captionFallback); this.events.progress?.(this.captionText.slice(0, item.end)); this.active = false; this.utterance = undefined; this.pump();
       };
       utterance.onerror = (event) => { if (current()) this.fail(this.failureMessage(event.error)); };
       synthesis.speak(utterance);
@@ -122,8 +141,8 @@ export class BrowserOutput implements SpeechOutput {
   }
   finish() { this.complete = true; if (this.failed) this.reportEnded(); else this.pump(); }
   cancel() {
-    this.generation.next(); this.queue = []; this.active = false; this.complete = false;
-    clearTimeout(this.watchdog); this.stopVoiceWait?.();
+    this.generation.next(); this.queue = []; this.captionText = ''; this.active = false; this.complete = false;
+    clearTimeout(this.watchdog); clearTimeout(this.captionFallback); this.stopVoiceWait?.();
     this.utterance = undefined;
     try { if (typeof window !== 'undefined') window.speechSynthesis?.cancel(); } catch { /* failure is reported by the initiating operation */ }
   }
@@ -131,6 +150,11 @@ export class BrowserOutput implements SpeechOutput {
 }
 
 export class PremiumOutput implements SpeechOutput {
+  private captions = new SpeechCaptionTimeline();
+  private captionTimer?: ReturnType<typeof setTimeout>;
+  private scheduledSeconds = 0;
+  private playedSeconds = 0;
+  private spans = new Map<AudioBufferSourceNode, { start: number; from: number; duration: number }>();
   private socket?: WebSocket;
   private generation = new Generation();
   private sources = new Set<AudioBufferSourceNode>();
@@ -179,8 +203,9 @@ export class PremiumOutput implements SpeechOutput {
         if (this.inputStarted) this.watchPlayback('Premium voice connected but returned no playable audio. Try Test speaker or check the selected voice.', 15000);
       } else if (event.type === 'speech-done') {
         if (!this.started) { this.fail('Premium voice returned no playable audio. Check the selected voice and try Test speaker.'); return; }
-        this.done = true; this.checkDone();
+        this.captions.finish(); this.done = true; this.checkDone();
       }
+      else if (event.type === 'speech-alignment') { this.captions.update(event.alignment); this.tickCaptions(id); }
       else if (event.type === 'error') this.fail(event.message);
     };
     socket.onerror = () => { if (this.generation.is(id)) this.fail('Premium voice connection failed. Read the reply or retry.'); };
@@ -196,6 +221,7 @@ export class PremiumOutput implements SpeechOutput {
   enqueue(text: string) {
     if (this.failed || !text.trim()) return;
     this.inputStarted = true;
+    this.captions.append(text);
     this.done = false;
     for (let offset = 0; offset < text.length; offset += 3500) this.send({ type: 'speak', text: text.slice(offset, offset + 3500) });
     if (this.ready) this.watchPlayback('Premium voice returned no audio for the next part of the reply. Please reconnect voice.', Math.max(15000, (this.nextTime - this.context.currentTime) * 1000 + 15000));
@@ -224,10 +250,13 @@ export class PremiumOutput implements SpeechOutput {
       const source = this.context.createBufferSource(); source.buffer = buffer; source.connect(this.context.destination);
       const start = Math.max(this.context.currentTime + 0.025, this.nextTime);
       this.nextTime = start + buffer.duration; this.sources.add(source);
+      const from = this.scheduledSeconds; this.scheduledSeconds += buffer.duration;
+      this.spans.set(source, { start, from, duration: buffer.duration });
       this.pendingBytes += bytes.byteLength;
       source.onended = () => {
         source.disconnect();
         if (!this.sources.delete(source) || !this.generation.is(id)) return;
+        this.playedSeconds = Math.max(this.playedSeconds, from + buffer.duration); this.spans.delete(source); this.tickCaptions(id);
         this.pendingBytes -= bytes.byteLength; this.playedBytes += bytes.byteLength;
         if (this.playbackWindow && !this.done && this.socket?.readyState === WebSocket.OPEN) {
           this.socket.send(JSON.stringify({ type: 'playback', playedBytes: this.playedBytes }));
@@ -239,6 +268,7 @@ export class PremiumOutput implements SpeechOutput {
       };
       source.start(start);
       this.events.reference?.({ samples: channel, sampleRate: this.sampleRate, startTime: start });
+      this.tickCaptions(id);
       if (!this.started) { this.started = true; this.firstTime = start; this.events.started(); }
       this.watchPlayback('Premium speech stopped responding before playback completed. The full reply remains as text.', Math.max(15000, (this.nextTime - this.context.currentTime) * 1000 + 5000));
     } catch { this.fail('Browser audio playback failed. Tap Test speaker to check output. The full reply remains as text.'); }
@@ -248,10 +278,22 @@ export class PremiumOutput implements SpeechOutput {
     const id = this.generation.current;
     this.playbackTimeout = setTimeout(() => { if (this.generation.is(id)) this.fail(message); }, delayMs);
   }
+  private tickCaptions(id: number) {
+    clearTimeout(this.captionTimer); this.captionTimer = undefined;
+    if (!this.generation.is(id) || this.failed) return;
+    let seconds = this.playedSeconds;
+    // Do not advance across future buffers, underruns, or suspended audio.
+    for (const span of this.spans.values()) if (span.start <= this.context.currentTime) {
+      seconds = Math.max(seconds, span.from + Math.min(span.duration, this.context.currentTime - span.start));
+    }
+    const text = this.captions.sample(seconds);
+    if (text !== undefined) this.events.progress?.(text);
+    if (this.spans.size) this.captionTimer = setTimeout(() => this.tickCaptions(id), 33);
+  }
   private reportEnded() { if (!this.ended) { this.ended = true; this.events.ended(); } }
   private checkDone() {
     if (this.complete && this.done && this.sources.size === 0) {
-      clearTimeout(this.playbackTimeout);
+      clearTimeout(this.playbackTimeout); clearTimeout(this.captionTimer);
       this.generation.next(); this.socket?.close(); this.socket = undefined; this.ready = false;
       this.reportEnded();
     }
@@ -265,10 +307,11 @@ export class PremiumOutput implements SpeechOutput {
   }
   cancel() {
     const offsetMs = this.started ? Math.max(0, (Math.min(this.context.currentTime, this.nextTime) - this.firstTime) * 1000) : 0;
-    this.generation.next(); clearTimeout(this.timeout); clearTimeout(this.playbackTimeout);
+    this.generation.next(); clearTimeout(this.timeout); clearTimeout(this.playbackTimeout); clearTimeout(this.captionTimer);
     // Silence first; provider acknowledgement must never delay a local interruption.
     for (const source of this.sources) { try { source.stop(); } catch { /* already ended */ } source.disconnect(); }
     this.sources.clear();
+    this.spans.clear(); this.captions = new SpeechCaptionTimeline(); this.scheduledSeconds = 0; this.playedSeconds = 0;
     this.events.cancelled?.(this.context.currentTime);
     if (this.ready && this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'interrupt', offsetMs }));
     this.socket?.close(); this.socket = undefined; this.commands = []; this.ready = false;

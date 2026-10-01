@@ -69,6 +69,7 @@ export type AudioEvent =
   | { type: 'ready'; sampleRate: number; playbackWindowBytes?: number }
   | { type: 'stt'; text: string; final: boolean; turnComplete: boolean; started?: boolean }
   | { type: 'speech-done' }
+  | { type: 'speech-alignment'; alignment: import('./speech-alignment').SpeechAlignment }
   | { type: 'interrupted' }
   | { type: 'error'; message: string; retryable?: boolean };
 export interface ModelManifest { id: string; url: string; sha256: string; bytes: number; license: string; sampleRate: number; }

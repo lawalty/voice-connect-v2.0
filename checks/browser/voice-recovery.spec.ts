@@ -99,7 +99,13 @@ for (const fault of ['reply connection', 'recognition connection'] as const) {
     } else await expect.poll(() => connections).toBe(initialConnections + 1);
     await expect(page.locator('.site-header .connection-pill')).toHaveText('Connected');
     await expect(page.getByRole('switch', { name: 'Auto mode' })).toBeChecked();
-    await expect(page.getByRole('article', { name: 'NorthPointe', exact: true })).toContainText('I’m here with you.');
+    // Available text is accessible immediately; visual words now follow the
+    // held utterance's playback. Do not require unsaid words on screen yet.
+    await expect.poll(async () => {
+      const reply = page.getByRole('article', { name: 'NorthPointe', exact: true });
+      const note = reply.getByRole('note');
+      return (await note.count() ? await note.getAttribute('aria-label') : await reply.textContent()) || '';
+    }).toContain('I’m here with you.');
     const after = await p.state();
     expect(after.captures).toBe(before.captures); expect(after.live).toBe(1); expect(after.cancelled).toBe(during.cancelled);
     await finishSentence(page);
@@ -108,7 +114,11 @@ for (const fault of ['reply connection', 'recognition connection'] as const) {
     await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     // The next normal voice turn is accepted exactly once on the same session.
     p.recognition.at(-1)!.send(JSON.stringify({ type: 'stt', text: 'A second synthetic message.', started: true, final: true, turnComplete: true }));
-    await expect(page.getByRole('article', { name: 'NorthPointe', exact: true }).last()).toContainText('Your second message is in the same conversation.');
+    await expect.poll(async () => {
+      const reply = page.getByRole('article', { name: 'NorthPointe', exact: true }).last();
+      const note = reply.getByRole('note');
+      return (await note.count() ? await note.getAttribute('aria-label') : await reply.textContent()) || '';
+    }).toContain('Your second message is in the same conversation.');
     expect(p.turns).toHaveLength(2); expect(new Set(p.turns).size).toBe(2); expect(p.aborts).toEqual([]);
     expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(p.conversation);
     await expect(page.getByText(/Voice paused during the connection loss|Premium recognition disconnected/)).toHaveCount(0);

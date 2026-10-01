@@ -5,7 +5,7 @@ import { waitForFixtureBudget } from './fixture-budget';
 
 test.beforeEach(waitForFixtureBudget);
 
-test('Messenger displays partial native text and starts Fish before the answer is complete', async ({ page }) => {
+test('Messenger receives partial native text and starts Fish before the answer is complete', async ({ page }) => {
   await installationFixture(page, { output: 'fish', fishVoice: 'fixture' });
   await page.addInitScript(() => localStorage.setItem('vc2:speech', JSON.stringify({ audioCues: false, keepAwake: false })));
   let submitted: string | undefined, complete = false, historyReads = 0;
@@ -37,7 +37,7 @@ test('Messenger displays partial native text and starts Fish before the answer i
   await page.getByRole('textbox', { name: 'Message NorthPointe' }).fill('Opening phrase fixture');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const log = page.getByRole('log', { name: 'Messages' });
-  await expect(log.getByText('**An imaginary garden is a peaceful place with col', { exact: true })).toBeVisible();
+  await expect(log.locator('.reply-accessible')).toHaveAttribute('aria-label', '**An imaginary garden is a peaceful place with col');
   await expect.poll(() => speech.length).toBeGreaterThan(0);
   expect(speech[0]).toEqual({ text: 'An imaginary garden is a peaceful place with', beforeComplete: true });
   await expect.poll(() => complete).toBe(true);

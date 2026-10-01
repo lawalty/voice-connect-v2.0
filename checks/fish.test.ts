@@ -21,17 +21,29 @@ class Socket extends EventEmitter {
   events() { return this.sent.filter(item => !item.binary).map(item => JSON.parse(item.data as string) as Record<string, unknown>); }
   pcm() { return Buffer.concat(this.sent.filter(item => item.binary).map(item => Buffer.from(item.data))); }
 }
-function fixture(voice = 'test_voice-123', delivery?: { model: string; cue: FishDelivery }) {
+function fixture(voice = 'test_voice-123', delivery?: { model: string; cue: FishDelivery }, timing = false) {
   const client = new Socket(), remote = new Socket(); remote.readyState = WebSocket.CONNECTING;
   let allowed = true;
   const factory = vi.fn((_url: string, _options: WebSocket.ClientOptions) => remote as unknown as WebSocket);
-  bridgeFishAudio(client as unknown as WebSocket, 'test-private-api-key', voice, () => allowed, factory, delivery);
+  bridgeFishAudio(client as unknown as WebSocket, 'test-private-api-key', voice, () => allowed, factory, delivery, timing);
   return { client, remote, factory, revoke: () => { allowed = false; }, open: () => { remote.readyState = WebSocket.OPEN; remote.emit('open'); } };
 }
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe('Fish Audio authenticated streaming bridge', () => {
+  it('opts into timestamp streaming without withholding PCM and forwards empty-audio corrections', () => {
+    const f = fixture('voice', undefined, true); f.open(); f.client.control({ type: 'speak', text: 'Hello.' });
+    expect(f.factory.mock.calls[0]![0]).toBe('wss://api.fish.audio/v1/tts/live/with-timestamp');
+    f.remote.provider({ event: 'audio', audio: Uint8Array.of(1, 0), alignment: null });
+    expect(f.client.pcm()).toEqual(Buffer.from([1, 0]));
+    const metadata = { chunk_seq: 0, chunk_audio_offset_sec: 0, content: 'Hello.', alignment: { audio_duration: 1, segments: [{ text: 'Hello', start: .1, end: .5 }] } };
+    f.remote.provider({ event: 'audio', audio: new Uint8Array(), ...metadata });
+    expect(f.client.events().at(-1)).toEqual({ type: 'speech-alignment', alignment: { chunk: 0, offset: 0, content: 'Hello.', duration: 1, words: metadata.alignment.segments } });
+    f.remote.provider({ event: 'audio', audio: new Uint8Array(), ...metadata, alignment: null });
+    expect(f.client.events().filter(event => event.type === 'speech-alignment')).toHaveLength(1);
+    f.client.close(); expect(vi.getTimerCount()).toBe(0);
+  });
   it.each([
     ['s2.1-pro', 'restrained', '[calm, warm, measured voice]'],
     ['s2-pro', 'soft', '[soft tone]'],

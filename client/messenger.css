@@ -106,3 +106,12 @@
 .clipboard-inline .error-text { margin: 8px 0; }
 .history-earlier { align-self: center; margin: 4px auto 18px; flex-shrink: 0; }
 .history-error { color: var(--muted); font-size: .85rem; margin: 0 0 16px; overflow-wrap: anywhere; }
+.typing-indicator { display: flex; align-items: center; gap: 6px; width: fit-content; min-height: 44px; padding: 14px 18px; margin: 0 0 20px; border: 1px solid #b4bace26; border-radius: 18px 18px 18px 5px; background: #222630; }
+.typing-indicator span { width: 6px; height: 6px; border-radius: 50%; background: #afc7c4; animation: reply-dot 1.2s ease-in-out infinite; }
+.typing-indicator span:nth-child(2) { animation-delay: .15s; }
+.typing-indicator span:nth-child(3) { animation-delay: .3s; }
+@keyframes reply-dot { 0%, 60%, 100% { opacity: .45; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+.reply-revealing { min-height: 1.65em; }
+.reply-caret { display: inline-block; height: 1em; width: 2px; margin-left: 3px; vertical-align: -.12em; background: #a7cfc2; animation: reply-caret 1s steps(2) infinite; }
+@keyframes reply-caret { 50% { opacity: 0; } }
+.reply-accessible { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
