@@ -16,7 +16,7 @@ class FakeRecognizer {
   stop() { this.running = false; }
   partial(text: string) { this.events.result({ text, final: false, turnComplete: false }); }
 }
-interface OutputEvents { started(): void; ended(): void; error(message: string): void }
+interface OutputEvents { started(): void; ended(): void; error(message: string): void; reference(audio:{samples:Float32Array;sampleRate:number;startTime:number}):void }
 class FakeOutput {
   words: string[] = []; finished = false;
   readonly events: OutputEvents;
@@ -108,7 +108,7 @@ beforeEach(() => {
   vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' });
   vi.stubGlobal('Worker', FakeWorker); vi.stubGlobal('AudioWorkletNode', FakeWorklet);
   vi.stubGlobal('AudioContext', class {
-    state = 'running'; sampleRate = 48000; destination = {}; audioWorklet = { addModule: async () => {} };
+    state = 'running'; currentTime = 0; sampleRate = 48000; destination = {}; audioWorklet = { addModule: async () => {} };
     async resume() {} async close() {}
     createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
   });
@@ -116,6 +116,18 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it('feeds face motion from Fish playback and fences cancelled audio references', async () => {
+    const run=setup();await run.engine.start({...preferences,output:'fish'},'face-timing');
+    run.engine.awaitReply();run.engine.speak('A spoken answer.');
+    const output=fixture.outputs[0]!;
+    const audio={samples:new Float32Array(2400).fill(.15),sampleRate:24000,startTime:0};
+    output.events.reference(audio);expect(run.engine.faceSpeech().open).toBeGreaterThan(.4);
+    run.engine.setSpeakerMuted(true);expect(run.engine.faceSpeech().open).toBe(0);
+    output.events.reference(audio);expect(run.engine.faceSpeech().open).toBe(0);
+    run.engine.setSpeakerMuted(false);run.engine.interrupt();run.engine.awaitReply();run.engine.speak('A new answer.');
+    fixture.outputs[1]!.events.reference(audio);expect(run.engine.faceSpeech().open).toBeGreaterThan(.4);
+    run.engine.interrupt();expect(run.engine.faceSpeech().open).toBe(0);
+  });
   it.each(['browser', 'fish'] as const)('speaks ephemeral commentary with %s, returns to work, and gives the answer priority', async output => {
     const run = setup(); await run.engine.start({ ...preferences, output, fishDelivery: 'soft' }, 'commentary');
     run.engine.awaitReply();
@@ -369,6 +381,38 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     expect(contexts[0]!.close).toHaveBeenCalledOnce();
     lateOldEvent?.(); // A retired output must not stop the new microphone session.
     expect(run.phases.at(-1)).toBe('listening');
+    expect(run.callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it.each(['continue', 'cancel', 'restart'])('waits for retired Android audio resources before capture, including %s during close', async action => {
+    Object.assign(navigator, { userAgent: 'Mozilla/5.0 (Linux; Android 16)' });
+    let finishClose!: () => void;
+    const closing = new Promise<void>(resolve => { finishClose = resolve; });
+    const contexts: DelayedContext[] = [];
+    class DelayedContext {
+      state = 'running'; sampleRate = 48000; destination = {}; audioWorklet = { addModule: async () => {} };
+      onstatechange: (() => void) | null = null;
+      readonly index = contexts.length;
+      close = vi.fn(async () => { if (this.index === 0) await closing; this.state = 'closed'; });
+      async resume() {}
+      createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+      constructor() { contexts.push(this); }
+    }
+    vi.stubGlobal('AudioContext', DelayedContext);
+    const run = setup();
+    run.engine.prepareSpeech({ ...preferences, output: 'fish' }, 'one-conversation');
+    const starting = run.engine.start(preferences, 'one-conversation');
+    await drain();
+    expect(contexts[0]!.close).toHaveBeenCalledOnce();
+    expect(microphone).not.toHaveBeenCalled();expect(contexts).toHaveLength(1);
+    let replacement: Promise<void> | undefined;
+    if (action === 'cancel') run.engine.stop();
+    if (action === 'restart') replacement = run.engine.start(preferences, 'one-conversation');
+    await drain();expect(microphone).not.toHaveBeenCalled();
+    finishClose();await Promise.all([starting, replacement]);
+    expect(microphone).toHaveBeenCalledTimes(action === 'cancel' ? 0 : 1);
+    expect(contexts).toHaveLength(action === 'cancel' ? 1 : 2);
+    expect(run.phases.at(-1)).toBe(action === 'cancel' ? 'off' : 'listening');
     expect(run.callbacks.onError).not.toHaveBeenCalled();
   });
 

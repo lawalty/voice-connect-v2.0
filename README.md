@@ -57,6 +57,13 @@ Physical echo rejection, interruption during speaker playback, and reliable turn
 boundaries in a noisy car remain unqualified. Browser fixtures cannot establish
 those real-device results.
 
+## Orb appearance
+
+Settings supports the classic orb and an animated Luminous Glass face with
+continuous movement, expressions, and mouth animation driven by existing Fish
+playback. Importable face packs replace the artwork without changing speech logic.
+See [face-pack format and limitations](docs/ORB-PACKS.md) for personalization.
+
 ## Shared document library
 
 The authenticated Library panel connects to the existing Hermes RAG API for
