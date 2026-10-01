@@ -1,5 +1,5 @@
 import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
-import { updaterTools, readHostStatus } from './tools.mjs';
+import { updaterTools, readHostStatus, completionNotice } from './tools.mjs';
 import fs from 'node:fs/promises';
 
 export default definePluginEntry({
@@ -20,11 +20,10 @@ export default definePluginEntry({
         let previous;
         try { previous = JSON.parse(await fs.readFile(marker, 'utf8')); } catch {}
         if (stopped || previous?.id === job.id) return;
-        const agentId = job.sessionKey.split(':')[1];
-        const text = `OpenClaw host updater result: ${JSON.stringify({ phase: job.phase, previousVersion: job.previousVersion, targetVersion: job.targetVersion, message: job.message })}. Report this verified result to the owner. Do not start another update.`;
-        api.runtime.system.enqueueSystemEvent(text, { sessionKey: job.sessionKey, contextKey: `host-update:${job.id}` });
+        const notice = completionNotice(job);
+        api.runtime.system.enqueueSystemEvent(notice.text, notice.eventOptions);
         await fs.writeFile(marker, JSON.stringify({ id: job.id }), { mode: 0o600 });
-        if (!stopped) api.runtime.system.requestHeartbeatNow({ agentId, sessionKey: job.sessionKey, reason: 'OpenClaw host update completed', heartbeat: { target: 'none' } });
+        if (!stopped) api.runtime.system.requestHeartbeatNow(notice.wakeOptions);
       } catch { /* The updater or gateway may be restarting; retry quietly. */ }
     };
     api.registerService({

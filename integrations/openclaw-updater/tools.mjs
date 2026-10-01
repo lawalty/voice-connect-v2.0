@@ -65,3 +65,12 @@ export function updaterTools(context, request = hostRequest) {
 export function readHostStatus() {
   return hostRequest('status', { assertInvocationCurrent() {} }, undefined);
 }
+
+export function completionNotice(job) {
+  const agentId = job.sessionKey.split(':')[1];
+  return {
+    text: `Exec finished: OpenClaw host updater. ${JSON.stringify({ phase: job.phase, previousVersion: job.previousVersion, targetVersion: job.targetVersion, message: job.message })}. Report this verified result to the owner. Do not start another update.`,
+    eventOptions: { agentId, sessionKey: job.sessionKey, contextKey: `host-update:${job.id}`, source: 'exec' },
+    wakeOptions: { agentId, sessionKey: job.sessionKey, source: 'exec-event', intent: 'event', reason: 'exec-event', coalesceMs: 0, heartbeat: { target: 'none' } },
+  };
+}

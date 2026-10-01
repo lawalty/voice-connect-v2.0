@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { updaterTools, hostRequest } from './tools.mjs';
+import { updaterTools, hostRequest, completionNotice } from './tools.mjs';
 
 test('only a trusted, current owner receives updater tools', () => {
   for (const context of [{}, { senderIsOwner: false }, { senderIsOwner: true }]) assert.deepEqual(updaterTools(context), []);
@@ -43,4 +43,15 @@ test('status is read-only and does not reveal the private notification session',
   assert.equal(action, 'status');
   assert.equal(result.details.phase, 'completed');
   assert.equal(JSON.stringify(result).includes('private'), false);
+});
+
+test('completion uses native execution-event wake routing without external delivery', () => {
+  const notice = completionNotice({ id: 'a'.repeat(32), sessionKey: 'agent:northpointe:qa', phase: 'rolled_back', message: 'Previous version restored.' });
+  assert.match(notice.text, /^Exec finished:/);
+  assert.equal(notice.eventOptions.sessionKey, 'agent:northpointe:qa');
+  assert.equal(notice.wakeOptions.source, 'exec-event');
+  assert.equal(notice.wakeOptions.intent, 'event');
+  assert.equal(notice.wakeOptions.reason, 'exec-event');
+  assert.equal(notice.wakeOptions.heartbeat.target, 'none');
+  assert.match(notice.text, /rolled_back/);
 });
