@@ -1,12 +1,13 @@
 import type { VoiceStopReason } from './audio/diagnostics';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowDown, ArrowRight, AudioLines, BookOpen, Camera as CameraIcon, Clipboard as ClipboardIcon, Check, ChevronDown, CircleStop, Headphones, LockKeyhole, MessageSquare, Mic, Plus, Send, Settings2, Square, WifiOff, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, BookOpen, Camera as CameraIcon, Clipboard as ClipboardIcon, Check, ChevronDown, CircleStop, Headphones, LockKeyhole, MessageSquare, Mic, Plus, Send, Settings2, Square, WifiOff, X } from 'lucide-react';
 import { type AcousticSignal, type AppSettings, type InstallationSpeech, type AppStatus, type Attachment, type Conversation, type ConversationView, type Message, type ServerEvent, type SpeechPreferences, type TurnReceipt, type VoicePhase } from '../contract/types';
 import { api, ApiError, setCsrf } from './api';
 import { AgentNameContext, useConversationAgentName } from './agent-name';
 import { DEFAULT_FISH_DELIVERY } from '../contract/fish-delivery';
 import { VoiceEngine } from './audio/engine';
 import Orb from './Orb';
+import voiceConnectLogo from './assets/voice-connect-logo.jpg';
 import { OrbProvider } from './orbs/OrbProvider';
 import { SILENT_MOUTH } from './orbs/speech';
 import Settings from './Settings';
@@ -37,7 +38,7 @@ hints.standby = 'Microphone and playback are paused. Tap the orb to resume.';
 hints['thinking-commentary'] = hints['working-commentary'] = 'You can interrupt whenever you need.';
 function readPreferences(): SpeechPreferences { try { return restoreSpeechPreferences(localStorage.getItem(preferenceKey)); } catch { return restoreSpeechPreferences(null); } }
 function messageFor(error: unknown) { return error instanceof Error ? error.message : 'Something interrupted the request. Please try again.'; }
-function Brand() { return <a className="brand" href="/" aria-label="Voice Connect home"><span className="brand-mark"><AudioLines size={22} strokeWidth={1.5} /></span><span>voice<span className="brand-light">connect</span><span className="version">2.0</span></span></a>; }
+function Brand() { return <a className="brand" href="/" aria-label="Voice Connect home"><img className="brand-logo" src={voiceConnectLogo} alt="Voice Connect" width={1280} height={183} /></a>; }
 
 function Entry({ status, onAuthenticated, initialError }: { status: AppStatus; onAuthenticated: (status: AppStatus) => void; initialError: string }) {
   const [password, setPassword] = useState(''), [token, setToken] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
