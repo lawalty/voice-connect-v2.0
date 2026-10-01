@@ -1,3 +1,4 @@
+import { useAgentName } from './agent-name';
 import { useEffect, useRef, useState } from 'react';
 import { Camera as CameraIcon, RotateCcw, Send } from 'lucide-react';
 import type { Attachment } from '../contract/types';
@@ -10,6 +11,7 @@ export default function Camera({ onClose, onSend, voicePaused, canSend }: {
   voicePaused: boolean;
   canSend: boolean;
 }) {
+  const agentName = useAgentName();
   const video = useRef<HTMLVideoElement>(null), stream = useRef<MediaStream | null>(null);
   const [error, setError] = useState(''), [ready, setReady] = useState(false), [busy, setBusy] = useState(false);
   const [shot, setShot] = useState<Blob | null>(null), [preview, setPreview] = useState(''), [caption, setCaption] = useState('');
@@ -57,7 +59,7 @@ export default function Camera({ onClose, onSend, voicePaused, canSend }: {
   return <Dialog title="Share a moment" onClose={onClose} closeDisabled={busy}>
     <p className="muted dialog-intro">{voicePaused ? 'Listening is paused while you take and caption your photo.' : 'Take a photo and add an optional caption.'}</p>
     <div className="camera-preview"><video ref={video} muted playsInline className={shot ? 'hidden' : ''} />{preview && <img src={preview} alt="Photo to send" />}{!ready && !error && <span>Opening camera…</span>}</div>
-    {shot && <label className="camera-caption">Caption (optional)<textarea rows={3} maxLength={20000} placeholder="What would you like NorthPointe to know?" value={caption} disabled={busy || attempted} onChange={event => setCaption(event.target.value)} /></label>}
+    {shot && <label className="camera-caption">Caption (optional)<textarea rows={3} maxLength={20000} placeholder={`What would you like ${agentName} to know?`} value={caption} disabled={busy || attempted} onChange={event => setCaption(event.target.value)} /></label>}
     {error && <p role="alert" className="error-text">{error}</p>}
     {!canSend && !busy && shot && <p role="status" className="muted">Waiting for the conversation to reconnect. Your photo and caption are kept here.</p>}
     <div className="dialog-actions">{shot ? <>

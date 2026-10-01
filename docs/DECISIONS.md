@@ -132,6 +132,18 @@ image and caption and reports that OpenClaw declined it, without exposing raw
 provider diagnostics or guessing that the model lacks vision. Browser permissions,
 authentication, upload format/size validation, and duplicate-send protection remain.
 
+## Agent display names (2026-09-29)
+
+The heading names the current conversation's agent; its dropdown selects saved
+conversations. VC reads `agent.identity.get` for the stable agent ID in the native
+session key, with `agents.list` identity/name metadata as the compatibility fallback.
+VC does not rename the agent, change its ID, or migrate/reset sessions. Names update
+on returning to a visible tab, on connection changes, and every 30 seconds while
+visible. A temporary lookup failure retains the last name; before discovery the
+neutral fallback is Assistant. Headings, assistant labels, status text, captions,
+settings, and accessibility names share the same display name. Static app metadata
+and permission guidance use generic wording. Existing message contents are untouched.
+
 ## Security and operational limits
 
 The owner authenticates with an Argon2id-hashed password and HttpOnly session cookie.

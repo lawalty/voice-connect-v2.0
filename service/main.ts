@@ -152,6 +152,11 @@ export async function buildApp(options:AppOptions={}) {
   app.delete('/api/settings/fish',async()=>{store.remove('fish');closeProvider('fish');return {ok:true};});
   app.get('/api/conversations',async()=>store.conversations());
   app.post('/api/conversations',async(req,reply)=>{const body=z.object({title:z.string().trim().min(1).max(100).optional()}).strict().parse(req.body??{});if(!store.get('default-agent'))return reply.code(503).send({error:'OpenClaw is connecting. Please try again shortly.'});return store.createConversation(body.title);});
+  app.get('/api/conversations/:id/agent',async(req,reply)=>{
+    const p=z.object({id}).parse(req.params);
+    if(!store.conversation(p.id))return reply.code(404).send({error:'Conversation not found.'});
+    try{return await gateway.identity(p.id);}catch{return reply.code(503).send({error:'Agent identity is temporarily unavailable.'});}
+  });
   app.get('/api/conversations/:id',async(req,reply)=>{const p=z.object({id}).parse(req.params);const options=z.object({before:z.string().max(16000).optional(),since:z.string().max(8192).optional()}).strict().parse(req.query);if(!store.conversation(p.id))return reply.code(404).send({error:'Conversation not found.'});return gateway.history(p.id,options);});
   app.post('/api/conversations/:id/presence',{config:{rateLimit:{max:60,timeWindow:60000}}},async(req,reply)=>{
     const p=z.object({id}).parse(req.params);if(!store.conversation(p.id))return reply.code(404).send({error:'Conversation not found.'});

@@ -1,3 +1,4 @@
+import { useAgentName } from './agent-name';
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { Send, X } from 'lucide-react';
 import type { Attachment } from '../contract/types';
@@ -20,6 +21,7 @@ export default function ClipboardShare({ source, inline, composerCaption, onCapt
   onState(state: ClipboardShareState): void;
   ref?: Ref<ClipboardShareHandle>;
 }) {
+  const agentName = useAgentName();
   const [content, setContent] = useState<ClipboardContent | null>(null), [preview, setPreview] = useState('');
   const [caption, setCaption] = useState(''), [error, setError] = useState(''), [loading, setLoading] = useState(true);
   const [fallbackText, setFallbackText] = useState('');
@@ -71,7 +73,7 @@ export default function ClipboardShare({ source, inline, composerCaption, onCapt
       event.preventDefault();
       try { void load(Promise.resolve(pastedContent(event.clipboardData))); } catch (reason) { setError((reason as Error).message); }
     }} onChange={event => setFallbackText(event.target.value)} /></label>{fallbackText.trim() && <button className="button secondary" onClick={() => void load(Promise.resolve({ kind: 'text', text: fallbackText }))}>Preview text</button>}</>}
-    {content && !inline && <label className="camera-caption">Caption (optional)<textarea rows={3} maxLength={20000} value={currentCaption} disabled={busy || attempted} placeholder="What would you like NorthPointe to know?" onChange={event => composerCaption === undefined ? setCaption(event.target.value) : onCaption(event.target.value)} /></label>}
+    {content && !inline && <label className="camera-caption">Caption (optional)<textarea rows={3} maxLength={20000} value={currentCaption} disabled={busy || attempted} placeholder={`What would you like ${agentName} to know?`} onChange={event => composerCaption === undefined ? setCaption(event.target.value) : onCaption(event.target.value)} /></label>}
     {error && <p role="alert" className="error-text">{error}</p>}
     {!canSend && content && <p role="status" className="muted">Waiting for the conversation to reconnect. Your clipboard is kept here.</p>}
     {inline ? <div className="clipboard-inline-actions"><span className="muted">{attempted ? 'Delivery needs checking. Send again to check the same message.' : voicePaused ? 'Listening paused · add a caption below, then send.' : 'Add a caption below, then send.'}</span><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="Remove clipboard image"><X size={18} /></button></div>

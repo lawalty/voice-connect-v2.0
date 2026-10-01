@@ -5,7 +5,7 @@ import { permissionAvailability, permissionFailure, permissionKinds, queryDevice
 import './device-permissions.css';
 
 const descriptions = {
-  microphone: { title: 'Microphone', purpose: 'Required for voice', detail: 'Speak to NorthPointe. Text chat works without it.', Icon: Mic },
+  microphone: { title: 'Microphone', purpose: 'Required for voice', detail: 'Speak to your agent. Text chat works without it.', Icon: Mic },
   camera: { title: 'Camera', purpose: 'Optional · photos', detail: 'Take a photo to review and share.', Icon: Camera },
   clipboard: { title: 'Clipboard', purpose: 'Optional · paste', detail: 'Share copied text or images when you choose.', Icon: Clipboard },
 };
@@ -106,7 +106,7 @@ export default function DevicePermissions({ onClose }: { onClose(): void }) {
         </section>;
       })}
     </div>
-    <p className="permission-footnote">Approvals stay checked while Chrome allows access, including when you reopen VC. Temporary grants may expire; Chrome controls how long they last. Checks briefly open and release the microphone or camera, or read and discard the clipboard. Nothing is saved or sent to NorthPointe.</p>
+    <p className="permission-footnote">Approvals stay checked while Chrome allows access, including when you reopen VC. Temporary grants may expire; Chrome controls how long they last. Checks briefly open and release the microphone or camera, or read and discard the clipboard. Nothing is saved or sent to your agent.</p>
     <details className="permission-recovery"><summary>Blocked or no prompt? Fix Chrome on Android</summary><ol>
       <li>In Chrome, tap the site controls icon beside VC’s address → Permissions. Allow Microphone or Camera. If Clipboard is listed, allow it too. You can also find VC under Chrome → Settings → Site settings → All sites.</li>
       <li>In Android Settings → Apps → Chrome → Permissions, allow Microphone and Camera. Check that Android’s microphone and camera privacy controls are on. Menu names vary by phone.</li>

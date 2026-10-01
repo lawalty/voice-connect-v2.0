@@ -23,6 +23,7 @@ export const DEFAULT_SPEECH: SpeechPreferences = {
 };
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }
 export interface HarnessCapabilities { connected: boolean; images: boolean; cancellation: boolean; approvals: boolean; version: string; reason?: string; }
+export interface AgentIdentity { id: string; name: string; }
 export interface AppStatus { ownerConfigured: boolean; authenticated: boolean; build: string; csrfToken?: string; }
 export interface InstallationSpeech {
   version: 1; revision: number; setupComplete: boolean;
@@ -66,6 +67,7 @@ export type AudioEvent =
 export interface ModelManifest { id: string; url: string; sha256: string; bytes: number; license: string; sampleRate: number; }
 export interface HarnessAdapter {
   capabilities(): HarnessCapabilities;
+  identity(conversationId: string): Promise<AgentIdentity>;
   history(conversationId: string, options?: HistoryOptions): Promise<ConversationView>;
   send(conversationId: string, turn: TurnRequest): Promise<TurnReceipt>;
   abort(conversationId: string, turnId: string): Promise<void>;

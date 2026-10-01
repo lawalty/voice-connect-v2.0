@@ -1,3 +1,4 @@
+import { useAgentName } from './agent-name';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowLeft, AudioLines, MessageSquare, Plus } from 'lucide-react';
 import type { Message } from '../contract/types';
@@ -7,6 +8,7 @@ export default function ConversationLog({ messages, activity, onClose, onNew, cr
   automatic: boolean; preparing: boolean; autoDisabled: boolean; onToggleAuto(): void;
   hasEarlier?: boolean; loadingEarlier?: boolean; historyError?: string; onEarlier?(): Promise<void>;
 }) {
+  const agentName = useAgentName();
   const scroll = useRef<HTMLDivElement>(null), follow = useRef(true), back = useRef<HTMLButtonElement>(null);
   const [showLatest, setShowLatest] = useState(false);
   const anchor = useRef<{ id: string; top: number } | null>(null);
@@ -48,12 +50,12 @@ export default function ConversationLog({ messages, activity, onClose, onNew, cr
       {hasEarlier && <button className="text-button history-earlier" disabled={loadingEarlier} onClick={earlier}>{loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}
       {historyError && <p className="history-error" role="status">{historyError}</p>}
       {messages.length === 0 ? <div className="messenger-empty"><MessageSquare size={28} strokeWidth={1.25} /><p>Your conversation starts here.</p></div> : messages.map(message =>
-        <article className={`message message-${message.role}`} key={message.id} data-message-id={message.id} aria-label={message.role === 'notice' ? 'Voice Connect status' : message.role === 'user' ? 'You' : 'NorthPointe'}>
+        <article className={`message message-${message.role}`} key={message.id} data-message-id={message.id} aria-label={message.role === 'notice' ? 'Voice Connect status' : message.role === 'user' ? 'You' : agentName}>
           <div className="message-bubble">
             {message.attachments?.map(photo => photo.previewUrl && <img className="message-photo" key={photo.id} src={photo.previewUrl} alt="Shared photo" onLoad={() => { if (follow.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; }} />)}
             {message.text && <p>{message.text}</p>}
           </div>
-          <div className="message-meta"><span>{message.role === 'notice' ? 'Voice Connect' : message.role === 'user' ? 'You' : 'NorthPointe'}</span><time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div>
+          <div className="message-meta"><span>{message.role === 'notice' ? 'Voice Connect' : message.role === 'user' ? 'You' : agentName}</span><time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div>
           {message.role === 'user' && message.delivery && ['pending', 'uncertain', 'failed', 'cancelled'].includes(message.delivery) && <span className="delivery-status">{message.delivery === 'uncertain' ? 'Delivery uncertain · check before resending' : message.delivery}</span>}
         </article>)}
       {activity && <div className="activity"><span className="activity-pulse" />{activity}</div>}
