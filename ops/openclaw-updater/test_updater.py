@@ -14,6 +14,30 @@ spec.loader.exec_module(updater)
 
 
 class Contracts(unittest.TestCase):
+    def test_docker_build_cache_uses_writable_service_state(self):
+        unit = Path(__file__).with_name('openclaw-host-updater.service').read_text()
+        self.assertIn('ProtectHome=read-only', unit)
+        self.assertIn('Environment=DOCKER_CONFIG=/var/lib/openclaw-updater/docker-config', unit)
+        self.assertIn('/var/lib/openclaw-updater', unit.split('ReadWritePaths=')[1])
+
+    def test_command_failure_identifies_operation_without_exposing_output(self):
+        with tempfile.TemporaryDirectory() as folder:
+            result = SimpleNamespace(returncode=1, stdout='private configuration', stderr='synthetic secret')
+            with patch.object(updater, 'STATE', Path(folder)), patch.object(updater.subprocess, 'run', return_value=result):
+                with self.assertRaises(updater.UpdateError) as caught:
+                    updater.run(['docker', 'build', '--label', 'private argument'])
+            self.assertIn('command_failed:docker_build:exit=1:diagnostic=', str(caught.exception))
+            self.assertNotIn('secret', str(caught.exception))
+            self.assertNotIn('private', str(caught.exception))
+            records = list((Path(folder)/'diagnostics').glob('*.json'))
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0].stat().st_mode & 0o777, 0o600)
+            self.assertEqual(records[0].parent.stat().st_mode & 0o777, 0o700)
+            record = json.loads(records[0].read_text())
+            self.assertEqual(record['operation'], 'docker_build')
+            self.assertEqual(record['stderr'], 'synthetic secret')
+            self.assertNotIn('argv', record)
+
     def test_only_official_stable_release_and_commit_are_admitted(self):
         release = {'tag_name': 'v2026.9.7', 'draft': False, 'prerelease': False}
         commit = {'object': {'type': 'commit', 'sha': 'a'*40}}

@@ -10,6 +10,7 @@ RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=yes
 StateDirectory=openclaw-updater
 StateDirectoryMode=0700
+Environment=DOCKER_CONFIG=/var/lib/openclaw-updater/docker-config
 ExecStart=/usr/bin/python3 /opt/openclaw-updater/current/updater.py serve
 Restart=on-failure
 RestartSec=3

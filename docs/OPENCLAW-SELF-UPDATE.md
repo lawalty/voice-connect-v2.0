@@ -23,6 +23,12 @@ gateway UID 1000. The socket directory and plugin are mounted read-only into the
 gateway. Code, deployment policy, and backup data remain outside agent-writable
 state. The existing Windows PC node and its routing are not changed.
 
+Docker's CLI/build-helper cache uses `DOCKER_CONFIG` under the updater's private
+state directory. The service keeps `/root` read-only; builds must not rely on a
+writable `/root/.docker`. Failed commands report their fixed operation and exit
+code. Bounded command output is retained only in root-only diagnostic files
+under `/var/lib/openclaw-updater/diagnostics`, never in tool replies or journals.
+
 To install from a staged directory containing `updater.py`, `install.py`, the
 systemd unit, and `plugin/`, run `python3 install.py STAGED_DIRECTORY` through the
 authorized dedicated SSH route. The installer verifies the expected host,

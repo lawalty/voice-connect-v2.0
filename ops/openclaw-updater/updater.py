@@ -63,14 +63,42 @@ def file_hash(path):
     return digest.hexdigest()
 
 
+def command_operation(argv):
+    # Only fixed executable/subcommand names enter public status, never arguments.
+    executable = Path(argv[0]).name
+    if executable == 'docker':
+        for operation in ['compose', 'build', 'pull', 'image', 'inspect', 'run', 'exec']:
+            if len(argv) > 1 and argv[1] == operation:
+                return 'docker_' + operation
+    return executable if executable in {'cp', 'systemctl'} else 'host_command'
+
+
+def record_command_failure(operation, stdout, stderr, returncode):
+    # Provider/configuration output stays in a root-only file, outside agent state.
+    # No raw command output or caller-controlled argument enters tool responses.
+    diagnostic_id = uuid.uuid4().hex
+    try:
+        directory = STATE/'diagnostics'
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(directory, 0o700)
+        write_json(directory/(diagnostic_id + '.json'), {
+            'createdAt': now(), 'operation': operation, 'returncode': returncode,
+            'stdout': (stdout or '')[-16384:], 'stderr': (stderr or '')[-16384:],
+        })
+    except OSError:
+        return 'diagnostic_unavailable'
+    return diagnostic_id
+
+
 def run(argv, timeout=120, env=None):
+    operation = command_operation(argv)
     try:
         result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
-        raise UpdateError('command_timeout') from None
+        raise UpdateError('command_timeout:' + operation) from None
     if result.returncode:
-        # Command output can contain provider configuration. Never return or log it.
-        raise UpdateError('command_failed:' + Path(argv[0]).name)
+        diagnostic_id = record_command_failure(operation, result.stdout, result.stderr, result.returncode)
+        raise UpdateError(f'command_failed:{operation}:exit={result.returncode}:diagnostic={diagnostic_id}')
     return result.stdout
 
 
