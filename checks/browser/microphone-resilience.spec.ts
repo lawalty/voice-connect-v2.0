@@ -63,13 +63,13 @@ async function fixture(page: Page) {
     say(text: string) { sockets.at(-1)!.send(JSON.stringify({ type: 'stt', text, started: true, final: true, turnComplete: true })); },
     async wake() {
       await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
-      await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+      await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     },
     async finishPlayback() {
       await page.evaluate(async () => { while (window.vcMicProbe.pending.length) {
         window.vcMicProbe.pending.shift()!.onend?.(new Event('end') as SpeechSynthesisEvent); await Promise.resolve();
       } });
-      await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+      await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     },
   };
 }
@@ -90,7 +90,7 @@ test('interruption opt-out survives reload and retains automatic voice turns and
   await expect(toggle).not.toBeChecked(); await expect(slider).toBeDisabled(); await expect(slider).toHaveValue('20');
   await page.getByRole('button', { name: 'Close Make yourself at home', exact: true }).click();
   await voice.wake(); voice.say('First full thought.');
-  await expect(page.getByText('NorthPointe is speaking', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-speaking')).toBeVisible();
   voice.say('A provider event during playback must be ignored.');
   await page.getByRole('button', { name: /Conversation\s*\d/ }).click();
   await expect(page.getByRole('switch', { name: 'Auto mode' })).toBeChecked();
@@ -98,9 +98,9 @@ test('interruption opt-out survives reload and retains automatic voice turns and
   await voice.finishPlayback();
   expect(voice.turns).toEqual(['First full thought.']);
   voice.say('Second full thought.');
-  await expect(page.getByText('NorthPointe is speaking', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-speaking')).toBeVisible();
   await page.getByRole('button', { name: 'Interrupt', exact: true }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   expect(voice.turns).toEqual(['First full thought.', 'Second full thought.']);
   expect(await page.evaluate(() => window.vcMicProbe.tracks.every(track => track.readyState === 'live'))).toBe(true);
   await page.getByRole('button', { name: 'Open settings' }).click();
@@ -110,7 +110,7 @@ test('interruption opt-out survives reload and retains automatic voice turns and
 test('real worklet and VAD survive an 800ms UI stall while a reply plays', async ({ page }) => {
   const voice = await fixture(page); await voice.wake();
   voice.say('Keep this reply playing through a short UI stall.');
-  await expect(page.getByText('NorthPointe is speaking', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-speaking')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.vcMicProbe.blocks)).toBeGreaterThan(12);
   const before = await page.evaluate(() => ({ blocks: window.vcMicProbe.blocks, cancellations: window.vcMicProbe.cancellations }));
   // Intentionally stall only the UI thread. The actual AudioWorklet keeps capturing.
@@ -120,7 +120,7 @@ test('real worklet and VAD survive an 800ms UI stall while a reply plays', async
     capturing: window.vcMicProbe.tracks.length === 1 && window.vcMicProbe.tracks[0]!.readyState === 'live' }));
   expect(after).toEqual({ dropped: 0, cancellations: before.cancellations, capturing: true });
   await expect(page.getByText(/Microphone processing fell behind|could not keep up with speech detection|unexpected gap/)).toHaveCount(0);
-  await expect(page.getByText('NorthPointe is speaking', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-speaking')).toBeVisible();
   await voice.finishPlayback(); voice.say('A complete turn after recovery.');
   await expect.poll(() => voice.turns).toEqual(['Keep this reply playing through a short UI stall.', 'A complete turn after recovery.']);
   expect(voice.sockets).toHaveLength(1);
@@ -129,7 +129,7 @@ test('real worklet and VAD survive an 800ms UI stall while a reply plays', async
 test('sustained overload still preserves an unfinished spoken turn instead of submitting it', async ({ page }) => {
   const voice = await fixture(page); await voice.wake();
   voice.sockets.at(-1)!.send(JSON.stringify({ type: 'stt', text: 'Keep my unfinished words', started: true, final: false, turnComplete: false }));
-  await expect(page.getByText('I’m hearing you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-hearing')).toBeVisible();
   await page.evaluate(() => { const until = performance.now() + 1700; while (performance.now() < until) { /* fault injection */ } });
   await expect(page.getByText('Microphone processing fell behind. Review your draft; incomplete audio was not sent.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: /Conversation\s*\d/ }).click();

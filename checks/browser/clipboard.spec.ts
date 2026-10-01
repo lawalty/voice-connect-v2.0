@@ -118,7 +118,7 @@ for (const auto of [false, true]) test(`Messenger paste with auto ${auto}: text 
   if (auto) {
     await page.getByRole('switch', { name: 'Auto mode' }).click();
     await expect.poll(async () => (await p.state()).mic).toBe(1);
-    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+    await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   }
   expect(await paste(page, 'image', true)).toBe(true);
   await expect(page.getByRole('region', { name: 'Clipboard attachment' })).toBeVisible();

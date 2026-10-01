@@ -43,7 +43,7 @@ for (const mode of ['orb-auto', 'messenger', 'messenger-auto'] as const) {
       if (mode === 'messenger-auto') await page.getByRole('switch', { name: 'Auto mode' }).click();
       else await page.getByRole('button', { name: 'Wake NorthPointe' }).click();
       await expect.poll(() => recognition.length).toBe(1);
-      await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+      await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     }
     const before = await state();
     await page.getByRole('button', { name: 'Attach a camera photo' }).click();
