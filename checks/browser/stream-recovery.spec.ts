@@ -55,7 +55,7 @@ for (const fault of ['silent socket', 'missing events'] as const) {
     });
     await expect(page.getByRole('article', { name: 'NorthPointe', exact: true })).toContainText('Your conversation stays together.', { timeout: 8000 });
     await expect(page.locator('.orb-stage.phase-thinking')).toHaveCount(0);
-    await expect(page.locator('.site-header .connection-pill')).toHaveText('Connected');
+    await expect(page.locator('.session-footer .connection-pill')).toHaveText('Connected');
     await expect(page.getByLabel('Message NorthPointe')).toHaveValue('Keep this unfinished thought.');
     expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(p.conversation);
     expect(await page.evaluate(() => (window as unknown as { recoverySpeech: string[] }).recoverySpeech)).toEqual([]);
