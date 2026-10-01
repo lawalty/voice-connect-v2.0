@@ -194,6 +194,34 @@ function pcmFixture() {
 }
 
 describe('Fish PCM output lifecycle', () => {
+  it('warms without synthesis or an audio timeout, then sends the first real phrase immediately', async () => {
+    vi.useFakeTimers(); const run = pcmFixture(); run.output.prepare();
+    const socket = run.sockets[0]!;
+    socket.event({ type: 'ready', sampleRate: 24000, playbackWindowBytes: PLAYBACK_WINDOW_BYTES });
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(run.events.error).not.toHaveBeenCalled(); expect(run.events.started).not.toHaveBeenCalled();
+    expect(run.operations).toEqual(['playback']);
+    run.output.enqueue('The opening phrase is ready');
+    expect(run.operations).toEqual(['playback', 'speak']);
+    socket.pcm(); expect(run.events.started).toHaveBeenCalledOnce();
+    run.output.cancel(); socket.pcm(); expect(run.sources).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('retries an expired warmup on real input and closes a text-free prepared reply silently', async () => {
+    vi.useFakeTimers(); const run = pcmFixture(); run.output.prepare();
+    const stale = run.sockets[0]!;
+    await vi.advanceTimersByTimeAsync(15001);
+    expect(run.events.error).not.toHaveBeenCalled(); expect(stale.close).toHaveBeenCalledOnce();
+    run.output.enqueue('A new connection can speak.');
+    expect(run.sockets).toHaveLength(2);
+    stale.event({ type: 'ready', sampleRate: 24000 }); stale.pcm();
+    expect(run.sources).toHaveLength(0);
+    run.sockets[1]!.event({ type: 'ready', sampleRate: 24000 }); run.sockets[1]!.pcm();
+    expect(run.events.started).toHaveBeenCalledOnce(); run.output.cancel();
+    const empty = pcmFixture(); empty.output.prepare(); empty.sockets[0]!.event({ type: 'ready', sampleRate: 24000 }); empty.output.finish();
+    expect(empty.events.error).not.toHaveBeenCalled(); expect(empty.events.ended).toHaveBeenCalledOnce();
+    expect(empty.sockets[0]!.close).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+  });
   it('streams a multi-minute reply through a four-second window and acknowledges only finished playback', () => {
     const run = pcmFixture(); run.output.enqueue('The beginning of a long reply.');
     const socket = run.sockets[0]!;

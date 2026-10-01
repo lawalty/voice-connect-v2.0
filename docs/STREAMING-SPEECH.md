@@ -5,6 +5,33 @@ recognition drain into one complete user turn. Assistant text streams through
 sentence/clause extraction into speech immediately; `responseDone` only flushes
 the final unfinished text and closes synthesis input.
 
+## First phrase latency
+
+Fish transport preparation now starts when the first answer text arrives, while
+the opening sentence is still forming. Preparation sends no text and starts no
+audio inactivity watchdog. An expired prepared connection retries on real input;
+a text-free response closes it silently. Playback status still starts only when
+PCM is scheduled, and interruption invalidates both prepared and active output.
+
+An opening phrase has a 300-ms deadline. With at least six complete words and
+40 spoken characters available, VC may release up to 160 source characters at
+a word boundary instead of waiting for a long first sentence. Partial words,
+unfinished inline code, and unfinished Markdown links remain buffered. If there
+is not enough text at the deadline, a later update can try again. Subsequent
+chunks keep their sentence/clause boundaries; completion drains the exact tail.
+
+The native Gateway's sequence numbers cover item, tool, and lifecycle events as
+well as answer text, and native text events can be coalesced. Numeric gaps in
+that shared sequence no longer cause a history fetch per text update. Native
+reconnection, durable history notifications, foreground checks, and gaps in VC's
+own client event revisions continue to reconcile the conversation.
+
+Short answers can still finish generating before provider synthesis produces
+audio. Likewise, VC cannot speak text the agent/provider has not emitted. The
+contract is incremental delivery without an added whole-answer wait, rather
+than a guarantee that every one-sentence answer starts sounding before its last
+token arrives.
+
 ## Reply length versus playback memory
 
 The original Fish player cancelled speech when synthesis got more than 60 seconds
@@ -47,6 +74,13 @@ code and escaped symbols remain literal content.
   delivery, long chunks, snapshot corrections, abbreviations and literal symbols.
 - `checks/browser/markdown-speech.spec.ts`: browser speech and Fish transport
   receive clean sentences before completion; persisted history retains Markdown.
+- `checks/browser/early-speech.spec.ts`: the actual Messenger/engine path displays
+  partial native text and sends an opening Fish phrase before completion, without
+  redundant history reads or replaying speech on refresh.
+- `checks/audio-continuous.test.ts`: the opening deadline preserves the suffix
+  through both providers and cannot restart cancelled output.
+- `checks/service.test.ts`: sparse native text sequences stream immediately
+  without mistaking hidden item events for missing answer packets.
 
 - `checks/fish-streaming.test.ts`: real local WebSockets, accelerated playback of
   three minutes of PCM, byte-for-byte integrity, at most 4.1 seconds ahead, and
