@@ -18,12 +18,14 @@ export interface SpeechPreferences {
   allowInterruptions?: boolean;
   /** Brief sounds when ready for a turn and when that listening window closes. */
   audioCues?: boolean;
+  /** Device-local visibility of the orb's microphone VU meters. */
+  audioVuMeters?: boolean;
   /** Installation-wide visibility of live transcription over the orb. */
   showTranscriptions?: boolean;
 }
 export const DEFAULT_SPEECH: SpeechPreferences = {
   recognition: 'vosk', output: 'browser', browserVoice: '', fishVoice: '', handsFree: true, turnMode: 'automatic', keepAwake: true,
-  interruptionSensitivity: 50, allowInterruptions: true, audioCues: true, fishDelivery: DEFAULT_FISH_DELIVERY, showTranscriptions: false,
+  interruptionSensitivity: 50, allowInterruptions: true, audioCues: true, audioVuMeters: true, fishDelivery: DEFAULT_FISH_DELIVERY, showTranscriptions: false,
 };
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }
 export interface HarnessCapabilities { connected: boolean; images: boolean; cancellation: boolean; approvals: boolean; version: string; reason?: string; }

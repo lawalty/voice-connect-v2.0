@@ -1,6 +1,6 @@
-# Orb face packs
+# Orb packs
 
-The web app has a shared animation runtime and replaceable artwork. Open **Settings → Orb appearance**, select **Luminous Glass**, and adjust Movement. Appearance changes immediately and saves to this VC installation, so signed-in devices share the selected face, movement, and State colors. The classic orb remains the default. Silent previews show resting, listening, thinking, working, and speaking without using a microphone or contacting a voice provider.
+The web app has replaceable orb renderers and artwork. Open **Settings → Orb appearance** and select **Luminous Glass** for an animated face or **Voice Connect v1** for the original microphone orb. Appearance changes immediately and saves to this VC installation, so signed-in devices share the selected pack, movement, and State colors. The classic floating orb remains the default. Silent previews cover all eight original states without using a microphone or contacting a voice provider.
 
 For built-in or imported faces, switch **State colors** off to preserve the
 artwork's original colors in every state. This bypasses the added hue,
@@ -11,6 +11,53 @@ of those images; use consistent colors across expressions for a natural head.
 State colors defaults to on for existing installations. The choice is shared
 across devices and applies across face packs; it does not alter the exported
 pack or the classic orb.
+
+## Voice Connect v1 pack
+
+This built-in pack recreates the supplied `orb-archive/pre-expression` images:
+solid circular microphone button, separate glow halo, and two 12-segment meters.
+The reference contact sheet identifies Hermes commit `6fe6a67`; the cited
+`lawalty/voice-connect` baseline `03d49f0b7865fd9a64eaf375fe460ed35e54e81a`
+also defines the eight-state palette. The current VC 2.0 voice engine, device
+identity, settings, sessions, VAD, STT/TTS, interruption and sentence speech
+remain the runtime; the older SPA and its state store are not transplanted.
+
+| State | Appearance and behavior |
+| --- | --- |
+| Idle | Dark grey, dim microphone, no halo |
+| Standby | Dark grey, emerald resume halo |
+| Connecting | Lighter grey, subtle pulse |
+| Listening | Emerald green, reactive meters |
+| Thinking | Amber, subtle pulse |
+| Working | Orange, stronger orange halo, **no added background audio** |
+| Speaking | Violet, larger pulsing halo, microphone rotates every two seconds |
+| Error | Red, dim microphone, no animated halo |
+
+Actual tool lifecycle events drive Working. Spoken progress displays Speaking
+while the status caption retains the tool context. Starting/reconnecting map to
+Connecting, hearing to Listening, finalizing to Thinking, and paused to Standby.
+Tap controls retain the current app's wake, standby and resume behavior.
+
+The meters fill bottom-up through emerald (3), lime (4), amber (3) and red (2)
+segments. Their geometry and color order are specific to this pack; other packs
+retain the existing 16-segment meters. Each side has its own level accumulator,
+but both receive the same real mono capture level today. No stereo input or
+fake audio motion is claimed. The existing **Orb ears → Audio VU meters** setting
+controls visibility. Muted/stopped input returns to zero; idle/standby/working
+meters remain unlit. Hidden pages suspend the meter loop. Reduced motion stops
+decorative pulsing and rotation while retaining the live level display.
+
+Voice Connect v1 always uses its semantic state palette. Face-only State colors
+and Movement controls are hidden for this renderer; their saved values remain
+available when switching back to a face. There is no working music asset,
+additional AudioContext, microphone owner, or speech provider request.
+
+Export this pack to download `my-voice-connect-v1.orb.json`. It uses renderer
+`status-orb-v1`, the common version/id/name fields and a `colors` object containing
+all eight state names with six-digit hex colors. Give a copy a unique ID and
+name to import a personalized palette. No artwork, scripts, URLs or audio fields
+are accepted for this renderer. It shares the same installation storage, limits,
+revision checks and export/removal controls as face packs.
 
 ## Plugging in a face
 
@@ -28,9 +75,9 @@ If the installation has no saved appearance yet, the selected migrated custom pa
 
 Devices refresh on sign-in, opening Orb appearance, returning to the tab or reconnecting, and every 30 seconds while visible. Concurrent stale edits show a conflict and restore the server's choice rather than silently overwriting it. Sharing is scoped to one VC installation and its database; separate VC installations connected to the same OpenClaw gateway do not share this storage automatically.
 
-This first version accepts **prepared face packs**. It does not generate expressions or a face rig from a single uploaded portrait. A character creator can be built later to output this same format without changing the voice engine.
+Face renderers accept **prepared face packs**. They do not generate expressions or a face rig from a single uploaded portrait. A character creator can be built later to output this same format without changing the voice engine.
 
-## Version 1 contract
+## Version 1 face contract
 
 ```json
 {
@@ -44,7 +91,7 @@ This first version accepts **prepared face packs**. It does not generate express
 }
 ```
 
-The placeholders above are illustrative; export a pack for actual usable PNG data. Imports must contain embedded, still PNGs, not remote URLs, scripts, SVGs, or executable plug-ins. JSON must be at most 6 MiB. IDs use 2–48 lowercase letters, digits, or hyphens, starting with a letter. `classic` and `luminous-glass` are reserved. Names are at most 48 characters. Unknown fields and renderer versions are rejected. Artwork is decoded before storage.
+The placeholders above are illustrative; export a face pack for actual usable PNG data. Face artwork must contain embedded, still PNGs, not remote URLs, scripts, SVGs, or executable plug-ins. JSON must be at most 6 MiB. IDs use 2–48 lowercase letters, digits, or hyphens, starting with a letter. `classic`, `luminous-glass` and `voice-connect-v1` are reserved. Names are at most 48 characters. Unknown fields and renderer versions are rejected. Artwork is decoded before storage.
 
 Each texture is a square 3 × 3 atlas, 384–1536 pixels wide, divisible by three. Both textures must have the same dimensions. Cell coordinates start at the top left:
 

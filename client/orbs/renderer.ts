@@ -1,4 +1,4 @@
-import type { OrbPack } from './packs';
+import type { FacePack } from './packs';
 
 export interface FaceFrame {
   time: number; yaw: number; pitch: number; roll: number; driftX: number; driftY: number;
@@ -85,7 +85,7 @@ export class GlassFaceRenderer {
     gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
     const at=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(at);gl.vertexAttribPointer(at,2,gl.FLOAT,false,0,0);
   }
-  async load(pack: OrbPack, signal: AbortSignal) {
+  async load(pack: FacePack, signal: AbortSignal) {
     const images=await Promise.all([pack.atlas,pack.flow || pack.atlas].map(src=>new Promise<HTMLImageElement>((resolve,reject)=>{
       const image=new Image();
       const clear=()=>{image.onload=null;image.onerror=null;signal.removeEventListener('abort',abort);};

@@ -83,7 +83,7 @@ export async function buildApp(options:AppOptions={}) {
   });
   app.get('/health',async()=>({ready:true,build:cfg.build,openclaw:gateway.capabilities().connected}));
   app.get('/api/status',async req=>status(req));
-  registerLibraryRoutes(app,new LibraryClient(cfg.libraryUrl,cfg.libraryToken));
+  registerLibraryRoutes(app,new LibraryClient(cfg.libraryUrl,cfg.libraryToken),store);
   registerOrbRoutes(app,store);
   app.get('/api/diagnostics',async()=>({build:cfg.build,gateway:gateway.capabilities(),deviceId:store.get('gateway-device-id'),timings:gateway.diagnostics?.()??[]}));
   const authRate={rateLimit:{max:12,timeWindow:15*60*1000}};

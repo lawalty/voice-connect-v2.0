@@ -1,12 +1,12 @@
 import { useAgentName } from '../agent-name';
 import { useEffect, useRef, useState } from 'react';
 import ClassicOrb, { type OrbProps } from './ClassicOrb';
-import type { OrbPack } from './packs';
+import type { FacePack } from './packs';
 import { GlassFaceRenderer } from './renderer';
 import { FaceMotion } from './motion';
 import { SILENT_MOUTH, type MouthPose } from './speech';
 
-export interface FaceOrbProps extends OrbProps { pack:OrbPack; motion:number; phaseColors:boolean; getSpeech?:()=>MouthPose; }
+export interface FaceOrbProps extends OrbProps { pack:FacePack; motion:number; phaseColors:boolean; getSpeech?:()=>MouthPose; }
 export default function FaceOrb(props:FaceOrbProps){
   const agentName = useAgentName();
   const {pack,motion:strength,phaseColors,phase,asleep=false,waking=false,onWake,wakeDisabled=false,onStandby,onResume}=props;
@@ -25,6 +25,8 @@ export default function FaceOrb(props:FaceOrbProps){
       const current=latest.current,speech=current.getSpeech?.()||SILENT_MOUTH;
       const pose=motion.sample(time,current.phase,Boolean(current.asleep),media.matches,current.motion,current.pack,speech);
       renderer!.draw(pose,current.phaseColors);
+      // Match the shader's screen-space drift and roll, including reduced motion.
+      surface.parentElement?.style.setProperty('--orb-ear-transform',`translate(${pose.driftX*100}%,${pose.driftY*100}%) rotate(${pose.roll}rad)`);
       surface.dataset.mouthOpen=pose.mouth.toFixed(2);surface.dataset.yaw=pose.yaw.toFixed(3);surface.dataset.speechSource=speech.source;
       if(!media.matches)schedule();
     };
@@ -48,6 +50,7 @@ export default function FaceOrb(props:FaceOrbProps){
   const standby=phase==='standby',action=standby?onResume:onStandby||onWake,disabled=standby||!onStandby?wakeDisabled:false;
   return <div className={`orb-stage orb-character phase-${phase}${asleep?' orb-sleeping':''}`} data-presence={standby?'standby':waking?'waking':asleep?'sleeping':'awake'} data-orb-pack={pack.id} data-face-ready={ready} data-phase-colors={phaseColors}>
     <canvas ref={canvas} className="orb-canvas" aria-hidden="true"/>
+    {props.children}
     {!ready&&<span className="orb-face-loading" role="status">Loading your orb…</span>}
     {action&&<button type="button" className="orb-wake-button" disabled={disabled} aria-label={standby?'Resume conversation':onStandby?'Enter standby mode':`Wake ${agentName}`} aria-pressed={onStandby||standby?standby:undefined} onClick={action}>
       {!disabled&&<span className="orb-wake-hint" aria-hidden="true">{standby?'Tap to resume':onStandby?'Tap for standby':asleep?'Tap to wake':''}</span>}

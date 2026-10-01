@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
@@ -228,6 +229,28 @@ class SupabaseRepository(_SupabaseHttp):
             json={"source_metadata": source_metadata},
         )
 
+    async def compare_document_source_metadata(
+        self, owner_id: UUID, document_id: UUID,
+        expected: dict[str, Any], replacement: dict[str, Any],
+    ) -> bool:
+        response = await self.request(
+            "PATCH", "/rest/v1/rag_documents",
+            params={"owner_id": f"eq.{owner_id}", "id": f"eq.{document_id}",
+                    "source_metadata": "eq." + json.dumps(expected, separators=(",", ":")),
+                    "archived_at": "is.null", "status": "eq.ready", "select": "id"},
+            headers={"Prefer": "return=representation"},
+            json={"source_metadata": replacement},
+        )
+        return bool(response.json())
+
+    async def document_chunk_count(self, owner_id: UUID, document_id: UUID) -> int:
+        response = await self.request(
+            "POST", "/rest/v1/rpc/rag_list_document_chunk_counts",
+            json={"p_owner_id": str(owner_id), "p_document_ids": [str(document_id)]},
+        )
+        return next((int(row["chunk_count"]) for row in response.json()
+                     if row["document_id"] == str(document_id)), 0)
+
     async def create_generated_document_job(
         self,
         *,
@@ -419,7 +442,8 @@ class SupabaseRepository(_SupabaseHttp):
         return self._document(rows[0]) if rows else None
 
     async def list_documents(
-        self, owner_id: UUID, group_id: UUID | None, limit: int
+        self, owner_id: UUID, group_id: UUID | None, limit: int,
+        conversation_id: UUID | None = None,
     ) -> list[Document]:
         params: dict[str, Any] = {
             "owner_id": f"eq.{owner_id}",
@@ -429,6 +453,10 @@ class SupabaseRepository(_SupabaseHttp):
         }
         if group_id:
             params["group_id"] = f"eq.{group_id}"
+        if conversation_id:
+            params["source_metadata->vc_conversation_ids"] = 'cs.["' + str(conversation_id) + '"]'
+            params["archived_at"] = "is.null"
+            params["order"] = "updated_at.desc"
         response = await self.request("GET", "/rest/v1/rag_documents", params=params)
         rows = response.json()
         if not rows:

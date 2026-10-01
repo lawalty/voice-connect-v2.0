@@ -1,10 +1,35 @@
 from uuid import UUID
+import json
 
 import httpx
 import pytest
 
 from app.config import Settings
 from app.supabase_backend import SupabaseRepository
+
+
+@pytest.mark.asyncio
+async def test_download_offer_metadata_patch_is_owner_scoped_and_compare_and_swap():
+    owner = UUID('11111111-1111-1111-1111-111111111111')
+    document = UUID('22222222-2222-2222-2222-222222222222')
+    expected = {'authored_by':'Original author'}
+    requests = []
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, request=request, json=[{'id':str(document)}] if len(requests)==1 else [])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        repository = SupabaseRepository(_settings('sb_secret_current'), client=client)
+        replacement = {**expected,'vc_conversation_ids':['current-conversation']}
+        assert await repository.compare_document_source_metadata(owner, document, expected, replacement)
+        assert not await repository.compare_document_source_metadata(owner, document, expected, replacement)
+    for request in requests:
+        assert request.method == 'PATCH'
+        assert request.url.params['owner_id'] == f'eq.{owner}'
+        assert request.url.params['id'] == f'eq.{document}'
+        assert request.url.params['status'] == 'eq.ready'
+        assert request.url.params['archived_at'] == 'is.null'
+        assert json.loads(request.url.params['source_metadata'][3:]) == expected
+        assert json.loads(request.content) == {'source_metadata':replacement}
 
 
 def _settings(key: str) -> Settings:

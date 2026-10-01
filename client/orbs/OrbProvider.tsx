@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { LUMINOUS_GLASS, MAX_PACK_BYTES, parseOrbPack, restoreOrbPreferences, type InstallationOrbs, type OrbPack, type OrbPreferences } from './packs';
+import { BUILTIN_PACKS, isBuiltinPack, MAX_PACK_BYTES, parseOrbPack, restoreOrbPreferences, type InstallationOrbs, type OrbPack, type OrbPreferences } from './packs';
 import { loadOrbPacks, verifyPackImages } from './storage';
 import { OrbSync, type LegacyOrbs } from './sync';
 
@@ -41,7 +41,7 @@ export function OrbProvider({ children }: { children: ReactNode }) {
     const timer = setInterval(visibleRefresh, 30000);
     return () => { current.dispose(); clearInterval(timer); window.removeEventListener('focus', visibleRefresh); window.removeEventListener('online', visibleRefresh); document.removeEventListener('visibilitychange', visibleRefresh); if (sync.current === current) sync.current = null; };
   }, [refresh]);
-  const packs = [LUMINOUS_GLASS, ...view.packs], pack = packs.find(p => p.id === view.preferences.packId);
+  const packs = [...BUILTIN_PACKS, ...view.packs], pack = packs.find(p => p.id === view.preferences.packId);
   async function importPack(file: File) {
     if (file.size > MAX_PACK_BYTES) throw new Error('Orb packs must be smaller than 6 MB.');
     const incoming = parseOrbPack(await file.text()); await verifyPackImages(incoming);
@@ -49,13 +49,17 @@ export function OrbProvider({ children }: { children: ReactNode }) {
     await sync.current.mutate(async (_revision, send) => (await send<{ state: InstallationOrbs }>('/api/orbs/packs', { method: 'POST', body: JSON.stringify(incoming) })).state);
   }
   async function removePack() {
-    if (!pack || pack.id === LUMINOUS_GLASS.id || !sync.current) return;
+    if (!pack || isBuiltinPack(pack.id) || !sync.current) return;
     await sync.current.mutate((revision, send) => send<InstallationOrbs>(`/api/orbs/packs/${pack.id}`, { method: 'DELETE', body: JSON.stringify({ revision }) }));
   }
   async function exportPack() {
     if (!pack) throw new Error('Choose a face to export.');
-    const [atlas, flow] = await Promise.all([embedded(pack.atlas), pack.flow ? embedded(pack.flow) : Promise.resolve(undefined)]);
-    const exported = { ...pack, id: pack.id === LUMINOUS_GLASS.id ? 'my-luminous-glass' : pack.id, name: pack.id === LUMINOUS_GLASS.id ? 'My Luminous Glass' : pack.name, atlas, ...(flow ? { flow } : {}) };
+    let artwork = {};
+    if (pack.renderer === 'glass-face-v1') {
+      const [atlas, flow] = await Promise.all([embedded(pack.atlas), pack.flow ? embedded(pack.flow) : Promise.resolve(undefined)]);
+      artwork = { atlas, ...(flow ? { flow } : {}) };
+    }
+    const exported = { ...pack, ...artwork, id: isBuiltinPack(pack.id) ? `my-${pack.id}` : pack.id, name: isBuiltinPack(pack.id) ? `My ${pack.name}` : pack.name };
     return { url: URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' })), name: `${exported.id}.orb.json` };
   }
   return <Context.Provider value={{ ...view, packs, pack, choose: patch => sync.current?.choose(patch), refresh, retry, importPack, removePack, exportPack }}>{children}</Context.Provider>;

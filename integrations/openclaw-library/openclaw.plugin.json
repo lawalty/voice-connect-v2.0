@@ -1,7 +1,7 @@
 {
-  "id": "vc-shared-library", "name": "Voice Connect Shared Library", "version": "0.1.0",
-  "description": "Read the existing shared document library alongside agent memory.",
-  "contracts": { "tools": ["vc_library_groups", "vc_library_documents", "vc_library_search", "vc_library_download"] },
+  "id": "vc-shared-library", "name": "Voice Connect Shared Library", "version": "0.2.0",
+  "description": "Create styled PDF documents and search the existing shared document library alongside agent memory.",
+  "contracts": { "tools": ["vc_library_groups", "vc_library_documents", "vc_library_search", "vc_library_download", "vc_library_write_document", "vc_library_read_document", "vc_library_revise_document"] },
   "activation": { "onStartup": true },
   "configSchema": {
     "type": "object", "additionalProperties": false,

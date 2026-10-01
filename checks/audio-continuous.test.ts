@@ -116,6 +116,36 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it('meters captured sounds before speech filtering and clears muted, paused, stale and stopped input', async () => {
+    const run = setup();
+    await run.engine.start(preferences, 'meter-conversation');
+    run.callbacks.onSignal.mockClear();
+    detector.holdSignals = true;
+    // No speech decision has returned: a background sound must still register.
+    capture.frame(.05);
+    expect(run.engine.microphoneLevel()).toBeCloseTo(.5);
+    expect(run.callbacks.onSignal).not.toHaveBeenCalled();
+    expect(microphone).toHaveBeenCalledTimes(1);
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 201);
+    expect(run.engine.microphoneLevel()).toBe(0);
+    clock.mockRestore();
+    capture.frame(.2);
+    expect(run.engine.microphoneLevel()).toBe(1);
+    run.engine.mute(true);
+    expect(run.engine.microphoneLevel()).toBe(0);
+    run.engine.mute(false);
+    expect(run.engine.microphoneLevel()).toBe(0);
+    capture.frame(.05);
+    expect(run.engine.microphoneLevel()).toBeCloseTo(.5);
+    run.engine.pauseInput();
+    expect(run.engine.microphoneLevel()).toBe(0);
+    await run.engine.resumeInput();
+    expect(run.engine.microphoneLevel()).toBe(0);
+    capture.frame(.05);
+    expect(run.engine.microphoneLevel()).toBeCloseTo(.5);
+    run.engine.stop();
+    expect(run.engine.microphoneLevel()).toBe(0);
+  });
   it('feeds face motion from Fish playback and fences cancelled audio references', async () => {
     const run=setup();await run.engine.start({...preferences,output:'fish'},'face-timing');
     run.engine.awaitReply();run.engine.speak('A spoken answer.');

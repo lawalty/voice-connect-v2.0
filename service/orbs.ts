@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import sharp from 'sharp';
 import { z } from 'zod';
 import { digest, type Store } from './store.js';
-import { LUMINOUS_GLASS, MAX_CUSTOM_PACKS, MAX_PACK_BYTES, orbPreferencesSchema, parseOrbPack, restoreOrbPreferences, type InstallationOrbs, type OrbPack, type OrbPreferences } from '../contract/orb-packs.js';
+import { isBuiltinPack, MAX_CUSTOM_PACKS, MAX_PACK_BYTES, orbPreferencesSchema, parseOrbPack, restoreOrbPreferences, type InstallationOrbs, type OrbPack, type OrbPreferences, type FacePack, type StatusPack } from '../contract/orb-packs.js';
 
 class OrbError extends Error { constructor(message: string, readonly statusCode: number) { super(message); } }
 const savedSchema = z.object({ revision: z.number().int().nonnegative(), configured: z.boolean(), preferences: orbPreferencesSchema }).strict();
@@ -22,14 +22,15 @@ export class OrbSettings {
   }
   read(): InstallationOrbs {
     const packs = (this.store.db.prepare('SELECT id, hash, manifest FROM orb_packs ORDER BY rowid').all() as unknown as PackRow[]).map(row => {
-      const manifest = JSON.parse(row.manifest) as Omit<OrbPack, 'atlas' | 'flow'> & { hasFlow: boolean };
+      const manifest = JSON.parse(row.manifest) as (Omit<FacePack, 'atlas' | 'flow'> & { hasFlow: boolean }) | StatusPack;
+      if (manifest.renderer === 'status-orb-v1') return manifest;
       const { hasFlow, ...pack } = manifest, root = `/api/orbs/packs/${row.id}`;
       return { ...pack, atlas: `${root}/atlas.png?v=${row.hash}`, ...(hasFlow ? { flow: `${root}/flow.png?v=${row.hash}` } : {}) };
     });
     return { ...this.config(), packs };
   }
   private row(id: string) { return this.store.db.prepare('SELECT * FROM orb_packs WHERE id=?').get(id) as unknown as PackRow | undefined; }
-  private exists(id: string) { return id === 'classic' || id === LUMINOUS_GLASS.id || Boolean(this.row(id)); }
+  private exists(id: string) { return id === 'classic' || isBuiltinPack(id) || Boolean(this.row(id)); }
   private transaction<T>(fn: () => T): T {
     this.store.db.exec('BEGIN IMMEDIATE');
     try { const value = fn(); this.store.db.exec('COMMIT'); return value; }
@@ -55,7 +56,7 @@ export class OrbSettings {
     const hash = digest(JSON.stringify(pack));
     // Bound actual decoder work too. Flow pixels are validated, never re-encoded.
     try {
-      for (const uri of [pack.atlas, pack.flow].filter((v): v is string => Boolean(v))) {
+      for (const uri of (pack.renderer === 'glass-face-v1' ? [pack.atlas, pack.flow] : []).filter((v): v is string => Boolean(v))) {
         const bytes = Buffer.from(uri.slice('data:image/png;base64,'.length), 'base64');
         await sharp(bytes, { limitInputPixels: 1536 * 1536, failOn: 'warning' }).raw().toBuffer();
       }
@@ -76,8 +77,10 @@ export class OrbSettings {
       if (!existing) {
         const count = (this.store.db.prepare('SELECT count(*) AS n FROM orb_packs').get() as { n: number }).n;
         if (count >= MAX_CUSTOM_PACKS) throw new OrbError('This installation already has eight imported orbs. Export and remove one before adding another. Device copies are kept.', 409);
-        const { atlas, flow, ...manifest } = { ...pack, id };
-        this.store.db.prepare('INSERT INTO orb_packs VALUES (?,?,?,?)').run(id, hash, JSON.stringify({ ...manifest, hasFlow: Boolean(flow) }), JSON.stringify({ ...pack, id }));
+        const stored = { ...pack, id };
+        let manifest: unknown = stored;
+        if (stored.renderer === 'glass-face-v1') { const { atlas, flow, ...rest } = stored; manifest = { ...rest, hasFlow: Boolean(flow) }; }
+        this.store.db.prepare('INSERT INTO orb_packs VALUES (?,?,?,?)').run(id, hash, JSON.stringify(manifest), JSON.stringify(stored));
       }
       if (migration) this.store.db.prepare('INSERT OR IGNORE INTO orb_migrations (hash,pack_id) VALUES (?,?)').run(hash, id);
       const before = this.config();
@@ -103,7 +106,8 @@ export class OrbSettings {
   }
   asset(id: string, kind: 'atlas' | 'flow'): Buffer {
     const row = this.row(id); if (!row) throw new OrbError('This orb is no longer installed.', 404);
-    const uri = (JSON.parse(row.body) as OrbPack)[kind];
+    const pack = JSON.parse(row.body) as OrbPack;
+    const uri = pack.renderer === 'glass-face-v1' ? pack[kind] : undefined;
     if (!uri) throw new OrbError('This artwork is unavailable.', 404);
     return Buffer.from(uri.slice('data:image/png;base64,'.length), 'base64');
   }

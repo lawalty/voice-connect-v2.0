@@ -40,6 +40,7 @@ export async function saveOrbPack(pack: OrbPack) {
 export async function removeOrbPack(id: string) { await transaction('readwrite',s => s.delete(id)); }
 
 export async function verifyPackImages(pack: OrbPack) {
+  if (pack.renderer !== 'glass-face-v1') return;
   await Promise.all([pack.atlas,pack.flow].filter((x): x is string => Boolean(x)).map(async uri => {
     const image = new Image();
     image.src = uri;

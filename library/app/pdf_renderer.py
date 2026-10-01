@@ -140,7 +140,7 @@ def _page(canvas, doc) -> None:  # type: ignore[no-untyped-def]
     canvas.setFillColor(colors.HexColor("#778197"))
     canvas.drawString(22 * mm, height - 13.2 * mm, str(doc.title)[:70])
     canvas.drawRightString(
-        width - 22 * mm, 12 * mm, f"Written by Hermes  |  {canvas.getPageNumber()}"
+        width - 22 * mm, 12 * mm, f"Written by {doc.author}  |  {canvas.getPageNumber()}"
     )
     canvas.restoreState()
 
@@ -157,7 +157,7 @@ def _table_block(block: MarkdownBlock, styles: dict[str, ParagraphStyle], width:
         row + [Paragraph("", styles["body"])] * (columns - len(row)) for row in rows
     ]
     table = LongTable(
-        normalized, colWidths=[width / columns] * columns, repeatRows=1, splitByRow=True
+        normalized, colWidths=[width / columns] * columns, repeatRows=1, splitByRow=True, splitInRow=True
     )
     table.setStyle(
         TableStyle(
@@ -177,7 +177,7 @@ def _table_block(block: MarkdownBlock, styles: dict[str, ParagraphStyle], width:
 
 
 def render_markdown_pdf(
-    title: str, markdown: str, updated_at: datetime | None = None
+    title: str, markdown: str, updated_at: datetime | None = None, *, author: str = "NorthPointe"
 ) -> bytes:
     _register_fonts()
     parsed = parse_markdown(markdown, title=title)
@@ -191,13 +191,13 @@ def render_markdown_pdf(
         topMargin=23 * mm,
         bottomMargin=19 * mm,
         title=title,
-        author="Hermes",
+        author=author[:80],
         creator=f"Hermes PDF Renderer {RENDERER_VERSION}",
     )
     story: list[object] = [
         Paragraph(html.escape(title), styles["title"]),
         Paragraph(
-            f"Written by Hermes  |  {(updated_at or datetime.now(timezone.utc)).strftime('%B %d, %Y')}",
+            f"Written by {html.escape(author[:80])}  |  {(updated_at or datetime.now(timezone.utc)).strftime('%B %d, %Y')}",
             styles["meta"],
         ),
     ]
@@ -231,6 +231,7 @@ def render_markdown_pdf(
                     ]
                 ],
                 colWidths=[doc.width],
+                splitInRow=True,
             )
             quote.setStyle(
                 TableStyle(
@@ -249,6 +250,7 @@ def render_markdown_pdf(
             code = Table(
                 [[Preformatted(block.plain_text, styles["code"], maxLineLength=92)]],
                 colWidths=[doc.width],
+                splitInRow=True,
             )
             code.setStyle(
                 TableStyle(

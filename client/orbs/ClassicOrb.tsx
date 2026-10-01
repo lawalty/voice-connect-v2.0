@@ -1,5 +1,5 @@
 import { useAgentName } from '../agent-name';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import type { AcousticSignal, VoicePhase } from '../../contract/types';
 import { OrbAcousticMotion, orbMotionShape } from '../orb-acoustics';
 
@@ -11,6 +11,7 @@ const palette: Record<VoicePhase, [number, number, number]> = {
 };
 
 export interface OrbProps {
+  children?: ReactNode;
   phase: VoicePhase;
   signal: AcousticSignal | null;
   asleep?: boolean;
@@ -21,7 +22,7 @@ export interface OrbProps {
   onResume?: () => void;
 }
 
-export default function Orb({ phase, signal, asleep = false, waking = false, onWake, wakeDisabled = false, onStandby, onResume }: OrbProps) {
+export default function Orb({ phase, signal, asleep = false, waking = false, onWake, wakeDisabled = false, onStandby, onResume, children }: OrbProps) {
   const agentName = useAgentName();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const latest = useRef({ phase, signal, asleep, waking });
@@ -102,6 +103,8 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
         return gradient;
       };
       const r = radius * (1 - sleepBlend * .12 + Math.sin(t * 1.2) * (.019 - sleepBlend * .007) + shape.expansion * (1 - sleepBlend) + wakeBloom * .18 + sleepExhale * .055);
+      // The ears share the body's exact wake, sleep, breath and acoustic scale.
+      canvas.parentElement?.style.setProperty('--orb-ear-transform', `scale(${r / radius})`);
       ctx.clearRect(0, 0, size, size);
       ctx.save(); ctx.translate(size / 2, size / 2);
       const outer = Math.min(size * .475, r * (1.55 + voice * .18));
@@ -212,6 +215,7 @@ export default function Orb({ phase, signal, asleep = false, waking = false, onW
     <span className="orb-orbit orbit-one" aria-hidden="true" /><span className="orb-orbit orbit-two" aria-hidden="true" />
     <canvas ref={canvasRef} className="orb-canvas" aria-hidden="true" />
     <span className="orb-coordinate coordinate-left" aria-hidden="true">N</span><span className="orb-coordinate coordinate-right" aria-hidden="true">P</span>
+    {children}
     {action && <button type="button" className="orb-wake-button" disabled={disabled} aria-label={standby ? 'Resume conversation' : onStandby ? 'Enter standby mode' : `Wake ${agentName}`} aria-pressed={onStandby || standby ? standby : undefined} onClick={action}>
       {!disabled && <span className="orb-wake-hint" aria-hidden="true">{standby ? 'Tap to resume' : onStandby ? 'Tap for standby' : asleep ? 'Tap to wake' : ''}</span>}
     </button>}

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { buildApp } from '../service/main';
-import { LUMINOUS_GLASS, MAX_PACK_BYTES } from '../contract/orb-packs';
+import { LUMINOUS_GLASS, VOICE_CONNECT_V1, MAX_PACK_BYTES } from '../contract/orb-packs';
 
 const atlas = readFileSync('client/public/orb-packs/luminous-glass/atlas.png');
 const flow = readFileSync('client/public/orb-packs/luminous-glass/flow.png');
@@ -24,6 +24,19 @@ async function fixture() {
 }
 
 describe('installation-wide orb packs', () => {
+  it('shares the built-in status selection and imported palettes across devices and restart', async () => {
+    const run = await fixture();
+    const selected = await run.app.inject({ method: 'PATCH', url: '/api/orbs/preferences', headers: run.phone, payload: { revision: 0, patch: { packId: VOICE_CONNECT_V1.id } } });
+    expect(selected.statusCode).toBe(200);
+    const palette = { ...VOICE_CONNECT_V1, id: 'my-status-orb', name: 'My status orb' };
+    const imported = await run.app.inject({ method: 'POST', url: '/api/orbs/packs', headers: run.phone, payload: palette });
+    expect(imported.statusCode).toBe(200); expect(imported.json().state.packs).toEqual([palette]);
+    await run.restart();
+    const state = (await run.app.inject({ url: '/api/orbs', headers: run.pc })).json();
+    expect(state.preferences.packId).toBe(palette.id); expect(state.packs).toEqual([palette]);
+    expect((await run.app.inject({ url: `/api/orbs/packs/${palette.id}/atlas.png`, headers: run.pc })).statusCode).toBe(404);
+    expect((await run.app.inject({ method: 'DELETE', url: `/api/orbs/packs/${palette.id}`, headers: run.pc, payload: { revision: state.revision } })).statusCode).toBe(200);
+  });
   it('copies a phone avatar to a fresh PC, preserving artwork, selection, colors and motion across server restart', async () => {
     const run = await fixture();
     expect((await run.app.inject({ url: '/api/orbs', headers: run.pc })).json()).toMatchObject({ revision: 0, configured: false, packs: [] });

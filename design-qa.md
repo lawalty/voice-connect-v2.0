@@ -132,3 +132,43 @@ final result: prior animation accepted; State colors visual acceptance pending
 Final result: automated shared-pack handoff and desktop/mobile-layout checks
 pass. Physical Android acceptance of the user's own avatar migration and color
 appearance remains a user check after opening the original phone browser.
+
+## September 30 Voice Connect v1 orb pack
+
+- Viewed all eight full-resolution pre-expression PNGs and the local contact
+  sheet. Its Hermes reference is `6fe6a67`; the requested Voice Connect source
+  baseline `03d49f0b7865fd9a64eaf375fe460ed35e54e81a` also defines the eight states.
+  Recreated the solid microphone circle, separate halo, historical palette,
+  speaking rotation, connecting/thinking pulse and standby bloom as a renderer
+  in the existing pack registry. The current voice engine remains in place.
+- Added the selectable Voice Connect v1 pack, portable palette export/import,
+  all eight silent previews, and shared installation persistence. Existing face
+  packs retain their saved movement/color settings and rendering behavior.
+- Twelve segments per ear fill through emerald, lime, amber and red. Both use
+  the existing mono capture level; they are not independent stereo inputs.
+  Hidden pages suspend meter sampling. Reduced motion stops decorative motion.
+  The owner's clarification is implemented: Working is orange and adds no
+  WAV/MP3, background music, audio context, capture stream or TTS processing.
+- Build/typecheck and all 359 unit/service tests passed. Twelve focused browser
+  cases passed across desktop and Android-layout Chromium: six existing VU
+  cases, four new state/pack/voice cases and two shared-avatar migration cases.
+  These cover palette and animation names, real export/reimport, fresh-device
+  selection, face switching, controlled PCM levels, actual fixture tool events,
+  three speech chunks, standby/resume/end and absence of WAV/MP3 requests.
+- The first voice test exposed an incomplete SpeechSynthesisUtterance fixture;
+  correcting that test double cleared it. The existing two-device migration
+  test passed its assertions but stalled in WebGL context teardown. It now uses
+  reduced motion on both test devices, retains real WebGL readiness checks and
+  passes in both layouts. Animation tests retain normal motion coverage.
+- Inspected the working preview and Android tool-working screenshot under
+  `.local/legacy-rerun`, plus a live local-browser preview and idle main view.
+  The orange circle, white microphone, separated side meters and stronger halo
+  match the reference composition. Settings and main controls fit the narrow
+  layout without horizontal overflow. No local-browser warning/error entries.
+- React review: renderer loading is deferred, level smoothing stays in the
+  meter effect, React receives only changed segment counts, and effects cancel
+  frames/listeners. Pack metadata preserves identity on unchanged refreshes.
+
+Final result: local build, service tests and desktop/Android-layout browser
+checks pass. Physical Android appearance, microphone response and audible
+speech remain owner acceptance checks after deployment.

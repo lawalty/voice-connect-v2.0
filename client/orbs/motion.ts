@@ -1,5 +1,5 @@
 import type { VoicePhase } from '../../contract/types';
-import type { OrbPack } from './packs';
+import type { FacePack } from './packs';
 import type { FaceFrame } from './renderer';
 import type { MouthPose } from './speech';
 
@@ -9,7 +9,7 @@ export class FaceMotion {
   private phase:VoicePhase='off';
   private delightedUntil=0;
   private values={listen:0,think:0,smile:0,blink:0,hue:0,sleep:1,mouth:0,round:.2,wide:.3};
-  sample(now:number,phase:VoicePhase,asleep:boolean,reduced:boolean,strength:number,pack:OrbPack,speech:MouthPose):FaceFrame {
+  sample(now:number,phase:VoicePhase,asleep:boolean,reduced:boolean,strength:number,pack:FacePack,speech:MouthPose):FaceFrame {
     const dt=this.last?Math.max(0,Math.min(.06,(now-this.last)/1000)):.033;this.last=now;
     if(this.phase==='speaking' && (phase==='listening'||phase==='off'))this.delightedUntil=now+1700;
     this.phase=phase;
