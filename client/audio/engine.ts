@@ -1,6 +1,7 @@
 import { SpeechFaceTimeline, SILENT_MOUTH, type MouthPose } from '../orbs/speech';
 import type { AcousticSignal, RecognizerCapabilities, RecognizerEvents, SpeechOutput, SpeechPreferences, SpeechRecognizer, VoicePhase } from '../../contract/types';
 import { acousticSignal, rms, SentenceStream, Transcript } from './dsp';
+import { createTranscriptNormalizer } from '../../contract/transcript-normalization';
 import { BrowserOutput, PremiumOutput, type PlaybackSamples } from './output';
 import { CueTransitions, ListeningCues } from './cues';
 import { HostRecognizer } from './vosk';
@@ -52,6 +53,7 @@ export class VoiceEngine {
   private firstPhraseTimer?: ReturnType<typeof setTimeout>;
   private answerChunked = false;
   private transcript = new Transcript();
+  private normalizeTranscript = createTranscriptNormalizer();
   private preferences?: SpeechPreferences;
   private conversationId = '';
   private phase: VoicePhase = 'off';
@@ -110,7 +112,7 @@ export class VoiceEngine {
     // Voice submission also uses this method just after scheduling its sent
     // cue. Only an inactive session can still have a sleep tail to cancel.
     if (!this.active) this.cues?.cancel();
-    this.preferences = { ...preferences }; this.conversationId = conversationId;
+    this.preferences = { ...preferences }; this.normalizeTranscript = createTranscriptNormalizer(preferences.transcriptRules); this.conversationId = conversationId;
     this.warmContext();
   }
   /** Presentation changes never restart capture or replay a missed cue. */
@@ -227,7 +229,7 @@ export class VoiceEngine {
     this.stop('restart');
     this.trace.record('voice-start', { provider: preferences.recognition });
     const generation = ++this.generation;
-    this.preferences = { ...preferences }; this.conversationId = conversationId;
+    this.preferences = { ...preferences }; this.normalizeTranscript = createTranscriptNormalizer(preferences.transcriptRules); this.conversationId = conversationId;
     this.active = true; this.muted = false; this.inputPaused = false; this.gap = false; this.transcript.clear();
     this.callbacks.onDraft(''); this.setPhase('starting');
     // Android assigns low-latency output to the mode active when it opens.
@@ -457,7 +459,7 @@ export class VoiceEngine {
         // A remote onset/result cannot bypass the local playback-aware decision.
         if (this.protectingReply || this.interruptionsBlocked()) return;
         if (result.started && this.preferences?.handsFree) this.speechStarted();
-        this.callbacks.onDraft(this.transcript.update(result.text, result.final));
+        this.callbacks.onDraft(this.normalizeTranscript(this.transcript.update(result.text, result.final)));
         if (result.text && !this.finishing) this.setPhase('hearing');
         if (result.turnComplete && !this.finishing && this.preferences?.handsFree) {
           this.trace.record('endpoint-ready', { provider: this.preferences.recognition }); this.commit();
@@ -560,12 +562,12 @@ export class VoiceEngine {
     clearTimeout(this.maxTurnTimer); this.turnAudio = false; this.prebuffer = []; this.prebufferSamples = 0;
     const draft = this.transcript.text, text = this.transcript.take();
     if (!text) {
-      this.callbacks.onDraft(draft); this.setPhase(this.ready ? 'listening' : 'paused');
+      this.callbacks.onDraft(this.normalizeTranscript(draft)); this.setPhase(this.ready ? 'listening' : 'paused');
       if (draft) this.callbacks.onNotice('Only an unconfirmed draft was returned. Review it and send as text.');
       return;
     }
     if (this.outputActive || this.output) this.interrupt('speech-onset', false);
-    this.callbacks.onDraft(''); this.awaitReply(); this.callbacks.onTurn(text);
+    this.callbacks.onDraft(''); this.awaitReply(); this.callbacks.onTurn(this.normalizeTranscript(text));
   }
   mute(muted: boolean) {
     this.muted = muted;

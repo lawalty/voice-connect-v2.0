@@ -1,4 +1,5 @@
 import { DEFAULT_FISH_DELIVERY, type FishDelivery } from './fish-delivery.js';
+import { DEFAULT_TRANSCRIPT_RULES, type TranscriptNormalizationRule } from './transcript-normalization.js';
 export type RecognizerKind = 'browser' | 'vosk' | 'deepgram';
 export type OutputKind = 'browser' | 'fish';
 export type VoicePhase = 'off' | 'starting' | 'listening' | 'hearing' | 'finalizing' | 'thinking' | 'working' | 'thinking-commentary' | 'working-commentary' | 'speaking' | 'reconnecting' | 'paused' | 'standby' | 'error';
@@ -22,10 +23,13 @@ export interface SpeechPreferences {
   audioVuMeters?: boolean;
   /** Installation-wide visibility of live transcription over the orb. */
   showTranscriptions?: boolean;
+  /** Installation-wide, case-insensitive preferred spellings for recognized speech only. */
+  transcriptRules?: TranscriptNormalizationRule[];
 }
 export const DEFAULT_SPEECH: SpeechPreferences = {
   recognition: 'vosk', output: 'browser', browserVoice: '', fishVoice: '', handsFree: true, turnMode: 'automatic', keepAwake: true,
   interruptionSensitivity: 50, allowInterruptions: true, audioCues: true, audioVuMeters: true, fishDelivery: DEFAULT_FISH_DELIVERY, showTranscriptions: false,
+  transcriptRules: DEFAULT_TRANSCRIPT_RULES,
 };
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }
 export interface HarnessCapabilities { connected: boolean; images: boolean; cancellation: boolean; approvals: boolean; version: string; reason?: string; }
@@ -36,6 +40,7 @@ export interface InstallationSpeech {
   recognition: RecognizerKind; output: OutputKind; fishVoice: string;
   fishDelivery?: FishDelivery;
   showTranscriptions?: boolean;
+  transcriptRules?: TranscriptNormalizationRule[];
 }
 export interface HostModelStatus {
   id: string; installed: boolean; state: 'missing' | 'downloading' | 'extracting' | 'loading' | 'ready' | 'error' | 'unavailable';
