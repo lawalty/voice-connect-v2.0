@@ -1,0 +1,14 @@
+.vector-face-orb { --vector-color: #27272a; --vector-halo: #10b981; }
+.vector-face-surface { position: absolute; inset: 17%; pointer-events: none; transform-origin: 50% 50%; will-change: transform; }
+.vector-face-surface svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.vector-face-surface [data-vector-node] { transition: fill .72s ease-in-out, stroke .72s ease-in-out; }
+.vector-face-surface stop { transition: stop-color .72s ease-in-out; }
+.vector-face-halo { position: absolute; inset: 5%; border-radius: 50%; background: color-mix(in srgb, var(--vector-halo) 30%, transparent); filter: blur(24px); pointer-events: none; transition: background-color .72s ease-in-out; }
+.vector-face-orb[data-orb-state="standby"] .vector-face-halo { background: color-mix(in srgb, #10b981 40%, transparent); box-shadow: 0 0 50px 10px #34d39940; }
+.vector-face-orb[data-orb-state="working"] .vector-face-halo { background: color-mix(in srgb, var(--vector-halo) 35%, transparent); }
+.vector-face-orb[data-orb-state="idle"] .vector-face-halo, .vector-face-orb[data-orb-state="error"] .vector-face-halo { display: none; }
+.vector-face-orb .vector-face-button { inset: 18%; border-radius: 50%; width: auto; height: auto; }
+.vector-face-button:focus-visible { outline: 3px solid #fff8e8; outline-offset: 6px; }
+.vector-face-hint { position: absolute; top: 83%; width: 100%; text-align: center; color: #9dadb8; font-size: 11px; pointer-events: none; }
+.vector-face-orb[data-orb-state="standby"] .vector-face-hint { color: #10b981; }
+@media (prefers-reduced-motion: reduce) { .vector-face-orb *, .vector-face-orb stop { transition: none; animation: none; } .vector-face-surface { will-change: auto; } }

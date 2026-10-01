@@ -1,0 +1,18 @@
+{
+  "pack": "copper-companion",
+  "states": [
+    "idle",
+    "standby",
+    "connecting",
+    "listening",
+    "thinking",
+    "working",
+    "speaking",
+    "error"
+  ],
+  "clockMs": 1800,
+  "identicalFrameAttributeWrites": 0,
+  "pageErrors": [],
+  "speech": "silent estimated review signal",
+  "physicalAndroidTested": false
+}

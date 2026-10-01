@@ -1,5 +1,31 @@
 # Orb packs
 
+## Live vector artwork and reusable rigs
+
+**Expressive Face** is the fourth style, using renderer `vector-face-v1`. It draws
+and recomputes SVG shapes live, without image morphing. Custom vector packs can
+replace the head silhouette, eyes, brows, nose, mouth, gradients and state poses
+through data, without application code changes. Existing Classic, Luminous Glass,
+imported image packs and Voice Connect v1 remain supported.
+
+See the [vector format and authoring guide](vector-face/README.md), the
+[ready-to-copy external-AI prompt](vector-face/AI-PROMPT.md), and two complete
+[example packs](vector-face/examples/). An AI may author one JSON directly or
+compile supported SVG artwork plus rig JSON. The installed `.orb.json` embeds
+all runtime artwork and gradient resources; a working resource folder is optional.
+SVG alone is not a rig, and arbitrary SVG features/scripts are not supported.
+
+The full vector schema requires geometry, rig roles and all eight poses in addition
+to the palette/ink/motion fields. It replaces earlier handmade palette-only vector
+JSON. Export **Expressive Face** to get `my-expressive-face.orb.json`; its built-in
+ID `expressive-face` is reserved. Vector packs show Movement and silent previews
+for all states; State colors is hidden because vector packs use their semantic
+palette. OS reduced motion renders a fixed illustration per state, including speech.
+
+This is a 2D vector rig with small head motions, not a 3D or guaranteed
+photorealistic renderer. PR review and physical Android acceptance precede production
+deployment. Browser screenshots alone do not prove phone frame smoothness.
+
 The web app has replaceable orb renderers and artwork. Open **Settings → Orb appearance** and select **Luminous Glass** for an animated face or **Voice Connect v1** for the original microphone orb. Appearance changes immediately and saves to this VC installation, so signed-in devices share the selected pack, movement, and State colors. The classic floating orb remains the default. Silent previews cover all eight original states without using a microphone or contacting a voice provider.
 
 For built-in or imported faces, switch **State colors** off to preserve the
