@@ -223,6 +223,8 @@ def snapshot(job_dir):
             if (PROJECT/name).exists():
                 tar.add(PROJECT/name, arcname='project/' + name)
     os.chmod(archive, 0o600)
+    with archive.open('rb') as stream:
+        os.fsync(stream.fileno())
     with tarfile.open(archive) as tar:
         if 'state/openclaw.json' not in tar.getnames() or 'project/compose.override.yaml' not in tar.getnames():
             raise UpdateError('backup_incomplete')

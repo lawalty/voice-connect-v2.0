@@ -55,8 +55,11 @@ It does not itself upgrade OpenClaw.
 
 The job outlives the gateway restart. The plugin polls its durable terminal
 result and queues a native system event for the requesting session, with an
-immediate wake request. The event reports only the verified result. A queued job
-is not success. `openclaw_update_status` remains available after reconnection.
+execution-event wake request. The event reports only the verified result. A
+queued job is not success. `openclaw_update_status` remains available after
+reconnection. On the installed 2026.9.6 runtime, QA confirmed that the notice was
+queued, but did not observe an immediate new assistant reply. Do not promise
+automatic spoken confirmation; the durable status is authoritative.
 
 ## Limits and maintenance
 
