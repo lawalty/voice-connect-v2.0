@@ -3,6 +3,7 @@ import { decode, encode } from '@msgpack/msgpack';
 import type { AudioEvent } from '../contract/types.js';
 import { PCM_RATE, PLAYBACK_FRAME_BYTES, PLAYBACK_WINDOW_BYTES } from '../contract/audio-flow.js';
 import { DEFAULT_FISH_DELIVERY, DEFAULT_FISH_MODEL, fishSpeechText, type FishDelivery } from '../contract/fish-delivery.js';
+import { speechAlignment } from '../contract/speech-alignment.js';
 
 type RemoteFactory = (url: string, options: WebSocket.ClientOptions) => WebSocket;
 const MAX_FRAME = 2 * 1024 * 1024;
@@ -13,6 +14,7 @@ export function bridgeFishAudio(
   client: WebSocket, key: string, voice: string, authorized: () => boolean,
   remoteFactory: RemoteFactory = (url, options) => new WebSocket(url, options),
   delivery: { model: string; cue: FishDelivery } = { model: DEFAULT_FISH_MODEL, cue: DEFAULT_FISH_DELIVERY },
+  wordTiming = false,
 ): void {
   let remote: WebSocket | undefined;
   let ended = false, ready = false, inputEnded = false, textChars = 0, audioBytes = 0;
@@ -134,7 +136,7 @@ export function bridgeFishAudio(
   if (!checkAuth()) return;
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(voice)) { fail('The Fish Audio voice ID is invalid. Update it in settings.'); return; }
   try {
-    remote = remoteFactory('wss://api.fish.audio/v1/tts/live', {
+    remote = remoteFactory(`wss://api.fish.audio/v1/tts/live${wordTiming ? '/with-timestamp' : ''}`, {
       headers: { Authorization: `Bearer ${key}`, model: delivery.model },
       maxPayload: MAX_FRAME, perMessageDeflate: false, handshakeTimeout: 10000,
     });
@@ -154,12 +156,16 @@ export function bridgeFishAudio(
     if (!binary || bytes.length > MAX_FRAME) { fail('Fish Audio returned unsupported speech data.'); return; }
     let event: Record<string, unknown>;
     try {
-      const value = decode(bytes, { maxStrLength: 16000, maxBinLength: MAX_FRAME, maxArrayLength: 32, maxMapLength: 32, maxExtLength: 0 });
+      const value = decode(bytes, { maxStrLength: 16000, maxBinLength: MAX_FRAME, maxArrayLength: 2048, maxMapLength: 32, maxExtLength: 0 });
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid event');
       event = value as Record<string, unknown>;
     } catch { fail('Fish Audio returned unreadable speech data.'); return; }
     if (event.event === 'audio') {
       if (!(event.audio instanceof Uint8Array)) { fail('Fish Audio returned unsupported audio.'); return; }
+      // Metadata never holds up PCM, and an empty trailing frame may correct
+      // the previous alignment. Null snapshots do not erase earlier timing.
+      const alignment = wordTiming ? speechAlignment(event) : undefined;
+      if (alignment) send({ type: 'speech-alignment', alignment });
       audioBytes += event.audio.byteLength;
       if (!event.audio.byteLength) return;
       touch(); clearTimeout(audioTimer); audioTimer = undefined; armFinishTimer();

@@ -46,7 +46,7 @@ for (const fault of ['silent socket', 'missing events'] as const) {
     faulty = true; brokenSocket = connections;
     await page.getByLabel('Message NorthPointe').fill('Synthetic lost reply check.');
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
-    await expect(page.getByText('NorthPointe is thinking', { exact: true })).toBeVisible();
+    await expect(page.locator('.orb-stage.phase-thinking')).toBeVisible();
     await expect.poll(() => dropped).toBeGreaterThanOrEqual(4);
     await page.getByLabel('Message NorthPointe').fill('Keep this unfinished thought.');
     await page.evaluate(() => {
@@ -54,7 +54,7 @@ for (const fault of ['silent socket', 'missing events'] as const) {
       document.dispatchEvent(new Event('resume'));
     });
     await expect(page.getByRole('article', { name: 'NorthPointe', exact: true })).toContainText('Your conversation stays together.', { timeout: 8000 });
-    await expect(page.getByText('NorthPointe is thinking', { exact: true })).toHaveCount(0);
+    await expect(page.locator('.orb-stage.phase-thinking')).toHaveCount(0);
     await expect(page.locator('.site-header .connection-pill')).toHaveText('Connected');
     await expect(page.getByLabel('Message NorthPointe')).toHaveValue('Keep this unfinished thought.');
     expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(p.conversation);
@@ -87,7 +87,7 @@ test('a delayed foreground history snapshot cannot erase a newer streamed reply'
     await page.getByLabel('Message NorthPointe').fill('Synthetic history race check.');
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect(page.getByRole('article', { name: 'NorthPointe', exact: true })).toContainText('I’m here with you.');
-    await expect(page.getByText('NorthPointe is thinking', { exact: true })).toHaveCount(0);
+    await expect(page.locator('.orb-stage.phase-thinking')).toHaveCount(0);
     await page.getByLabel('Message NorthPointe').fill('Draft survives reconciliation.');
   } finally { release?.(); }
   await expect.poll(() => returned).toBe(true);
@@ -118,7 +118,7 @@ test('foreground checks preserve an unfinished streamed answer and recover a mis
   await expect.poll(() => droppedCompletion, { timeout: 16000 }).toBe(true);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(answer).toContainText('I’m here with you.');
-  await expect(page.getByText('NorthPointe is thinking', { exact: true })).toHaveCount(0);
+  await expect(page.locator('.orb-stage.phase-thinking')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Interrupt', exact: true })).toHaveCount(0);
   expect(p.submissions).toHaveLength(1); expect(p.aborts).toHaveLength(0);
 });

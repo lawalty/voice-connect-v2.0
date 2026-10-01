@@ -2,6 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { restoreSpeechPreferences, selectRecognizer } from '../client/speech-preferences';
 
 describe('device speech preference compatibility', () => {
+  it('defaults VU meters on and preserves an explicit device opt-out across provider changes', () => {
+    expect(restoreSpeechPreferences(null).audioVuMeters).toBe(true);
+    const saved = restoreSpeechPreferences(JSON.stringify({ audioVuMeters: false }));
+    expect(selectRecognizer(saved, 'deepgram').audioVuMeters).toBe(false);
+    for (const value of [null, 'false', 0, {}, []]) expect(restoreSpeechPreferences(JSON.stringify({ audioVuMeters: value })).audioVuMeters).toBe(true);
+  });
+  it('defaults interruptions on, preserves an explicit opt-out and rejects nonboolean values', () => {
+    expect(restoreSpeechPreferences(null).allowInterruptions).toBe(true);
+    for (const value of [true, false]) {
+      const saved = restoreSpeechPreferences(JSON.stringify({ allowInterruptions: value }));
+      expect(saved.allowInterruptions).toBe(value);
+      expect(selectRecognizer(saved, 'deepgram').allowInterruptions).toBe(value);
+    }
+    for (const value of [null, 'false', 0, {}, []]) expect(restoreSpeechPreferences(JSON.stringify({ allowInterruptions: value })).allowInterruptions).toBe(true);
+  });
   it('restores a delivery preset, preserves Off, and defaults invalid legacy values', () => {
     for (const fishDelivery of ['off', 'calm', 'soft', 'restrained']) expect(restoreSpeechPreferences(JSON.stringify({ fishDelivery })).fishDelivery).toBe(fishDelivery);
     for (const fishDelivery of [null, false, '[arbitrary]', {}, []]) expect(restoreSpeechPreferences(JSON.stringify({ fishDelivery })).fishDelivery).toBe('restrained');

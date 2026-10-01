@@ -128,6 +128,23 @@ export class SentenceStream {
   finish(): string[] {
     return this.drain(true);
   }
+  /** A latency deadline may release an opening phrase, never a partial word.
+   * Later chunks still prefer sentence/clause boundaries. */
+  openingPhrase(): string[] {
+    const pending = this.text.slice(this.emitted);
+    const window = pending.slice(0, 160);
+    const boundaries = [...window.matchAll(/\s+/g)].map(match => match.index);
+    for (const boundary of boundaries.reverse()) {
+      const raw = pending.slice(0, boundary), plain = speechText(raw);
+      if (plain.length < 40 || plain.split(/\s+/).length < 6) continue;
+      // Do not split inside an inline code span or Markdown link target. A
+      // following update or the final boundary will resolve that structure.
+      if ((raw.match(/`/g)?.length ?? 0) % 2 || /\[[^\]]*$|\]\([^)]*$/.test(raw)) continue;
+      this.emitted += boundary;
+      return [plain];
+    }
+    return [];
+  }
   private drain(final: boolean): string[] {
     const output: string[] = [];
     while (this.emitted < this.text.length) {

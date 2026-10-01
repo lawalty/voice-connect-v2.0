@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { acousticSignal, Generation, NoiseFloor, pcm16, Resampler, SentenceStream, Transcript, TurnDetector } from '../client/audio/dsp';
+import { speechText } from '../client/audio/speech-text';
 
 describe('audio streaming math', () => {
   it('preserves sample count and signal across arbitrary microphone block boundaries', () => {
@@ -85,6 +86,21 @@ describe('coherent turn and speech output boundaries', () => {
     expect(first.length).toBeGreaterThan(0); expect(first.every(piece => piece.length <= 280)).toBe(true);
     expect([...first, ...stream.finish()].join(' ')).toBe(words);
     expect(stream.finish()).toEqual([]);
+  });
+  it('releases complete opening words at a deadline and preserves the unsent suffix exactly once', () => {
+    const stream = new SentenceStream();
+    expect(stream.append('**An imaginary garden is a peaceful place with col')).toEqual([]);
+    expect(stream.openingPhrase()).toEqual(['An imaginary garden is a peaceful place with']);
+    expect(stream.append('orful flowers and winding paths.')).toEqual(['colorful flowers and winding paths.']);
+    expect(stream.finish()).toEqual([]);
+    expect(stream.append('**An imaginary garden is a peaceful place with colorful flowers and winding paths.', true)).toEqual([]);
+  });
+  it('does not force tiny fragments, partial words, code spans, or link labels at the opening deadline', () => {
+    for (const text of ['A tiny start', 'oneverylongunbrokenword'.repeat(6), 'Read `[an unfinished code span with many more words', 'Here is [a link label that has not yet closed']) {
+      const stream = new SentenceStream(); stream.append(text);
+      expect(stream.openingPhrase()).toEqual([]);
+      expect(stream.finish()).toEqual([speechText(text)]);
+    }
   });
   it('invalidates late playback and transport callbacks after interruption', () => {
     const generation = new Generation(), before = generation.current;

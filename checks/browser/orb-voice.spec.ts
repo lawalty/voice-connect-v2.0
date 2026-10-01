@@ -42,7 +42,7 @@ async function enterWithMeter(page: Page) {
   });
   await enterFixtureSession(page);
   await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as unknown as { vcOrbMeter: { frames: number } }).vcOrbMeter.frames)).toBeGreaterThan(5);
   await page.waitForTimeout(1700); // Let the separate wake animation settle.
 }
@@ -108,10 +108,10 @@ test('microphone evidence pulses the orb and atmosphere in both views; End stops
   await page.screenshot({ path: info.outputPath('messenger-asleep.png') });
   // Waking again during the exhale must immediately reclaim the animation.
   await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   await page.getByRole('button', { name: 'End voice session', exact: true }).click();
   await page.getByRole('button', { name: 'Wake NorthPointe', exact: true }).click();
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   await page.waitForTimeout(1700);
   await expect(page.locator('.orb-stage')).toHaveAttribute('data-presence', 'awake');
   expect(await captureState(page)).toEqual({ captures: 3, live: 1 });
@@ -121,8 +121,7 @@ test('microphone evidence pulses the orb and atmosphere in both views; End stops
   await page.waitForTimeout(300);
   const settledPosition = await page.locator('.orb-canvas').boundingBox();
   expect(position).not.toBeNull(); expect(settledPosition).not.toBeNull();
-  // Removing the label changes the layout by 1–3px across Chromium font
-  // metrics. Reject a visible jump without requiring identical text sizing.
+  // Ending capture should not visibly shift the orb as it settles to sleep.
   for (const key of ['x', 'y'] as const)
     expect(Math.abs(settledPosition![key] - position![key])).toBeLessThanOrEqual(2);
   for (const key of ['width', 'height'] as const)
@@ -137,13 +136,19 @@ test('reduced motion stays static through voice input and settles immediately on
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await enterWithMeter(page);
   const quiet = await canvasMetrics(page);
+  const ears = page.locator('.orb-ear-meters');
+  const quietEars = await ears.evaluate(el => getComputedStyle(el).transform);
   await input(page, .9); await page.waitForTimeout(300);
   expect((await canvasMetrics(page)).hash).toBe(quiet.hash);
+  expect(await ears.evaluate(el => getComputedStyle(el).transform)).toBe(quietEars);
   await page.getByRole('button', { name: 'End voice session', exact: true }).click();
   expect((await captureState(page)).live).toBe(0);
   await page.waitForTimeout(150);
   const asleep = await canvasMetrics(page);
+  const asleepEars = await ears.evaluate(el => getComputedStyle(el).transform);
   expect(asleep.light).toBeLessThan(quiet.light);
+  expect(asleepEars).not.toBe(quietEars);
   await page.waitForTimeout(350);
   expect((await canvasMetrics(page)).hash).toBe(asleep.hash);
+  expect(await ears.evaluate(el => getComputedStyle(el).transform)).toBe(asleepEars);
 });

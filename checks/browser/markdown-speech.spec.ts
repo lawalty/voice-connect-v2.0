@@ -59,7 +59,7 @@ for (const output of ['browser', 'fish'] as const) {
     // rather than clicking during the old/new connection's enabled-state change.
     await expect.poll(() => subscribed.has(conversationId)).toBe(true);
     await page.getByRole('button', { name: 'Wake NorthPointe' }).click();
-    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+    await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     await page.evaluate(() => (window as unknown as { vcMarkdownProbe: { emit(text: string): void } }).vcMarkdownProbe.emit('Markdown speech fixture slow'));
     await page.getByRole('button', { name: 'Finish thought', exact: true }).click();
     const spoken = async () => output === 'fish' ? speech : page.evaluate(() => (window as unknown as { vcMarkdownProbe: { spoken: string[] } }).vcMarkdownProbe.spoken);

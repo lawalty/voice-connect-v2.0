@@ -2,7 +2,10 @@ import type { APIRequestContext, TestInfo } from '@playwright/test';
 
 // The real service counts shell assets as well as API calls. Reserve enough for
 // one complete scenario, including a reload, instead of racing its shared limit.
-const minimumRemaining = 60;
+// Reload/import scenarios issue nearly 100 requests including orb artwork and
+// code chunks. A 60-request reservation exhausted the window mid-test, then a
+// failed cleanup left the selected legacy pack in later canvas scenarios.
+const minimumRemaining = 120;
 const maximumWaitMs = 61_000;
 
 export async function waitForFixtureBudget({ request }: { request: APIRequestContext }, info: TestInfo): Promise<void> {

@@ -29,6 +29,7 @@ from app.models import (
     AgentDocumentAccepted,
     AgentDocumentArchive,
     Document,
+    DocumentDownloadOffer,
     GeneratedDocumentAccepted,
     GeneratedDocumentCreate,
     GeneratedDocumentUpdate,
@@ -298,6 +299,7 @@ def create_app(
                 source_metadata={
                     "authored_by": "NorthPointe",
                     "canonical_format": "markdown",
+                    "vc_conversation_ids": [str(body.conversation_id)] if body.conversation_id else [],
                 },
             )
             if settings.inline_worker:
@@ -338,12 +340,24 @@ def create_app(
                 document_id,
                 title=body.title,
                 markdown=body.markdown,
+                conversation_id=body.conversation_id,
             )
             if settings.inline_worker:
                 background_tasks.add_task(
                     service.process_job, identity.owner_id, accepted.job_id
                 )
             return accepted
+        except Exception as exc:
+            raise as_http_error(exc) from exc
+
+    @app.get("/v1/generated-documents/{document_id}/source")
+    async def generated_source(
+        document_id: UUID,
+        identity: Principal = Depends(agent_principal),
+    ) -> dict[str, Any]:
+        try:
+            document = await service.generated_source(identity.owner_id, document_id)
+            return document.model_dump(mode="json", include={"id", "title", "body_markdown", "revision", "status"})
         except Exception as exc:
             raise as_http_error(exc) from exc
 
@@ -470,9 +484,10 @@ def create_app(
         identity: Principal = Depends(principal),
         group: str | None = Query(default=None, max_length=80),
         limit: int = Query(default=50, ge=1, le=200),
+        conversation_id: UUID | None = Query(default=None),
     ) -> list[dict[str, Any]]:
         try:
-            documents = await service.list_documents(identity.owner_id, group, limit)
+            documents = await service.list_documents(identity.owner_id, group, limit, conversation_id)
             return [
                 document.model_dump(
                     mode="json",
@@ -480,6 +495,29 @@ def create_app(
                 )
                 for document in documents
             ]
+        except Exception as exc:
+            raise as_http_error(exc) from exc
+
+    @app.post("/v1/documents/{document_id}/offer-download")
+    async def offer_download(
+        document_id: UUID, body: DocumentDownloadOffer,
+        identity: Principal = Depends(agent_principal),
+    ) -> dict[str, Any]:
+        try:
+            return await service.offer_document_download(identity.owner_id, document_id, body.conversation_id)
+        except Exception as exc:
+            raise as_http_error(exc) from exc
+
+    @app.get("/v1/documents/{document_id}/download")
+    async def download_document(
+        document_id: UUID, identity: Principal = Depends(principal),
+    ) -> Response:
+        try:
+            document, payload, media_type = await service.download_document(identity.owner_id, document_id)
+            return Response(payload, media_type=media_type, headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(service.download_filename(document), safe='')}",
+                "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+            })
         except Exception as exc:
             raise as_http_error(exc) from exc
 

@@ -12,7 +12,8 @@ for (const endpoint of ['settings', 'conversations']) {
     const connection = page.locator('.site-header .connection-pill');
     await expect(connection).toHaveText('Reconnecting');
     await expect(page.locator('.notice')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Wake NorthPointe' })).toBeDisabled();
+    // The agent's name is unavailable until the initial conversation load succeeds.
+    await expect(page.getByRole('button', { name: /^Wake / })).toBeDisabled();
     failing = false;
     await expect(connection).toHaveText('Connected');
     await expect(connection).not.toHaveAttribute('title');

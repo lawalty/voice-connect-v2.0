@@ -1,5 +1,6 @@
 import { DEFAULT_SPEECH, type InstallationSpeech, type RecognizerKind, type SpeechPreferences } from '../contract/types';
 import { DEFAULT_FISH_DELIVERY, FISH_DELIVERIES } from '../contract/fish-delivery';
+import { DEFAULT_TRANSCRIPT_RULES } from '../contract/transcript-normalization';
 
 export function restoreSpeechPreferences(raw: string | null): SpeechPreferences {
   try {
@@ -22,6 +23,8 @@ export function restoreSpeechPreferences(raw: string | null): SpeechPreferences 
       interruptionSensitivity: typeof saved.interruptionSensitivity === 'number' && Number.isFinite(saved.interruptionSensitivity)
         ? Math.min(100, Math.max(0, saved.interruptionSensitivity)) : DEFAULT_SPEECH.interruptionSensitivity,
       audioCues: typeof saved.audioCues === 'boolean' ? saved.audioCues : DEFAULT_SPEECH.audioCues,
+      audioVuMeters: typeof saved.audioVuMeters === 'boolean' ? saved.audioVuMeters : DEFAULT_SPEECH.audioVuMeters,
+      allowInterruptions: typeof saved.allowInterruptions === 'boolean' ? saved.allowInterruptions : DEFAULT_SPEECH.allowInterruptions,
       handsFree: recognition !== 'browser' && (typeof saved.handsFree === 'boolean' ? saved.handsFree : turnMode !== 'manual'),
       turnMode,
     };
@@ -34,5 +37,5 @@ export function selectRecognizer(prefs: SpeechPreferences, recognition: Recogniz
 
 /** Installation choices override stale device selections, never the other way around. */
 export function installationPreferences(device: SpeechPreferences, saved: InstallationSpeech): SpeechPreferences {
-  return selectRecognizer({ ...device, output: saved.output, fishVoice: saved.fishVoice, fishDelivery: saved.fishDelivery ?? DEFAULT_FISH_DELIVERY }, saved.recognition);
+  return selectRecognizer({ ...device, output: saved.output, fishVoice: saved.fishVoice, fishDelivery: saved.fishDelivery ?? DEFAULT_FISH_DELIVERY, showTranscriptions: saved.showTranscriptions ?? false, transcriptRules: saved.transcriptRules ?? DEFAULT_TRANSCRIPT_RULES }, saved.recognition);
 }

@@ -124,6 +124,11 @@ class Document(BaseModel):
     chunk_count: int = Field(default=0, ge=0)
 
 
+class DocumentDownloadOffer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    conversation_id: UUID | None = None
+
+
 class Job(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: UUID
@@ -198,6 +203,7 @@ class UrlIngestRequest(BaseModel):
 class GeneratedDocumentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     markdown: str = Field(min_length=1, max_length=200_000)
+    conversation_id: UUID | None = None
 
     @field_validator("title", "markdown")
     @classmethod
@@ -208,6 +214,7 @@ class GeneratedDocumentCreate(BaseModel):
 class GeneratedDocumentUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     markdown: str = Field(min_length=1, max_length=200_000)
+    conversation_id: UUID | None = None
 
     @field_validator("title", "markdown")
     @classmethod

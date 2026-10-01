@@ -16,9 +16,10 @@ class FakeRecognizer {
   stop() { this.running = false; }
   partial(text: string) { this.events.result({ text, final: false, turnComplete: false }); }
 }
-interface OutputEvents { started(): void; ended(): void; error(message: string): void }
+interface OutputEvents { started(): void; ended(): void; error(message: string): void; reference(audio:{samples:Float32Array;sampleRate:number;startTime:number}):void }
 class FakeOutput {
   words: string[] = []; finished = false;
+  prepare = vi.fn();
   readonly events: OutputEvents;
   constructor(_preferences: SpeechPreferences | AudioContext, eventsOrConversation: OutputEvents | string, _voice?: string, premiumEvents?: OutputEvents, readonly delivery?: string) {
     this.events = typeof eventsOrConversation === 'string' ? premiumEvents! : eventsOrConversation; fixture.outputs.push(this);
@@ -70,10 +71,10 @@ class FakeWorker {
   terminate() {}
 }
 class FakeWorklet {
-  port = { onmessage: undefined as ((event: { data: object }) => void) | undefined, postMessage() {} };
+  port = { onmessage: undefined as ((event: { data: object }) => void) | undefined, postMessage: vi.fn() };
   constructor() { capture = this; }
   connect() {} disconnect() {}
-  frame(value = 0.25) { this.port.onmessage?.({ data: { samples: new Float32Array(512).fill(value), dropped: 0 } }); }
+  frame(value = 0.25, endTime?: number, dropped = 0) { this.port.onmessage?.({ data: { samples: new Float32Array(512).fill(value), dropped, endTime } }); }
 }
 async function drain() { for (let i = 0; i < 8; i++) await Promise.resolve(); }
 async function frame(transition: 'start' | 'end' | null = null, value = transition === 'end' ? 0 : 0.25, interruption = false) {
@@ -108,7 +109,7 @@ beforeEach(() => {
   vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' });
   vi.stubGlobal('Worker', FakeWorker); vi.stubGlobal('AudioWorkletNode', FakeWorklet);
   vi.stubGlobal('AudioContext', class {
-    state = 'running'; sampleRate = 48000; destination = {}; audioWorklet = { addModule: async () => {} };
+    state = 'running'; currentTime = 0; sampleRate = 48000; destination = {}; audioWorklet = { addModule: async () => {} };
     async resume() {} async close() {}
     createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
   });
@@ -116,6 +117,76 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it.each(['browser', 'fish'] as const)('starts an opening phrase before completion through %s and keeps every following word', async output => {
+    vi.useFakeTimers(); const run = setup();
+    run.engine.prepareSpeech({ ...preferences, output }, 'opening-phrase'); run.engine.awaitReply();
+    run.engine.speak('**An imaginary garden is a peaceful place with col');
+    expect(microphone).not.toHaveBeenCalled();
+    if (output === 'fish') expect(fixture.outputs[0]!.prepare).toHaveBeenCalledOnce();
+    expect(fixture.outputs.flatMap(item => item.words)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(299); expect(fixture.outputs.flatMap(item => item.words)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fixture.outputs[0]!.words).toEqual(['An imaginary garden is a peaceful place with']);
+    expect(fixture.outputs[0]!.finished).toBe(false); expect(run.phases.at(-1)).toBe('speaking');
+    run.engine.speak('orful flowers and winding paths.** More to follow'); run.engine.responseDone();
+    expect(fixture.outputs[0]!.words).toEqual(['An imaginary garden is a peaceful place with', 'colorful flowers and winding paths.', 'More to follow']);
+    expect(fixture.outputs).toHaveLength(1); expect(fixture.outputs[0]!.finished).toBe(true);
+    fixture.outputs[0]!.end(); expect(run.phases.at(-1)).toBe('off');
+  });
+  it('cancels a pending opening phrase and fences late warmup callbacks without restarting audio', async () => {
+    vi.useFakeTimers(); const run = setup();
+    run.engine.prepareSpeech({ ...preferences, output: 'fish' }, 'cancel-warmup'); run.engine.awaitReply();
+    run.engine.speak('This opening sentence has enough complete words but no ending yet');
+    const warm = fixture.outputs[0]!;
+    run.engine.interrupt(); warm.events.started(); warm.end();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(warm.words).toEqual([]); expect(warm.cancel).toHaveBeenCalled();
+    expect(run.phases.at(-1)).toBe('off');
+    run.engine.awaitReply(); run.engine.speak('The next turn can speak.'); run.engine.responseDone();
+    expect(fixture.outputs[1]!.words).toEqual(['The next turn can speak.']);
+  });
+  it('meters captured sounds before speech filtering and clears muted, paused, stale and stopped input', async () => {
+    const run = setup();
+    await run.engine.start(preferences, 'meter-conversation');
+    run.callbacks.onSignal.mockClear();
+    detector.holdSignals = true;
+    // No speech decision has returned: a background sound must still register.
+    capture.frame(.05);
+    expect(run.engine.microphoneLevel()).toBeCloseTo(.5);
+    expect(run.callbacks.onSignal).not.toHaveBeenCalled();
+    expect(microphone).toHaveBeenCalledTimes(1);
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 201);
+    expect(run.engine.microphoneLevel()).toBe(0);
+    clock.mockRestore();
+    capture.frame(.2);
+    expect(run.engine.microphoneLevel()).toBe(1);
+    run.engine.mute(true);
+    expect(run.engine.microphoneLevel()).toBe(0);
+    run.engine.mute(false);
+    expect(run.engine.microphoneLevel()).toBe(0);
+    capture.frame(.05);
+    expect(run.engine.microphoneLevel()).toBeCloseTo(.5);
+    run.engine.pauseInput();
+    expect(run.engine.microphoneLevel()).toBe(0);
+    await run.engine.resumeInput();
+    expect(run.engine.microphoneLevel()).toBe(0);
+    capture.frame(.05);
+    expect(run.engine.microphoneLevel()).toBeCloseTo(.5);
+    run.engine.stop();
+    expect(run.engine.microphoneLevel()).toBe(0);
+  });
+  it('feeds face motion from Fish playback and fences cancelled audio references', async () => {
+    const run=setup();await run.engine.start({...preferences,output:'fish'},'face-timing');
+    run.engine.awaitReply();run.engine.speak('A spoken answer.');
+    const output=fixture.outputs[0]!;
+    const audio={samples:new Float32Array(2400).fill(.15),sampleRate:24000,startTime:0};
+    output.events.reference(audio);expect(run.engine.faceSpeech().open).toBeGreaterThan(.4);
+    run.engine.setSpeakerMuted(true);expect(run.engine.faceSpeech().open).toBe(0);
+    output.events.reference(audio);expect(run.engine.faceSpeech().open).toBe(0);
+    run.engine.setSpeakerMuted(false);run.engine.interrupt();run.engine.awaitReply();run.engine.speak('A new answer.');
+    fixture.outputs[1]!.events.reference(audio);expect(run.engine.faceSpeech().open).toBeGreaterThan(.4);
+    run.engine.interrupt();expect(run.engine.faceSpeech().open).toBe(0);
+  });
   it.each(['browser', 'fish'] as const)('speaks ephemeral commentary with %s, returns to work, and gives the answer priority', async output => {
     const run = setup(); await run.engine.start({ ...preferences, output, fishDelivery: 'soft' }, 'commentary');
     run.engine.awaitReply();
@@ -199,6 +270,88 @@ describe('automatic continuous VoiceEngine orchestration', () => {
       ['voice-start', undefined], ['voice-stop', 'settings'],
     ]);
     expect(events[1]!.values.phase).toBe('speaking'); expect(run.turns).toEqual([]);
+  });
+
+  it('waits for VAD consumption before returning microphone credit', async () => {
+    const run = setup(); await run.engine.start(preferences, 'capture-credit');
+    detector.holdSignals = true;
+    for (let i = 0; i < 8; i++) capture.frame();
+    expect(capture.port.postMessage).not.toHaveBeenCalled();
+    detector.transition(null);
+    expect(capture.port.postMessage).toHaveBeenCalledExactlyOnceWith('ack');
+    expect(run.notices.some(value => value.includes('keep up'))).toBe(false);
+  });
+
+  it('keeps continuous audio after a UI stall and still rejects a real capture gap mid-turn', async () => {
+    vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });
+    const run = setup(); await run.engine.start(preferences, 'delayed-capture');
+    detector.nextTransition = 'start'; capture.frame(.25, 1); await drain();
+    fixture.recognizers[0]!.partial('Keep this unfinished thought');
+    await vi.advanceTimersByTimeAsync(900);
+    capture.frame(.25, 1.032); await drain();
+    expect(run.notices.some(value => value.includes('gap'))).toBe(false);
+    expect(fixture.recognizers[0]!.running).toBe(true);
+    capture.frame(.25, 2.032); await drain();
+    expect(run.notices.at(-1)).toContain('unexpected gap');
+    expect(run.drafts.at(-1)).toBe('Keep this unfinished thought');
+    expect(run.turns).toEqual([]);
+    expect(fixture.recognizers[0]!.running).toBe(false);
+  });
+
+  it.each(['frame', 'overflow'])('preserves the draft and rejects late endpoints after actual audio loss (%s)', async kind => {
+    const sockets = installFluxSocket(), run = setup();
+    await run.engine.start({ ...preferences, recognition: 'deepgram' }, 'lost-audio');
+    sockets[0]!.event({ type: 'stt', text: 'My unfinished sentence', started: true, final: false, turnComplete: false });
+    if (kind === 'frame') capture.frame(.25, 1, 512);
+    else capture.port.onmessage?.({ data: { type: 'overflow', dropped: 512 } });
+    await drain();
+    sockets[0]!.event({ type: 'stt', text: 'Do not send this incomplete turn', final: true, turnComplete: true });
+    expect(run.notices.at(-1)).toContain('Microphone processing fell behind');
+    expect(run.drafts.at(-1)).toBe('My unfinished sentence'); expect(run.turns).toEqual([]);
+  });
+
+  it('disables spoken interruptions for local speech and resumes normal automatic turns after playback', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, allowInterruptions: false }, 'no-barge-local');
+    run.engine.awaitReply(); run.engine.speak('Finish this entire answer.');
+    const output = fixture.outputs[0]!, recognizer = fixture.recognizers[0]!;
+    await frame('start', .5, true);
+    recognizer.events.result({ text: 'Ignore during reply', final: true, turnComplete: true });
+    expect(run.callbacks.onInterrupt).not.toHaveBeenCalled(); expect(output.cancel).not.toHaveBeenCalled();
+    expect(recognizer.frames).toEqual([]); expect(run.turns).toEqual([]);
+    const track = (await microphone.mock.results[0]!.value).getAudioTracks()[0];
+    expect(track.stop).not.toHaveBeenCalled(); expect(track.enabled).toBe(true);
+    run.engine.responseDone(); output.end();
+    expect(run.phases.at(-1)).toBe('listening');
+    await frame('start'); recognizer.finals.push('Now my next whole thought.'); await frame('end');
+    expect(run.turns).toEqual(['Now my next whole thought.']);
+  });
+
+  it('keeps Deepgram alive with silence when interruptions are off and permits manual Interrupt', async () => {
+    const sockets = installFluxSocket(), run = setup();
+    await run.engine.start({ ...preferences, recognition: 'deepgram', allowInterruptions: false }, 'no-barge-premium');
+    run.engine.awaitReply(); run.engine.speak('An answer that should keep playing.');
+    const output = fixture.outputs[0]!;
+    for (let i = 0; i < 4; i++) await frame('start', .5, true);
+    sockets[0]!.event({ type: 'stt', text: 'A stray provider endpoint', started: true, final: true, turnComplete: true });
+    expect(sockets[0]!.pcm().length).toBeGreaterThan(0); expect(sockets[0]!.pcm().every(sample => sample === 0)).toBe(true);
+    expect(run.turns).toEqual([]); expect(output.cancel).not.toHaveBeenCalled();
+    run.engine.interrupt('manual');
+    expect(output.cancel).toHaveBeenCalledOnce(); expect(run.callbacks.onInterrupt).toHaveBeenCalledOnce();
+    sockets[0]!.event({ type: 'stt', text: 'My complete next turn.', started: true, final: true, turnComplete: true });
+    expect(run.turns).toEqual(['My complete next turn.']);
+  });
+
+  it('cannot revive ignored speech from a late VAD result after a non-interruptible reply ends', async () => {
+    const run = setup(); await run.engine.start({ ...preferences, allowInterruptions: false }, 'late-off-barge');
+    run.engine.awaitReply(); run.engine.speak('Wait for this reply.');
+    detector.holdSignals = true; capture.frame(.5);
+    run.engine.responseDone(); fixture.outputs[0]!.end();
+    detector.transition('start', true);
+    expect(fixture.recognizers[0]!.frames).toEqual([]);
+    expect(run.phases.at(-1)).toBe('listening'); expect(run.callbacks.onInterrupt).not.toHaveBeenCalled();
+    detector.holdSignals = false; await frame('start');
+    fixture.recognizers[0]!.finals.push('Fresh input after the reply.'); await frame('end');
+    expect(run.turns).toEqual(['Fresh input after the reply.']);
   });
 
   it('reconnects premium recognition during playback without replacing the microphone or cancelling speech', async () => {
@@ -369,6 +522,38 @@ describe('automatic continuous VoiceEngine orchestration', () => {
     expect(contexts[0]!.close).toHaveBeenCalledOnce();
     lateOldEvent?.(); // A retired output must not stop the new microphone session.
     expect(run.phases.at(-1)).toBe('listening');
+    expect(run.callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it.each(['continue', 'cancel', 'restart'])('waits for retired Android audio resources before capture, including %s during close', async action => {
+    Object.assign(navigator, { userAgent: 'Mozilla/5.0 (Linux; Android 16)' });
+    let finishClose!: () => void;
+    const closing = new Promise<void>(resolve => { finishClose = resolve; });
+    const contexts: DelayedContext[] = [];
+    class DelayedContext {
+      state = 'running'; sampleRate = 48000; destination = {}; audioWorklet = { addModule: async () => {} };
+      onstatechange: (() => void) | null = null;
+      readonly index = contexts.length;
+      close = vi.fn(async () => { if (this.index === 0) await closing; this.state = 'closed'; });
+      async resume() {}
+      createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+      constructor() { contexts.push(this); }
+    }
+    vi.stubGlobal('AudioContext', DelayedContext);
+    const run = setup();
+    run.engine.prepareSpeech({ ...preferences, output: 'fish' }, 'one-conversation');
+    const starting = run.engine.start(preferences, 'one-conversation');
+    await drain();
+    expect(contexts[0]!.close).toHaveBeenCalledOnce();
+    expect(microphone).not.toHaveBeenCalled();expect(contexts).toHaveLength(1);
+    let replacement: Promise<void> | undefined;
+    if (action === 'cancel') run.engine.stop();
+    if (action === 'restart') replacement = run.engine.start(preferences, 'one-conversation');
+    await drain();expect(microphone).not.toHaveBeenCalled();
+    finishClose();await Promise.all([starting, replacement]);
+    expect(microphone).toHaveBeenCalledTimes(action === 'cancel' ? 0 : 1);
+    expect(contexts).toHaveLength(action === 'cancel' ? 1 : 2);
+    expect(run.phases.at(-1)).toBe(action === 'cancel' ? 'off' : 'listening');
     expect(run.callbacks.onError).not.toHaveBeenCalled();
   });
 

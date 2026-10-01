@@ -8,26 +8,30 @@ import { bridgeFishAudio } from '../service/fish';
 import { PremiumOutput } from '../client/audio/output';
 import { PCM_BYTES_PER_SECOND, PCM_RATE } from '../contract/audio-flow';
 
-it('streams three minutes through real sockets, plays before input ends, and drains every sample in order', async () => {
+it.each([false, true])('streams three minutes through real sockets with timing=%s and drains every sample and word', async timing => {
   const provider = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   const app = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await Promise.all([once(provider, 'listening'), once(app, 'listening')]);
   const address = (server: WebSocketServer) => `ws://127.0.0.1:${(server.address() as { port: number }).port}`;
   const expected = createHash('sha256'), actual = createHash('sha256');
+  const captions: string[] = []; let chunk = 0;
   let cursor = 0, receivedSamples = 0, maximumAhead = 0, beganBeforeDone = false, inputDone = false;
   provider.on('connection', socket => socket.on('message', bytes => {
     const event = decode(new Uint8Array(bytes as Buffer)) as { event: string };
     if (event.event === 'text') {
+      const content = chunk === 0 ? 'Here is the first passage.' : 'Here is the second passage.';
+      const metadata = { chunk_seq: chunk, chunk_audio_offset_sec: chunk * 90, content, alignment: { audio_duration: 90,
+        segments: content.split(' ').map((text, index) => ({ text, start: index * 15, end: index * 15 + 1 })) } }; chunk++;
       // Each of two coherent passages yields 90 seconds almost instantly.
       for (let block = 0; block < 90; block++) {
         const pcm = Buffer.alloc(PCM_BYTES_PER_SECOND);
         for (let i = 0; i < PCM_RATE; i++) pcm.writeInt16LE((cursor++ % 30000) - 15000, i * 2);
-        expected.update(pcm); socket.send(encode({ event: 'audio', audio: pcm }));
+        expected.update(pcm); socket.send(encode({ event: 'audio', audio: pcm, ...(block === 0 ? metadata : {}) }));
       }
     } else if (event.event === 'stop') socket.send(encode({ event: 'finish', reason: 'stop' }));
   }));
   app.on('connection', client => bridgeFishAudio(client, 'fixture-key', 'fixture-voice', () => true,
-    (_url, options) => new WebSocket(address(provider), options)));
+    (_url, options) => new WebSocket(address(provider), options), undefined, timing));
   vi.stubGlobal('location', { href: address(app).replace('ws:', 'http:'), protocol: 'http:' });
   vi.stubGlobal('WebSocket', WebSocket);
   const began = performance.now(), timers = new Set<ReturnType<typeof setTimeout>>();
@@ -69,12 +73,14 @@ it('streams three minutes through real sockets, plays before input ends, and dra
       // The second passage and final boundary do not exist at first playback.
       setTimeout(() => { output.enqueue('Here is the second passage.'); inputDone = true; output.finish(); }, 25);
     },
-    ended: resolve, error: message => reject(new Error(message)),
+    progress: text => captions.push(text), ended: resolve, error: message => reject(new Error(message)),
   });
   try {
     output.enqueue('Here is the first passage.');
     await finished;
     expect(beganBeforeDone).toBe(true); expect(maximumAhead).toBeLessThanOrEqual(4.1);
+    if (timing) expect(captions.at(-1)).toBe('Here is the first passage. Here is the second passage');
+    else expect(captions).toEqual([]);
     expect(receivedSamples).toBe(PCM_RATE * 180); expect(actual.digest('hex')).toBe(expected.digest('hex'));
   } finally {
     output.dispose(); for (const timer of timers) clearTimeout(timer);

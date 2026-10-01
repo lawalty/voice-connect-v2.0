@@ -1,3 +1,4 @@
+import { installationFixture } from './installation-fixture';
 import {test,expect,type Page,type BrowserContext} from '@playwright/test';
 import { waitForFixtureBudget } from './fixture-budget';
 
@@ -17,6 +18,7 @@ async function enterPrivateSpace(page:Page,context:BrowserContext){
 }
 
 async function useNativeSpeechFixture(page:Page){
+  await installationFixture(page, { showTranscriptions: true });
   await page.addInitScript(()=>{
     // This fixture deliberately exercises the supported browser fallback, not the new-device default.
     localStorage.setItem('vc2:speech',JSON.stringify({recognition:'browser',output:'browser',handsFree:false}));
@@ -59,7 +61,7 @@ test('active reply remains speakable after a history reconciliation without repl
   await page.getByRole('button',{name:'NorthPointe',exact:true}).click();
   await page.getByRole('button',{name:'Begin a new conversation',exact:true}).click();
   await page.getByRole('button',{name:'Wake NorthPointe',exact:true}).click();
-  await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   await page.evaluate(()=>(window as unknown as {vcTestSpeech:{emit(text:string):void}}).vcTestSpeech.emit('A spoken history reconciliation test.'));
   await page.getByRole('button',{name:'Finish thought',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>(window as unknown as {vcSpeechReconcile:{held:{type:string}[]}}).vcSpeechReconcile.held.some(event=>event.type==='complete'))).toBe(true);
@@ -93,7 +95,7 @@ for(const handoff of ['Edit as text'] as const){
     await composer.fill('An existing typed thought.');
     await page.getByRole('button',{name:'Back to orb'}).click();
     await page.getByRole('button',{name:'Wake NorthPointe'}).click();
-    await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
+    await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     await page.evaluate(()=>(window as unknown as {vcTestSpeech:{emit(text:string):void}}).vcTestSpeech.emit('Words spoken before typing.'));
     await expect(page.getByRole('region',{name:'Voice conversation'}).getByText('Words spoken before typing.',{exact:true})).toBeVisible();
     await page.getByRole('button',{name:'Edit as text',exact:true}).click();
@@ -127,7 +129,7 @@ for(const source of ['voice','text'] as const){
     await composer.fill('An earlier typed draft.');
     await page.getByRole('button',{name:'Back to orb'}).click();
     await page.getByRole('button',{name:'Wake NorthPointe'}).click();
-    await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
+    await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     if(source==='voice'){
       await page.evaluate(()=>(window as unknown as {vcTestSpeech:{emit(text:string):void}}).vcTestSpeech.emit('A complete spoken turn.'));
       await expect(page.getByRole('region',{name:'Voice conversation'}).getByText('A complete spoken turn.',{exact:true})).toBeVisible();
@@ -146,7 +148,7 @@ for(const source of ['voice','text'] as const){
       if(source==='voice'){
         await page.getByRole('button',{name:'End voice session',exact:true}).click();
         await page.getByRole('button',{name:'Wake NorthPointe',exact:true}).click();
-        await expect(page.getByText('Listening to you',{exact:true})).toBeVisible();
+        await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
         await page.evaluate(()=>(window as unknown as {vcTestSpeech:{emit(text:string):void}}).vcTestSpeech.emit('A second completed thought.'));
         await page.getByRole('button',{name:'Finish thought',exact:true}).click();
         await expect(page.getByRole('button',{name:'Wake NorthPointe',exact:true})).toBeEnabled();

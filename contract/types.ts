@@ -1,4 +1,5 @@
 import { DEFAULT_FISH_DELIVERY, type FishDelivery } from './fish-delivery.js';
+import { DEFAULT_TRANSCRIPT_RULES, type TranscriptNormalizationRule } from './transcript-normalization.js';
 export type RecognizerKind = 'browser' | 'vosk' | 'deepgram';
 export type OutputKind = 'browser' | 'fish';
 export type VoicePhase = 'off' | 'starting' | 'listening' | 'hearing' | 'finalizing' | 'thinking' | 'working' | 'thinking-commentary' | 'working-commentary' | 'speaking' | 'reconnecting' | 'paused' | 'standby' | 'error';
@@ -14,20 +15,32 @@ export interface SpeechPreferences {
   keepAwake: boolean;
   /** Device-local interruption threshold: 0 is least sensitive, 100 is most sensitive. */
   interruptionSensitivity?: number;
+  /** Device-local opt-out from voice-triggered interruption; manual Interrupt remains available. */
+  allowInterruptions?: boolean;
   /** Brief sounds when ready for a turn and when that listening window closes. */
   audioCues?: boolean;
+  /** Device-local visibility of the orb's microphone VU meters. */
+  audioVuMeters?: boolean;
+  /** Installation-wide visibility of live transcription over the orb. */
+  showTranscriptions?: boolean;
+  /** Installation-wide, case-insensitive preferred spellings for recognized speech only. */
+  transcriptRules?: TranscriptNormalizationRule[];
 }
 export const DEFAULT_SPEECH: SpeechPreferences = {
   recognition: 'vosk', output: 'browser', browserVoice: '', fishVoice: '', handsFree: true, turnMode: 'automatic', keepAwake: true,
-  interruptionSensitivity: 50, audioCues: true, fishDelivery: DEFAULT_FISH_DELIVERY,
+  interruptionSensitivity: 50, allowInterruptions: true, audioCues: true, audioVuMeters: true, fishDelivery: DEFAULT_FISH_DELIVERY, showTranscriptions: false,
+  transcriptRules: DEFAULT_TRANSCRIPT_RULES,
 };
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }
 export interface HarnessCapabilities { connected: boolean; images: boolean; cancellation: boolean; approvals: boolean; version: string; reason?: string; }
+export interface AgentIdentity { id: string; name: string; }
 export interface AppStatus { ownerConfigured: boolean; authenticated: boolean; build: string; csrfToken?: string; }
 export interface InstallationSpeech {
   version: 1; revision: number; setupComplete: boolean;
   recognition: RecognizerKind; output: OutputKind; fishVoice: string;
   fishDelivery?: FishDelivery;
+  showTranscriptions?: boolean;
+  transcriptRules?: TranscriptNormalizationRule[];
 }
 export interface HostModelStatus {
   id: string; installed: boolean; state: 'missing' | 'downloading' | 'extracting' | 'loading' | 'ready' | 'error' | 'unavailable';
@@ -61,11 +74,13 @@ export type AudioEvent =
   | { type: 'ready'; sampleRate: number; playbackWindowBytes?: number }
   | { type: 'stt'; text: string; final: boolean; turnComplete: boolean; started?: boolean }
   | { type: 'speech-done' }
+  | { type: 'speech-alignment'; alignment: import('./speech-alignment').SpeechAlignment }
   | { type: 'interrupted' }
   | { type: 'error'; message: string; retryable?: boolean };
 export interface ModelManifest { id: string; url: string; sha256: string; bytes: number; license: string; sampleRate: number; }
 export interface HarnessAdapter {
   capabilities(): HarnessCapabilities;
+  identity(conversationId: string): Promise<AgentIdentity>;
   history(conversationId: string, options?: HistoryOptions): Promise<ConversationView>;
   send(conversationId: string, turn: TurnRequest): Promise<TurnReceipt>;
   abort(conversationId: string, turnId: string): Promise<void>;

@@ -27,8 +27,9 @@ existing media-volume setting.
 
 ## Change
 
-On Android, every voice-session start retires its previous AudioContext and waits
-for microphone capture before opening a fresh output context. The existing shared
+On Android, every voice-session start retires its previous AudioContext, waits
+for its asynchronous close to finish, then acquires microphone capture before
+opening a fresh output context. The existing shared
 clock is retained throughout that session for capture, playback, cues and echo
 reference. No context restart occurs between conversational turns. Echo
 cancellation, noise suppression, streaming, and playback pacing remain enabled.
@@ -52,3 +53,21 @@ fresh output on restart, one clock across turns, and late retired-context events
 Live deployment and physical Fish audibility must also be checked; an isolated
 route probe or an automated desktop browser cannot establish either by itself.
 Bluetooth, headsets, other Android models and iOS are outside this reproduction.
+
+## September 28 follow-up: quiet playback after selecting a face
+
+The owner reported quiet playback and ineffective volume buttons on Android
+after deploying the animated face. The release comparison found no changes to
+PCM scaling, playback gain, destination, or Fish synthesis settings. A new
+regression check verifies that lip-sync feature extraction and sampling leave
+the playback samples unchanged. This does not establish physical audibility.
+
+The restart path did detach the previous context without awaiting `close()`.
+A delayed-close regression reproduced new capture opening before that release
+finished. Startup now waits, including when a second start supersedes the first;
+cancelling during the wait cannot reopen capture. The non-Android activation
+path and the shared clock between conversational turns remain unchanged.
+
+This is a verified lifecycle correction, not a confirmed reproduction of the
+owner's current volume symptom. Physical Android volume-button acceptance is
+pending; no phone was attached during these follow-up checks.

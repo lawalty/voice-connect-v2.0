@@ -23,6 +23,7 @@ import { LibraryClient } from './library.js';
 import { registerLibraryRoutes } from './library-routes.js';
 import { SpeechSettings, speechSelection } from './speech-settings.js';
 import { VoskHost } from './vosk.js';
+import { registerOrbRoutes } from './orbs.js';
 
 const password=z.string().min(12).max(256);
 const id=z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
@@ -82,7 +83,8 @@ export async function buildApp(options:AppOptions={}) {
   });
   app.get('/health',async()=>({ready:true,build:cfg.build,openclaw:gateway.capabilities().connected}));
   app.get('/api/status',async req=>status(req));
-  registerLibraryRoutes(app,new LibraryClient(cfg.libraryUrl,cfg.libraryToken));
+  registerLibraryRoutes(app,new LibraryClient(cfg.libraryUrl,cfg.libraryToken),store);
+  registerOrbRoutes(app,store);
   app.get('/api/diagnostics',async()=>({build:cfg.build,gateway:gateway.capabilities(),deviceId:store.get('gateway-device-id'),timings:gateway.diagnostics?.()??[]}));
   const authRate={rateLimit:{max:12,timeWindow:15*60*1000}};
   app.post('/api/auth/setup',{config:authRate},async(req,reply)=>{
@@ -150,6 +152,11 @@ export async function buildApp(options:AppOptions={}) {
   app.delete('/api/settings/fish',async()=>{store.remove('fish');closeProvider('fish');return {ok:true};});
   app.get('/api/conversations',async()=>store.conversations());
   app.post('/api/conversations',async(req,reply)=>{const body=z.object({title:z.string().trim().min(1).max(100).optional()}).strict().parse(req.body??{});if(!store.get('default-agent'))return reply.code(503).send({error:'OpenClaw is connecting. Please try again shortly.'});return store.createConversation(body.title);});
+  app.get('/api/conversations/:id/agent',async(req,reply)=>{
+    const p=z.object({id}).parse(req.params);
+    if(!store.conversation(p.id))return reply.code(404).send({error:'Conversation not found.'});
+    try{return await gateway.identity(p.id);}catch{return reply.code(503).send({error:'Agent identity is temporarily unavailable.'});}
+  });
   app.get('/api/conversations/:id',async(req,reply)=>{const p=z.object({id}).parse(req.params);const options=z.object({before:z.string().max(16000).optional(),since:z.string().max(8192).optional()}).strict().parse(req.query);if(!store.conversation(p.id))return reply.code(404).send({error:'Conversation not found.'});return gateway.history(p.id,options);});
   app.post('/api/conversations/:id/presence',{config:{rateLimit:{max:60,timeWindow:60000}}},async(req,reply)=>{
     const p=z.object({id}).parse(req.params);if(!store.conversation(p.id))return reply.code(404).send({error:'Conversation not found.'});
@@ -199,9 +206,10 @@ export async function buildApp(options:AppOptions={}) {
   });
   app.get('/api/audio',{websocket:true},(socket,req)=>{
     const conversationId=bindSocket(socket,req);if(!conversationId)return;
-    const q=z.object({kind:z.enum(['stt','tts']),provider:z.enum(['deepgram','fish','vosk']).default('deepgram'),voice:id.optional(),fishDelivery:z.enum(FISH_DELIVERIES).optional(),conversationId:id}).strict().safeParse(req.query);
+    const q=z.object({kind:z.enum(['stt','tts']),provider:z.enum(['deepgram','fish','vosk']).default('deepgram'),voice:id.optional(),fishDelivery:z.enum(FISH_DELIVERIES).optional(),timing:z.literal('words').optional(),conversationId:id}).strict().safeParse(req.query);
     const unavailable=(message:string)=>{socket.send(JSON.stringify({type:'error',message}));socket.close(1008,'Speech unavailable');};
     if(!q.success){unavailable('Choose a supported speech provider and voice in Settings.');return;}
+    if(q.data.timing && (q.data.provider!=='fish'||q.data.kind!=='tts')){unavailable('Word timing is available for Fish Audio output only.');return;}
     if(q.data.fishDelivery && (q.data.provider!=='fish'||q.data.kind!=='tts')){unavailable('Delivery cues are available for Fish Audio speech output only.');return;}
     if(q.data.provider==='vosk'){
       if(q.data.kind!=='stt'||q.data.voice){unavailable('Vosk supports recognition only.');return;}
@@ -212,7 +220,7 @@ export async function buildApp(options:AppOptions={}) {
       if(q.data.kind!=='tts'||!q.data.voice){unavailable('Fish Audio needs a voice ID and supports speech output only.');return;}
       const key=store.fishKey();if(!key){unavailable('Save your Fish Audio API key in Settings before testing or using this voice.');return;}
       sockets.get(socket)!.provider='fish';
-      bridgeFishAudio(socket,key,q.data.voice,()=>Boolean(session(req)),undefined,{model:cfg.fishModel,cue:q.data.fishDelivery??speechSettings.read().fishDelivery??DEFAULT_FISH_DELIVERY});return;
+      bridgeFishAudio(socket,key,q.data.voice,()=>Boolean(session(req)),undefined,{model:cfg.fishModel,cue:q.data.fishDelivery??speechSettings.read().fishDelivery??DEFAULT_FISH_DELIVERY},q.data.timing==='words');return;
     }
     if(q.data.kind!=='stt'){unavailable('Deepgram is used for recognition only. Choose Fish Audio or Device voices for speech output.');return;}
     if(q.data.voice){unavailable('Deepgram recognition does not use an output voice.');return;}

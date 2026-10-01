@@ -10,7 +10,7 @@ for (const provider of ['browser', 'fish'] as const) {
     await installationFixture(page, { output: provider, fishVoice: 'fixture' });
     await page.addInitScript(output => {
       localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output, fishVoice: 'fixture', handsFree: false, audioCues: false }));
-      const probe = { spoken: [] as string[], cancelled: 0, captures: 0, tracks: [] as MediaStreamTrack[], emit: (_text: string) => {} };
+      const probe = { spoken: [] as string[], cancelled: 0, captures: 0, tracks: [] as MediaStreamTrack[], emit: (_text: string) => {}, finishFirst: () => {} };
       Object.assign(window, { vcMessengerProbe: probe });
       const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
       navigator.mediaDevices.getUserMedia = async constraints => { probe.captures++; const stream = await capture(constraints); probe.tracks.push(...stream.getAudioTracks()); return stream; };
@@ -24,7 +24,11 @@ for (const provider of ['browser', 'fish'] as const) {
         getVoices: () => [], addEventListener() {}, removeEventListener() {}, cancel() { probe.cancelled++; },
         speak(utterance: SpeechSynthesisUtterance) {
           probe.spoken.push(utterance.text);
-          queueMicrotask(() => { utterance.onstart?.(new Event('start') as SpeechSynthesisEvent); utterance.onend?.(new Event('end') as SpeechSynthesisEvent); });
+          const finish = () => utterance.onend?.(new Event('end') as SpeechSynthesisEvent);
+          // Keep the first reply active through the draft assertion. Immediate
+          // completion otherwise races the normal output.dispose() cancellation.
+          if (probe.spoken.length === 1) probe.finishFirst = finish;
+          queueMicrotask(() => { utterance.onstart?.(new Event('start') as SpeechSynthesisEvent); if (probe.spoken.length !== 1) finish(); });
         },
       } });
     }, provider);
@@ -63,9 +67,13 @@ for (const provider of ['browser', 'fish'] as const) {
     await page.getByRole('button', { name: 'Back to orb' }).click();
     await expect(composer).toHaveCount(0);
     await expect(page.getByRole('log')).toHaveCount(0);
+    if (provider === 'browser') {
+      await page.evaluate(() => (window as unknown as { vcMessengerProbe: { finishFirst(): void } }).vcMessengerProbe.finishFirst());
+      await expect(page.getByRole('button', { name: 'Wake NorthPointe', exact: true })).toBeEnabled();
+    }
     // A finished typed reply may already have put the orb to sleep.
     const wake = page.getByRole('button', { name: 'Wake NorthPointe', exact: true });
-    if (await wake.count()) { await wake.click(); await expect(page.getByText('Listening to you', { exact: true })).toBeVisible(); }
+    if (await wake.count()) { await wake.click(); await expect(page.locator('.orb-stage.phase-listening')).toBeVisible(); }
     await page.getByRole('button', { name: 'Enter standby mode', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Resume conversation', exact: true })).toHaveAttribute('aria-pressed', 'true');
     expect((await state()).capturing).toBe(false);
@@ -77,7 +85,7 @@ for (const provider of ['browser', 'fish'] as const) {
     expect(await count()).toBe(quietCount);
     await page.screenshot({ path: info.outputPath(`messenger-${provider}.png`), fullPage: true });
     await page.getByRole('button', { name: 'Resume conversation', exact: true }).click();
-    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+    await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     await composer.fill('Another typed reply in messenger.'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect.poll(count).toBeGreaterThan(quietCount);
     expect((await state()).capturing).toBe(true);
@@ -99,7 +107,7 @@ for (const provider of ['browser', 'fish'] as const) {
     expect((await state()).capturing).toBe(false);
     await expect(page.getByRole('button', { name: 'Mute microphone' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Resume conversation', exact: true }).click();
-    await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+    await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     const beforeVoice = await count();
     await page.evaluate(() => (window as unknown as { vcMessengerProbe: { emit(text: string): void } }).vcMessengerProbe.emit('A voice reply from messenger.'));
     await page.getByRole('button', { name: 'Finish thought', exact: true }).click();

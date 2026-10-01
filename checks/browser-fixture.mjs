@@ -54,6 +54,21 @@ gateway.on('connection',ws=>{
       const history=sessions.get(p.sessionKey)||[];
       history.push({id:randomUUID(),role:'user',content:[{type:'text',text:p.message}],timestamp:Date.now(),runId});sessions.set(p.sessionKey,history);
       res(receipt);
+      if(p.message.includes('Opening phrase fixture')){
+        const base={sessionKey:p.sessionKey,runId};
+        const opening='**An imaginary garden is a peaceful place with col';
+        const remainder='orful flowers and winding paths.** More to follow.';
+        const group=[
+          setTimeout(()=>event('chat',{...base,seq:3,state:'delta',deltaText:opening}),100),
+          setTimeout(()=>event('agent',{...base,seq:7,stream:'item',data:{kind:'answer_candidate',hideFromChannelProgress:true,progressText:'Private provisional fixture'}}),400),
+          setTimeout(()=>event('chat',{...base,seq:11,state:'delta',deltaText:remainder}),1200),
+          setTimeout(()=>{
+            const message={id:randomUUID(),role:'assistant',content:[{type:'text',text:opening+remainder}],timestamp:Date.now(),runId};
+            history.push(message);event('chat',{...base,seq:17,state:'final',message});timers.delete(runId);
+          },2000),
+        ];
+        timers.set(runId,group);return;
+      }
       if(p.message.includes('Progress commentary fixture')){
         const base={sessionKey:p.sessionKey,runId};
         const progress=(seq,itemId,text)=>event('agent',{...base,seq,stream:'assistant',data:{phase:'commentary',itemId,text,replace:true}});

@@ -31,9 +31,9 @@ test('private entry, continuous text conversation, and refresh preserve history'
   await page.route('**/api/conversations',async route=>{const response=await route.fetch();await historyReady;await route.fulfill({response});},{times:1});
   try{
     await page.reload();
-    await expect(page.getByLabel('Message NorthPointe')).toHaveCount(0);
+    await expect(page.getByRole('textbox',{name:/^Message /})).toHaveCount(0);
     await page.getByRole('button',{name:/Conversation\s*\d/}).click();
-    await expect(page.getByLabel('Message NorthPointe')).toBeDisabled();
+    await expect(page.getByRole('textbox',{name:/^Message /})).toBeDisabled();
     await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
     await expect(page.getByRole('button',{name:'Attach a camera photo',exact:true})).toBeDisabled();
   }finally{releaseHistory();}

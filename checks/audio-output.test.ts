@@ -6,6 +6,32 @@ const BROWSER_PREFERENCES = { browserVoice: '' };
 
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('playback cancellation', () => {
+  it('reveals words at scheduled PCM time, pauses through underruns, and cancels late caption updates', async () => {
+    vi.useFakeTimers(); const sockets: any[] = [], sources: any[] = [];
+    class Socket { static OPEN = 1; readyState = 1; binaryType = ''; onmessage?: (event: { data: string | ArrayBuffer }) => void;
+      constructor() { sockets.push(this); } send() {} close() {} }
+    vi.stubGlobal('WebSocket', Socket); vi.stubGlobal('location', { href: 'https://voice.test', protocol: 'https:' });
+    const context = { currentTime: 0, state: 'running', destination: {},
+      createBuffer: (_n: number, length: number, rate: number) => ({ duration: length / rate, getChannelData: () => new Float32Array(length) }),
+      createBufferSource: () => { const source = { connect() {}, disconnect() {}, start() {}, stop() {}, onended: undefined }; sources.push(source); return source; },
+    } as unknown as AudioContext;
+    const events = { started: vi.fn(), ended: vi.fn(), error: vi.fn(), progress: vi.fn() };
+    const output = new PremiumOutput(context, 'conversation', 'voice', events); output.enqueue('Hello there.');
+    const socket = sockets[0], send = (value: object) => socket.onmessage({ data: JSON.stringify(value) });
+    send({ type: 'ready', sampleRate: 24000 });
+    send({ type: 'speech-alignment', alignment: { chunk: 0, offset: 0, content: 'Hello there.', duration: 1, words: [{ text: 'Hello', start: .1, end: .3 }, { text: 'there', start: .4, end: .8 }] } });
+    socket.onmessage({ data: new ArrayBuffer(48000) }); expect(events.progress).not.toHaveBeenCalled();
+    Object.assign(context, { currentTime: .126 }); await vi.advanceTimersByTimeAsync(34); expect(events.progress).toHaveBeenLastCalledWith('Hello');
+    Object.assign(context, { currentTime: .426 }); await vi.advanceTimersByTimeAsync(34); expect(events.progress).toHaveBeenLastCalledWith('Hello there');
+    Object.assign(context, { currentTime: 1.1 }); sources[0].onended(); output.enqueue('Hello again.');
+    send({ type: 'speech-alignment', alignment: { chunk: 1, offset: 1, content: 'Hello again.', duration: 1, words: [{ text: 'Hello', start: .2, end: .4 }, { text: 'again', start: .5, end: .9 }] } });
+    Object.assign(context, { currentTime: 8 }); await vi.advanceTimersByTimeAsync(100); expect(events.progress).toHaveBeenLastCalledWith('Hello there');
+    socket.onmessage({ data: new ArrayBuffer(48000) });
+    Object.assign(context, { currentTime: 8.226 }); await vi.advanceTimersByTimeAsync(34); expect(events.progress).toHaveBeenLastCalledWith('Hello there. Hello');
+    output.cancel(); const count = events.progress.mock.calls.length;
+    Object.assign(context, { currentTime: 100 }); send({ type: 'speech-alignment', alignment: { chunk: 1, offset: 1, content: 'Hello again.', duration: 1, words: [{ text: 'again', start: 0, end: .1 }] } });
+    await vi.advanceTimersByTimeAsync(1000); expect(events.progress).toHaveBeenCalledTimes(count); expect(vi.getTimerCount()).toBe(0);
+  });
   it('discards queued browser speech and ignores late native callbacks', () => {
     const utterances: { onstart?(): void; onend?(): void }[] = [];
     const synthesis = { speak: (utterance: object) => utterances.push(utterance), cancel: vi.fn(), getVoices: () => [] };
@@ -69,6 +95,7 @@ function browserFixture(activeGesture = false) {
   class FakeUtterance {
     voice?: SpeechSynthesisVoice; lang = ''; volume = 1;
     onstart?: () => void; onend?: () => void; onerror?: (event: { error: string }) => void;
+    onboundary?: (event: { name: string; charIndex: number }) => void;
     constructor(readonly text: string) {}
   }
   const synthesis = {
@@ -78,12 +105,23 @@ function browserFixture(activeGesture = false) {
   };
   vi.stubGlobal('window', { speechSynthesis: synthesis }); vi.stubGlobal('speechSynthesis', synthesis);
   vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance); vi.stubGlobal('navigator', { userActivation: { isActive: activeGesture } });
-  const events = { started: vi.fn(), ended: vi.fn(), error: vi.fn() };
+  const events = { started: vi.fn(), ended: vi.fn(), error: vi.fn(), progress: vi.fn() };
   const output = new BrowserOutput(BROWSER_PREFERENCES, events);
   return { output, events, utterances, synthesis, listeners, setVoices: (value: SpeechSynthesisVoice[]) => { voices = value; }, voicesChanged: () => { for (const listener of [...listeners]) listener(); } };
 }
 
 describe('browser speech readiness and failure visibility', () => {
+  it('uses native word boundaries and cancels its bounded phrase fallback', async () => {
+    vi.useFakeTimers(); const f = browserFixture(); f.output.enqueue('Hello there.'); f.output.enqueue('Next sentence.'); f.output.finish();
+    const first = f.utterances[0]!; first.onstart?.(); first.onboundary?.({ name: 'word', charIndex: 0 });
+    expect(f.events.progress).toHaveBeenLastCalledWith('Hello');
+    await vi.advanceTimersByTimeAsync(600); expect(f.events.progress).toHaveBeenCalledOnce();
+    first.onboundary?.({ name: 'word', charIndex: 6 }); expect(f.events.progress).toHaveBeenLastCalledWith('Hello there.');
+    first.onend?.(); const second = f.utterances[1]!; second.onstart?.();
+    await vi.advanceTimersByTimeAsync(501); expect(f.events.progress).toHaveBeenLastCalledWith('Hello there. Next sentence.');
+    f.output.cancel(); const count = f.events.progress.mock.calls.length; second.onboundary?.({ name: 'word', charIndex: 0 });
+    await vi.advanceTimersByTimeAsync(1000); expect(f.events.progress).toHaveBeenCalledTimes(count); expect(vi.getTimerCount()).toBe(0);
+  });
   it('reports a missing speech API rather than silently finishing', () => {
     const run = browserFixture(); vi.stubGlobal('SpeechSynthesisUtterance', undefined);
     run.output.enqueue('An audible reply.'); run.output.finish();
@@ -194,6 +232,34 @@ function pcmFixture() {
 }
 
 describe('Fish PCM output lifecycle', () => {
+  it('warms without synthesis or an audio timeout, then sends the first real phrase immediately', async () => {
+    vi.useFakeTimers(); const run = pcmFixture(); run.output.prepare();
+    const socket = run.sockets[0]!;
+    socket.event({ type: 'ready', sampleRate: 24000, playbackWindowBytes: PLAYBACK_WINDOW_BYTES });
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(run.events.error).not.toHaveBeenCalled(); expect(run.events.started).not.toHaveBeenCalled();
+    expect(run.operations).toEqual(['playback']);
+    run.output.enqueue('The opening phrase is ready');
+    expect(run.operations).toEqual(['playback', 'speak']);
+    socket.pcm(); expect(run.events.started).toHaveBeenCalledOnce();
+    run.output.cancel(); socket.pcm(); expect(run.sources).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('retries an expired warmup on real input and closes a text-free prepared reply silently', async () => {
+    vi.useFakeTimers(); const run = pcmFixture(); run.output.prepare();
+    const stale = run.sockets[0]!;
+    await vi.advanceTimersByTimeAsync(15001);
+    expect(run.events.error).not.toHaveBeenCalled(); expect(stale.close).toHaveBeenCalledOnce();
+    run.output.enqueue('A new connection can speak.');
+    expect(run.sockets).toHaveLength(2);
+    stale.event({ type: 'ready', sampleRate: 24000 }); stale.pcm();
+    expect(run.sources).toHaveLength(0);
+    run.sockets[1]!.event({ type: 'ready', sampleRate: 24000 }); run.sockets[1]!.pcm();
+    expect(run.events.started).toHaveBeenCalledOnce(); run.output.cancel();
+    const empty = pcmFixture(); empty.output.prepare(); empty.sockets[0]!.event({ type: 'ready', sampleRate: 24000 }); empty.output.finish();
+    expect(empty.events.error).not.toHaveBeenCalled(); expect(empty.events.ended).toHaveBeenCalledOnce();
+    expect(empty.sockets[0]!.close).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+  });
   it('streams a multi-minute reply through a four-second window and acknowledges only finished playback', () => {
     const run = pcmFixture(); run.output.enqueue('The beginning of a long reply.');
     const socket = run.sockets[0]!;

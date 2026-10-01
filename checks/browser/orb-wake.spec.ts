@@ -47,7 +47,7 @@ function probe(page: Page) {
 
 async function ready(page: Page) {
   await page.evaluate(() => (window as unknown as { vcWakeProbe: WakeProbe }).vcWakeProbe.ready());
-  await expect(page.getByText('Listening to you', { exact: true })).toBeVisible();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
   await expect(page.locator('.orb-stage')).toHaveAttribute('data-presence', 'awake');
 }
 

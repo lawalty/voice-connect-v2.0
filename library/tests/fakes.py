@@ -201,6 +201,20 @@ class FakeRepository:
             update={"source_metadata": source_metadata}
         )
 
+    async def compare_document_source_metadata(
+        self, owner_id: UUID, document_id: UUID,
+        expected: dict[str, Any], replacement: dict[str, Any],
+    ) -> bool:
+        document = self.documents.get(document_id)
+        if not document or document.owner_id != owner_id or document.archived_at or document.status != "ready" or document.source_metadata != expected:
+            return False
+        await self.update_document_source_metadata(owner_id, document_id, replacement)
+        return True
+
+    async def document_chunk_count(self, owner_id: UUID, document_id: UUID) -> int:
+        document = self.documents.get(document_id)
+        return len(self.chunks.get(document_id, [])) if document and document.owner_id == owner_id else 0
+
     async def create_generated_document_job(
         self, **values: Any
     ) -> tuple[UUID, UUID, int, str]:
@@ -422,13 +436,16 @@ class FakeRepository:
         return None
 
     async def list_documents(
-        self, owner_id: UUID, group_id: UUID | None, limit: int
+        self, owner_id: UUID, group_id: UUID | None, limit: int,
+        conversation_id: UUID | None = None,
     ) -> list[Document]:
         output = []
         for document in self.documents.values():
             if document.owner_id != owner_id or (
                 group_id and document.group_id != group_id
             ):
+                continue
+            if conversation_id and (document.archived_at or str(conversation_id) not in document.source_metadata.get("vc_conversation_ids", [])):
                 continue
             hydrated = await self.get_document(owner_id, document.id)
             if hydrated is not None:
