@@ -1,0 +1,14 @@
+{
+  "id": "openclaw-host-updater",
+  "name": "OpenClaw Host Updater",
+  "version": "0.1.0",
+  "description": "Owner-requested stable OpenClaw image updates through the private host updater.",
+  "activation": { "onStartup": true },
+  "skills": ["./skills"],
+  "contracts": { "tools": ["openclaw_update", "openclaw_update_status"] },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

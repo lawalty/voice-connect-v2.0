@@ -1,0 +1,27 @@
+[Unit]
+Description=Private OpenClaw host updater
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+RuntimeDirectory=openclaw-updater
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+StateDirectory=openclaw-updater
+StateDirectoryMode=0700
+ExecStart=/usr/bin/python3 /opt/openclaw-updater/current/updater.py serve
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ReadWritePaths=/root/.openclaw /root/.openclaw-auth-profile-secrets /root/openclaw /var/lib/openclaw-updater /run/openclaw-updater
+ProtectSystem=strict
+ReadWritePaths=/opt/openclaw-updater
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+TimeoutStopSec=1800
+
+[Install]
+WantedBy=multi-user.target
