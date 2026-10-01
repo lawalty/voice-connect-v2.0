@@ -190,7 +190,20 @@ try {
   assert.match(recognized.result, /zero one eight zero three$/);
   assert.deepEqual(errors, []);
   console.log('Host WAV recognition passed:', recognized.result);
-  assert.equal((await hostRequest('/model', 'DELETE')).ok, true);
+  // stop() starts an asynchronous WebSocket close across the relay. Wait for
+  // the host to release recognition sessions before testing model removal.
+  const closeDeadline = Date.now() + 5000;
+  let hostStatus;
+  do {
+    const response = await hostRequest('/status');
+    assert.equal(response.ok, true, 'host status is available during recognition cleanup');
+    hostStatus = await response.json();
+    if (hostStatus.activeSessions === 0) break;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  } while (Date.now() < closeDeadline);
+  assert.equal(hostStatus.activeSessions, 0, 'stopped recognizers release all host sessions within five seconds');
+  const removal = await hostRequest('/model', 'DELETE');
+  assert.equal(removal.ok, true, `host model removal failed (${removal.status}): ${await removal.text()}`);
   assert.equal((await (await hostRequest('/status')).json()).installed, false);
   console.log('Host model removal passed.');
 } finally { await browser.close(); await server.close(); relay.close(); worker.kill(); }
