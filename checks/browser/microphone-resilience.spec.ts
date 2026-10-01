@@ -49,11 +49,22 @@ async function fixture(page: Page) {
     } });
   });
   const sockets: WebSocketRoute[] = [], turns: string[] = [];
+  let submittedTurn: string | undefined;
+  const completedTurns = new Set<string>();
   await page.routeWebSocket(url => url.pathname === '/api/audio' && url.searchParams.get('kind') === 'stt', socket => {
     sockets.push(socket); socket.send(JSON.stringify({ type: 'ready', sampleRate: 16000 }));
   });
   page.on('request', request => {
-    if (request.method() === 'POST' && request.url().endsWith('/turns')) turns.push(request.postDataJSON().text);
+    if (request.method() === 'POST' && request.url().endsWith('/turns')) {
+      const turn = request.postDataJSON(); submittedTurn = turn.id; turns.push(turn.text);
+    }
+  });
+  page.on('websocket', socket => {
+    if (new URL(socket.url()).pathname !== '/api/events') return;
+    socket.on('framereceived', frame => {
+      const event = JSON.parse(String(frame.payload));
+      if (event.type === 'complete') completedTurns.add(event.turnId);
+    });
   });
   await enterFixtureSession(page);
   await page.getByRole('button', { name: 'NorthPointe', exact: true }).click();
@@ -66,6 +77,9 @@ async function fixture(page: Page) {
       await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
     },
     async finishPlayback() {
+      // Early speech starts before the complete reply arrives. Keep the fake
+      // player holding audio until all streamed chunks have been received.
+      await expect.poll(() => !!submittedTurn && completedTurns.has(submittedTurn)).toBe(true);
       await page.evaluate(async () => { while (window.vcMicProbe.pending.length) {
         window.vcMicProbe.pending.shift()!.onend?.(new Event('end') as SpeechSynthesisEvent); await Promise.resolve();
       } });
