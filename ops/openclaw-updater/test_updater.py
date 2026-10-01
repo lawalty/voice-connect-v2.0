@@ -183,6 +183,21 @@ class Contracts(unittest.TestCase):
                 updater.restore(root)
             self.assertFalse((root/'restored').exists())
 
+    def test_runtime_verification_requires_a_real_successful_agent_reply(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root/'openclaw.json').write_text(json.dumps({'agents': {'entries': {'northpointe': {}}}}))
+            for value, passes in [({'status': 'ok', 'result': {'payloads': [{'text': 'HOST_UPDATER_OK'}]}}, True), ({'status': 'error'}, False), ({'status': 'ok', 'result': {'payloads': [{'text': 'Something failed'}]}}, False)]:
+                with patch.object(updater, 'CONFIG', root), patch.object(updater, 'run', return_value=json.dumps(value)) as run:
+                    if passes:
+                        updater.verify_agent_runtime('2026.9.7')
+                        command = run.call_args.args[0]
+                        self.assertNotIn('--deliver', command)
+                        self.assertIn('host-updater-health-', command[command.index('--session-key')+1])
+                    else:
+                        with self.assertRaises(updater.UpdateError):
+                            updater.verify_agent_runtime('2026.9.7')
+
 
 if __name__ == '__main__':
     unittest.main()

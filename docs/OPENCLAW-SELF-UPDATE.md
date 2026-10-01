@@ -44,8 +44,11 @@ It does not itself upgrade OpenClaw.
    snapshot with an integrity manifest. Keep the previous immutable image.
 5. Replace only the gateway image, retaining Compose settings, identities,
    sessions, credentials, workspace, browser routing, and unrelated services.
-6. Verify version, Docker health, authenticated native Gateway health, and VC's
-   restored native connection. Record completed status only after these pass.
+6. Verify version, Docker health, authenticated native Gateway health, VC's
+   restored native connection, and an isolated real agent response through the
+   configured harness. Record completed status only after these pass. The small
+   labeled agent check uses the existing model credentials and may incur model
+   usage; it never delivers to an external channel or joins the owner's chat.
 7. On failure after stopping, restore both image and pre-migration state, then
    verify the previous version. Recovery is also attempted after an interrupted
    updater process. Failed recovery is reported honestly; backups are retained.

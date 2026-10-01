@@ -270,10 +270,33 @@ def verify_gateway(version, timeout=180):
             with urllib.request.urlopen('http://127.0.0.1:18880/health', timeout=5) as response:
                 if json.load(response).get('openclaw') is not True:
                     raise UpdateError('voice_connect_not_reconnected')
-            return
+            break
         except (UpdateError, OSError, ValueError):
             time.sleep(3)
-    raise UpdateError('post_update_verification_failed')
+    else:
+        raise UpdateError('post_update_verification_failed')
+    verify_agent_runtime(version)
+
+
+def verify_agent_runtime(version):
+    config = json.loads((CONFIG/'openclaw.json').read_text())
+    entries = config.get('agents', {}).get('entries', {})
+    if not isinstance(entries, dict) or not entries:
+        raise UpdateError('agent_runtime_health_target_missing')
+    agent_id = next(iter(entries))
+    if not re.fullmatch(r'[a-z0-9_-]+', agent_id):
+        raise UpdateError('agent_runtime_health_target_invalid')
+    # An isolated, labeled native turn exercises real harness/tool construction.
+    # It never delivers to an external channel or joins the owner's conversation.
+    session = 'agent:' + agent_id + ':host-updater-health-' + version + '-' + uuid.uuid4().hex[:8]
+    output = run(['docker', 'exec', CONTAINER, 'node', 'openclaw.mjs', 'agent', '--agent', agent_id, '--session-key', session, '--message', 'Automated OpenClaw host-update health check only. Do not use tools, modify memory, or take any other action. Reply with exactly HOST_UPDATER_OK.', '--thinking', 'low', '--timeout', '90', '--json'], timeout=120)
+    try:
+        result = json.loads(output[output.index('{'):])
+        payloads = result.get('result', {}).get('payloads', result.get('payloads', []))
+        if result.get('status') != 'ok' or not any(p.get('text', '').strip() == 'HOST_UPDATER_OK' for p in payloads):
+            raise UpdateError('agent_runtime_health_failed')
+    except (ValueError, TypeError, KeyError):
+        raise UpdateError('agent_runtime_health_failed') from None
 
 
 def perform_update(job, report, release_lookup=stable_release):
