@@ -94,3 +94,21 @@ node --test integrations/openclaw-updater/tools.test.mjs
 
 Python tests require Linux because execution locking and Unix peer credentials
 are native parts of the host contract.
+
+## Live qualification on 2026-10-01
+
+The first owner-requested update stopped during candidate preparation: Docker
+Buildx tried to update its activity cache under the service's read-only
+`/root/.docker`. The gateway remained healthy on 2026.9.6. Moving `DOCKER_CONFIG`
+into the private writable service state fixed the failure without weakening
+`ProtectHome`.
+
+The same host updater then completed the actual 2026.9.6 to 2026.9.7 upgrade.
+Docker/native Gateway health, the real configured-agent response, unchanged VC
+build and restored connection, and the agent-facing status tool passed. The
+paired Windows PC `computer` screenshot observation also succeeded; this was
+read-only, not a click/input test. The stopped-state backup and prior image are
+retained. All 17 Linux updater tests, five Node authority/routing tests, and the
+updater-specific CI workflow passed. Production rollback and immediate spoken
+completion remain unqualified; regression rollback tests do not establish those
+results.
