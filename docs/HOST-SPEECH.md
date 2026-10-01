@@ -8,8 +8,13 @@ not simply accepting an arbitrary API key.
 ## Persistent versus device and session choices
 
 - `/opt/voice-connect-v2/state/preferences.json`: schema version, revision, setup
-  completion, STT provider, TTS provider, Fish voice ID. Owner-only writes use an
+  completion, STT provider, TTS provider, Fish voice ID and delivery, and the
+  `showTranscriptions` display preference. Owner-only writes use an
   atomic replacement and revision check. Credentials never enter this JSON.
+- Settings → Show Transcriptions, below Device diagnostics, controls only the
+  Orb-mode live transcription popup. It defaults off, including for older files
+  without the field. Save preferences persists it across devices and restarts;
+  Messenger's inline transcription and automatic turn submission are unaffected.
 - Existing encrypted SQLite credential storage and separate master key remain.
 - The client reads installation settings before voice starts. Browser storage
   cannot migrate or overwrite provider choices implicitly. Wake refreshes the

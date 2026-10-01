@@ -34,5 +34,5 @@ export function selectRecognizer(prefs: SpeechPreferences, recognition: Recogniz
 
 /** Installation choices override stale device selections, never the other way around. */
 export function installationPreferences(device: SpeechPreferences, saved: InstallationSpeech): SpeechPreferences {
-  return selectRecognizer({ ...device, output: saved.output, fishVoice: saved.fishVoice, fishDelivery: saved.fishDelivery ?? DEFAULT_FISH_DELIVERY }, saved.recognition);
+  return selectRecognizer({ ...device, output: saved.output, fishVoice: saved.fishVoice, fishDelivery: saved.fishDelivery ?? DEFAULT_FISH_DELIVERY, showTranscriptions: saved.showTranscriptions ?? false }, saved.recognition);
 }
