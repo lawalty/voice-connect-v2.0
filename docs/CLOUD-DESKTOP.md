@@ -5,6 +5,10 @@ same Voice Connect owner sign-in. It shows the Ubuntu Gateway's managed XFCE
 desktop and a dedicated, persistent Chromium profile. Opening starts view-only.
 **Take control** reconnects with manual input enabled; **Release control** returns
 to watching. Reconnect is explicit after connection loss or control takeover.
+**Voice Connect** focuses the original window and closes this desktop tab. The
+same-origin monitor link retains its opener for this return action. If the desktop
+was opened directly or its original window has closed, the button returns to Voice
+Connect within the current tab, without opening another window.
 
 This uses OpenClaw **Host Desktop**, not **Cloud Worker Desktop**. The latter
 provisions separate Crabbox workers. This workspace runs inside the existing
