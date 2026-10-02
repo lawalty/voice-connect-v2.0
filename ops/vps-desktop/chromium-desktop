@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
-browser=$(find /home/node/.cache/ms-playwright -path '*/chrome-linux64/chrome' -type f | head -1)
-test -n "$browser" || { echo 'Bundled Chromium is unavailable' >&2; exit 1; }
+browser=/usr/bin/google-chrome-stable
+test -x "$browser" || { echo 'Google Chrome Stable is unavailable' >&2; exit 1; }
 # Dedicated persistent profile, never the existing server or Windows profile.
 exec "$browser" --no-sandbox --disable-dev-shm-usage --disable-gpu \
   --no-first-run --no-default-browser-check --password-store=basic \
   --user-data-dir=/home/node/.openclaw/browser/vps-desktop \
   --remote-debugging-address=127.0.0.1 --remote-debugging-port=18802 \
-  --window-size=1280,800 about:blank
+  --window-size=1280,800 "$@"

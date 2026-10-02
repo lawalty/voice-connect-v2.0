@@ -2,7 +2,8 @@
 
 The upper-right monitor icon opens `/desktop` in a separate browser tab using the
 same Voice Connect owner sign-in. It shows the Ubuntu Gateway's managed XFCE
-desktop and a dedicated, persistent Chromium profile. Opening starts view-only.
+desktop and a dedicated, persistent Google Chrome Stable profile. The VPS host
+is Ubuntu; the desktop's Gateway container uses Debian 12 and XFCE. Opening starts view-only.
 **Take control** reconnects with manual input enabled; **Release control** returns
 to watching. Reconnect is explicit after connection loss or control takeover.
 **Voice Connect** focuses the original window and closes this desktop tab. The
@@ -12,7 +13,7 @@ Connect within the current tab, without opening another window.
 
 This uses OpenClaw **Host Desktop**, not **Cloud Worker Desktop**. The latter
 provisions separate Crabbox workers. This workspace runs inside the existing
-Gateway container; it is not an isolated VM. Chromium uses the container's existing
+Gateway container; it is not an isolated VM. Chrome uses the container's existing
 sandbox-disabled deployment model. Browser data lives under
 `/root/.openclaw/browser/vps-desktop` on the VPS and is separate from Windows and
 the existing headless server browser.
@@ -40,8 +41,10 @@ scaled desktop; physical phone interaction requires separate acceptance.
 ## Host setup and recovery
 
 `ops/vps-desktop/Dockerfile` derives from the currently verified OpenClaw image,
-preserving its computer capability repair and bundled Chromium. It adds TigerVNC,
-XFCE and D-Bus, plus an autostart launcher. VNC and Chromium CDP listen only inside
+preserving its computer capability repair and bundled testing browser for other
+OpenClaw uses. It installs regular Google Chrome Stable system-wide from Google's
+official Debian package, owned by root and run as the desktop's `node` account.
+It adds TigerVNC, XFCE and D-Bus, plus an autostart launcher. VNC and Chrome CDP listen only inside
 the Gateway container on loopback; no new public listener is published.
 
 Prepare the fixed root-owned context at `/opt/voice-connect-v2/desktop-build`,
@@ -57,3 +60,31 @@ repair and before stopping the running Gateway. Missing context or failed packag
 preparation fails before stopping it. To disable this workspace deliberately,
 disable `desktop.host.enabled` and `plugins.entries.cua-computer.enabled`, then
 remove that marker; retain the profile and backups unless deletion is requested.
+
+## Personal desktop and incoming files
+
+XFCE settings are persisted at `/root/.openclaw/desktop/xfce4`, linked to
+`/home/node/.config/xfce4`. The Chrome migration preserves existing background,
+panel and dock settings, removes the workspace switcher, and sets one workspace.
+The dock, application menu, autostart and XFCE preferred browser all use the same
+root-owned launcher and persistent Chrome profile. `upgrade.py` checks the active
+host/version and idle VC turns, preserves desktop settings and user-local files,
+takes a stopped Gateway snapshot and retains a rollback image before switching.
+
+Home contains **Shared files**, with **Images** and **Documents**. This is a
+read/write bind of `/opt/voice-connect-v2/shared-files`; these files remain across
+container recreation. The `voice-connect-desktop-files` host service copies new
+VC image attachments and native OpenClaw `media/inbound` files there within
+seconds. Images go to Images; other native incoming files go to Documents.
+Existing incoming files are copied on the first run. This does not add a document
+upload feature to VC, which currently accepts images; files sent through native
+OpenClaw channels are supported when they enter `media/inbound`.
+
+Original attachment records and native incoming storage remain intact for chat
+history and native processing. These visible copies are destinations, not a
+restriction on the agent's existing permissions. The copier records completed
+files; it does not overwrite user edits or recreate a visible copy after the user
+deletes it. Files over 100 MiB from native channels are not copied. Destination
+creation uses directory handles, exclusive writes and no-follow checks to reject
+symlink redirection. Agent guidance identifies the visible paths for received
+files and user-facing document/image work.

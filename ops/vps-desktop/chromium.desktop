@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Cloud Chromium
+Name=Cloud Google Chrome
 Exec=/usr/local/bin/vc-cloud-browser
 Terminal=false
 OnlyShowIn=XFCE;

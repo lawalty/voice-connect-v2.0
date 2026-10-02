@@ -4,11 +4,13 @@ on:
     paths:
       - 'integrations/openclaw-updater/**'
       - 'ops/openclaw-updater/**'
+      - 'ops/vps-desktop/**'
       - '.github/workflows/openclaw-updater.yml'
   push:
     paths:
       - 'integrations/openclaw-updater/**'
       - 'ops/openclaw-updater/**'
+      - 'ops/vps-desktop/**'
       - '.github/workflows/openclaw-updater.yml'
 
 jobs:
@@ -23,5 +25,6 @@ jobs:
         with:
           python-version: '3.14'
       - run: python ops/openclaw-updater/test_updater.py
+      - run: python ops/vps-desktop/test_shared_files.py
       - run: node --test integrations/openclaw-updater/tools.test.mjs
       - run: node --check integrations/openclaw-updater/index.mjs
