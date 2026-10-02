@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Monitor, RefreshCw } from 'lucide-react';
-import RFB from '@novnc/novnc/lib/rfb.js';
+import NoVNC from '@novnc/novnc/lib/rfb.js';
 import { api, setCsrf } from './api';
 import type { AppStatus } from '../contract/types';
 import './desktop.css';
 
 type Connection={ticket:string;control:boolean;password?:string};
+// The published noVNC CommonJS package has a nested default under Vite's interop.
+const RFB=typeof NoVNC==='function'?NoVNC:(NoVNC as unknown as {default:typeof NoVNC}).default;
+type RFB=NoVNC;
 export default function CloudDesktop() {
   const [authenticated,setAuthenticated]=useState(false),[password,setPassword]=useState(''),[loading,setLoading]=useState(true);
   const [error,setError]=useState(''),[state,setState]=useState('Disconnected'),[control,setControl]=useState(false),[attempt,setAttempt]=useState(0);

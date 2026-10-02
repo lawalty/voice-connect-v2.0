@@ -19,3 +19,13 @@ test('monitor icon opens an authenticated separate cloud desktop and preserves t
   await page.screenshot({path:info.outputPath('monitor-icon.png')});
   await popup.close();
 });
+
+test('initializes the packaged RFB client and reports a refused stream without a runtime error',async({page})=>{
+  await enterFixtureSession(page);
+  await page.route('**/api/desktop/connect',route=>route.fulfill({json:{ticket:'57731ef9-6d61-4c51-a646-1f1a3433cba5',control:false}}));
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('/desktop');
+  await expect(page.getByRole('status')).toHaveText('Ubuntu VPS · Disconnected');
+  await expect(page.getByRole('alert')).toContainText('desktop disconnected');
+  expect(errors).toEqual([]);
+});
