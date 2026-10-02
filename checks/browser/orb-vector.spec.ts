@@ -169,8 +169,8 @@ test('vector rig follows real voice events, meters, commentary and standby witho
     await expect.poll(() => page.evaluate(() => (window as any).legacyProbe.spoken)).toEqual(['I will check the configuration.', 'I found the setting.', 'The configuration is correct.']);
     // Browser fallback finishes capture with the submitted turn; restarting is
     // explicit. The selected orb must not change that existing provider behavior.
-    await expect(page.getByRole('button', { name: 'Record again', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Record again', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Resume microphone', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Resume microphone', exact: true }).click();
     await expect(orb).toHaveAttribute('data-orb-state', 'listening');
     const states = await page.evaluate(() => (window as any).legacyProbe.states as string[]);
     expect(states).toContain('thinking'); expect(states).toContain('working'); expect(states).toContain('speaking');
