@@ -33,12 +33,12 @@ async function messenger(page: Page) {
 
 for (const fault of ['silent socket', 'missing events'] as const) {
   test(`${fault}: foreground recovery restores a completed reply without refresh, resend, or speech replay`, async ({ page }) => {
-    let faulty = false, brokenSocket = 0, connections = 0, dropped = 0;
+    let faulty = false, brokenSocket = 0, connections = 0, dropped = 0, droppedCompletion = false;
     await page.routeWebSocket(url => url.pathname === '/api/events', route => {
       const connection = ++connections, server = route.connectToServer();
       server.onMessage(message => {
         const event = JSON.parse(message.toString());
-        if (faulty && connection === brokenSocket && event.type !== 'hello' && (fault === 'silent socket' || event.type !== 'pong')) { dropped++; return; }
+        if (faulty && connection === brokenSocket && event.type !== 'hello' && (fault === 'silent socket' || event.type !== 'pong')) { dropped++; if (event.type === 'complete') droppedCompletion = true; return; }
         route.send(message);
       });
     });
@@ -48,6 +48,7 @@ for (const fault of ['silent socket', 'missing events'] as const) {
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect(page.locator('.orb-stage.phase-thinking')).toBeVisible();
     await expect.poll(() => dropped).toBeGreaterThanOrEqual(4);
+    await expect.poll(() => droppedCompletion).toBe(true);
     await page.getByLabel('Message NorthPointe').fill('Keep this unfinished thought.');
     await page.evaluate(() => {
       window.dispatchEvent(new Event('focus'));

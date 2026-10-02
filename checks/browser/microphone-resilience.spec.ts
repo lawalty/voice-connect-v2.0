@@ -51,6 +51,7 @@ async function fixture(page: Page) {
   });
   const sockets: WebSocketRoute[] = [], turns: string[] = [];
   let submittedTurn: string | undefined;
+  let subscribedConversation: string | undefined;
   const completedTurns = new Set<string>();
   await page.routeWebSocket(url => url.pathname === '/api/audio' && url.searchParams.get('kind') === 'stt', socket => {
     sockets.push(socket); socket.send(JSON.stringify({ type: 'ready', sampleRate: 16000 }));
@@ -64,12 +65,16 @@ async function fixture(page: Page) {
     if (new URL(socket.url()).pathname !== '/api/events') return;
     socket.on('framereceived', frame => {
       const event = JSON.parse(String(frame.payload));
+      if (event.type === 'hello') subscribedConversation = event.conversationId;
       if (event.type === 'complete') completedTurns.add(event.turnId);
     });
   });
   await enterFixtureSession(page);
   await page.getByRole('button', { name: 'NorthPointe', exact: true }).click();
   await page.getByRole('button', { name: 'Begin a new conversation', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Your conversations', exact: true })).toHaveCount(0);
+  const selectedConversation = await page.evaluate(() => localStorage.getItem('vc2:conversation'));
+  await expect.poll(() => subscribedConversation).toBe(selectedConversation);
   return {
     sockets, turns,
     say(text: string) { sockets.at(-1)!.send(JSON.stringify({ type: 'stt', text, started: true, final: true, turnComplete: true })); },
