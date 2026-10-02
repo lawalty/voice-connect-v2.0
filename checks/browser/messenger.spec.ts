@@ -9,7 +9,7 @@ for (const provider of ['browser', 'fish'] as const) {
     await context.grantPermissions(['microphone']);
     await installationFixture(page, { output: provider, fishVoice: 'fixture' });
     await page.addInitScript(output => {
-      localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output, fishVoice: 'fixture', handsFree: false, audioCues: false }));
+      localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'browser', output, fishVoice: 'fixture', handsFree: false, audioCues: false }));
       const probe = { spoken: [] as string[], cancelled: 0, captures: 0, tracks: [] as MediaStreamTrack[], emit: (_text: string) => {}, finishFirst: () => {} };
       Object.assign(window, { vcMessengerProbe: probe });
       const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -99,8 +99,10 @@ for (const provider of ['browser', 'fish'] as const) {
     if (info.project.name === 'android-layout') {
       await page.setViewportSize({ width: 320, height: 740 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-      const controls = await page.locator('.voice-controls button').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().toJSON()));
-      for (let index = 1; index < controls.length; index++) expect(controls[index].left).toBeGreaterThanOrEqual(controls[index - 1].right - 1);
+      await expect.poll(() => page.locator('.voice-controls button').evaluateAll(elements => {
+        const controls = elements.map(element => element.getBoundingClientRect());
+        return controls.length > 0 && controls.every((control, index) => control.width > 0 && (index === 0 || control.left >= controls[index - 1]!.right - 1));
+      })).toBe(true);
       await page.screenshot({ path: info.outputPath(`messenger-active-320-${provider}.png`), fullPage: true });
     }
     await page.getByRole('button', { name: 'Enter standby mode', exact: true }).click();

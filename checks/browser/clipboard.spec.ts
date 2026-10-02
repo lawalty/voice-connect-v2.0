@@ -9,7 +9,7 @@ async function setup(page: Page) {
   await page.context().grantPermissions(['microphone']);
   await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'deepgram', output: 'browser', handsFree: true, audioCues: false, keepAwake: false }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'deepgram', output: 'browser', handsFree: true, audioCues: false, keepAwake: false }));
     const probe = { tracks: [] as MediaStreamTrack[], reads: 0, spoken: [] as string[], denied: false };
     Object.assign(window, { clipboardProbe: probe });
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);

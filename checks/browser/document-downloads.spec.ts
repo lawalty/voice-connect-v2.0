@@ -97,7 +97,7 @@ for(const viewport of [{width:768,height:768},{width:390,height:664}]) {
     await context.grantPermissions(['microphone']);
     await installationFixture(page,{recognition:'deepgram',showTranscriptions:true});
     await page.route('**/api/orbs',route=>route.fulfill({json:{revision:1,configured:true,preferences:{packId:'luminous-glass',motion:0,phaseColors:true},packs:[]}}));
-    await page.addInitScript(()=>localStorage.setItem('vc2:speech',JSON.stringify({audioCues:false})));
+    await page.addInitScript(()=>localStorage.setItem('vc2:speech',JSON.stringify({ greeting: false,audioCues:false})));
     let socket:WebSocketRoute|undefined;
     await page.routeWebSocket(url=>url.pathname==='/api/audio'&&url.searchParams.get('kind')==='stt',route=>{socket=route;route.send(JSON.stringify({type:'ready',sampleRate:16000}));});
     let ready=false;

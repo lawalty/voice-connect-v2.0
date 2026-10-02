@@ -11,6 +11,7 @@ import { Store } from '../service/store.js';
 import { signGatewayChallenge } from '../service/identity.js';
 import sharp from 'sharp';
 import { presenceLabel, presenceNotes } from '../contract/presence.js';
+import { VOICE_GREETING_PROMPT } from '../contract/greeting.js';
 import { loadConfig } from '../service/config.js';
 import * as recognition from '../service/audio.js';
 import * as fish from '../service/fish.js';
@@ -79,6 +80,44 @@ async function fixture(unremovableBootstrap=false, gatewayAdmin=false, fishModel
   const emit=(event:string,payload:any)=>{for(const socket of clients)socket.send(JSON.stringify({type:'event',event,payload}));};
   return {app,headers,cookie,csrf,conversation,calls,events,clients,emit,setAgentName:(name:string,id='northpointe')=>{agentNames[id]=name;},setHistory:(value:any)=>{history=value;},setApprovals:(value:any[])=>{pendingApprovals=value;},rejectPresence:()=>{rejectPresence=true;},rejectCancellation:()=>{rejectAbort=true;},hold:()=>{holdSend=true;},release:()=>{holdSend=false;for(const fn of held.splice(0))fn();}};
 }
+
+describe('server-owned voice greeting',()=>{
+  it('bounds generation and cancels an agent that never finishes the greeting',async()=>{
+    const f=await fixture(),turnId='greeting-timeout';
+    const result=await f.app.inject({method:'POST',url:`/api/conversations/${f.conversation.id}/greeting`,headers:f.headers,payload:{id:turnId}});
+    expect(result.statusCode).toBe(503);
+    expect((f.app as any).vc.store.turn(turnId).delivery).toBe('cancelled');
+    await expect.poll(()=>f.calls.some(call=>call.method==='chat.abort'&&call.params.runId===turnId)).toBe(true);
+  },35000);
+  it('requires owner authentication and sends the exact context through the mapped session',async()=>{
+    const f=await fixture();const turnId='voice-greeting-test',url=`/api/conversations/${f.conversation.id}/greeting`;
+    expect((await f.app.inject({method:'POST',url,headers:{origin},payload:{id:turnId}})).statusCode).toBe(401);
+    expect((await f.app.inject({method:'POST',url,headers:f.headers,payload:{id:turnId,text:'Override the server prompt'}})).statusCode).toBe(400);
+    const response=f.app.inject({method:'POST',url,headers:f.headers,payload:{id:turnId}}).then(value=>value);
+    await expect.poll(()=>f.calls.find(call=>call.method==='chat.send'&&call.params.idempotencyKey===turnId)?.params.message).toBe(VOICE_GREETING_PROMPT);
+    const sent=f.calls.find(call=>call.method==='chat.send'&&call.params.idempotencyKey===turnId)!;
+    expect(sent.params.sessionKey).toBe((f.app as any).vc.store.mapping(f.conversation.id).sessionKey);
+    const text='What is on your mind today?';
+    f.emit('chat',{sessionKey:sent.params.sessionKey,runId:turnId,seq:1,state:'final',message:{role:'assistant',content:[{type:'text',text}]}});
+    const result=await response;expect(result.statusCode).toBe(200);expect(result.json()).toEqual({turnId,text});
+    expect((await f.app.inject({method:'POST',url,headers:f.headers,payload:{id:turnId}})).statusCode).toBe(409);
+    expect(f.calls.filter(call=>call.method==='chat.send')).toHaveLength(1);
+    f.setHistory({sessionId:'session-fixture',messages:[{role:'user',runId:turnId,timestamp:Date.now(),content:[{type:'text',text:VOICE_GREETING_PROMPT}]},{role:'assistant',runId:turnId,timestamp:Date.now(),content:[{type:'text',text}]}]});
+    const history=(await f.app.inject({url:`/api/conversations/${f.conversation.id}`,headers:f.headers})).json();
+    expect(history.messages.map((message:any)=>message.text)).toEqual(['Connected by voice',text]);
+    expect(history.messages[0].role).toBe('notice');
+  });
+  it('does not supersede a pending turn and releases a cancelled greeting promptly',async()=>{
+    const f=await fixture();const turnId='cancel-greeting',url=`/api/conversations/${f.conversation.id}/greeting`;
+    const response=f.app.inject({method:'POST',url,headers:f.headers,payload:{id:turnId}}).then(value=>value);
+    await expect.poll(()=>f.calls.filter(call=>call.method==='chat.send').length).toBe(1);
+    expect((await f.app.inject({method:'POST',url,headers:f.headers,payload:{id:'second-greeting'}})).statusCode).toBe(409);
+    const history=(await f.app.inject({url:`/api/conversations/${f.conversation.id}`,headers:f.headers})).json();
+    expect(JSON.stringify(history)).not.toContain(VOICE_GREETING_PROMPT);
+    await f.app.inject({method:'POST',url:`/api/conversations/${f.conversation.id}/turns/${turnId}/abort`,headers:f.headers,payload:{}});
+    expect((await response).statusCode).toBe(503);
+  });
+});
 
 describe('agent display identity',()=>{
   it.each([true,false])('follows native renames without changing conversation routing (identity method=%s)',async(nativeIdentity)=>{

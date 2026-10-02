@@ -9,7 +9,7 @@ async function enterWithMeter(page: Page) {
   await page.context().grantPermissions(['microphone']);
   await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'deepgram', output: 'browser', handsFree: true, audioCues: false, keepAwake: false }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'deepgram', output: 'browser', handsFree: true, audioCues: false, keepAwake: false }));
     const probe = { energy: 0, confidence: 0, speech: 0, frames: 0, captures: 0, tracks: [] as MediaStreamTrack[] };
     Object.assign(window, { vcOrbMeter: probe });
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);

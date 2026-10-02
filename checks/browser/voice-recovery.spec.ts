@@ -10,7 +10,7 @@ async function setup(page: Page) {
   await page.context().grantPermissions(['microphone']);
   await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'deepgram', output: 'browser', handsFree: true, audioCues: false, keepAwake: false }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'deepgram', output: 'browser', handsFree: true, audioCues: false, keepAwake: false }));
     const p: Probe = { tracks: [], spoken: [], cancelled: 0 };
     Object.assign(window, { voiceRecovery: p });
     Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: class { constructor(readonly text: string) {} } });

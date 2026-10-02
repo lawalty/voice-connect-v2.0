@@ -8,7 +8,7 @@ test('normalizes speech before Messenger and submission; editable rules persist 
   await context.grantPermissions(['microphone']);
   await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ audioCues: false, keepAwake: false }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, audioCues: false, keepAwake: false }));
     localStorage.setItem('vc2:speaker-muted', 'true');
   });
   const sockets: WebSocketRoute[] = [], turns: string[] = [];

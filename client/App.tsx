@@ -25,6 +25,7 @@ import { VoiceMessageDraft } from './voice-message-draft';
 import { mergeOlderMessages, reconcileMessages } from './history';
 import { ConversationActions } from './conversation-actions';
 import type { PresenceMode } from '../contract/presence';
+import type { VoiceGreeting } from '../contract/greeting';
 
 const preferenceKey = 'vc2:speech';
 function readPreferences(): SpeechPreferences { try { return restoreSpeechPreferences(localStorage.getItem(preferenceKey)); } catch { return restoreSpeechPreferences(null); } }
@@ -69,6 +70,7 @@ export default function App() {
   const [liveText, setLiveText] = useState<string | null>(null);
   const clearLiveDraft = useCallback(() => { liveDraft.current = null; setLiveText(null); }, []);
   const voiceStart = useRef<symbol | null>(null), conversationToggle = useRef<HTMLButtonElement>(null);
+  const greetingRequest = useRef<AbortController | null>(null), voiceSession = useRef('');
   const messengerRef = useRef(false), shareOpen = useRef(false);
   const changeView = useCallback((messenger: boolean) => {
     messengerRef.current = messenger; engine.current?.setCuesSuppressed(messenger); setShowTranscript(messenger);
@@ -78,7 +80,7 @@ export default function App() {
     }
   }, []);
   const closeMessenger = useCallback(() => { changeView(false); requestAnimationFrame(() => conversationToggle.current?.focus({ preventScroll: true })); }, [changeView]);
-  const cancelVoiceStart = useCallback(() => { voiceStart.current = null; setPreparingVoice(false); }, []);
+  const cancelVoiceStart = useCallback(() => { greetingRequest.current?.abort(); greetingRequest.current = null; voiceStart.current = null; setPreparingVoice(false); }, []);
   const spoken = useRef(new Map<string, string>()), sequences = useRef(new Map<string, number>()), latest = useRef({ preferences, draft }); latest.current = { preferences, draft };
   const completed = useRef(new Set<string>()), cancelled = useRef(new Set<string>()), speakingTurn = useRef(''), sendingRef = useRef(false), aborting = useRef<Promise<void> | null>(null), suppressAbort = useRef(false);
   const audibleTurns = useRef(new Set<string>()), standbyRef = useRef(false);
@@ -223,7 +225,7 @@ export default function App() {
     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
   }, []);
   useEffect(() => {
-    const expired = () => { ++presenceEpoch.current; ++audioEpoch.current; standbyRef.current = false; setStandby(false); engine.current?.setSpeakerMuted(false); setLibraryOpen(false); shareOpen.current = false; setClipboard(null); setModal(null); cancelVoiceStart(); voiceRef.current = false; suppressAbort.current = true; engine.current?.interrupt(); engine.current?.stop('auth-expired'); suppressAbort.current = false; setVoiceActive(false); setPhase('off'); setStatus(value => value ? { ...value, authenticated: false, csrfToken: undefined } : value); setCsrf(); setInitialError('Your session ended. Sign in again to continue.'); };
+    const expired = () => { voiceSession.current = ''; ++presenceEpoch.current; ++audioEpoch.current; standbyRef.current = false; setStandby(false); engine.current?.setSpeakerMuted(false); setLibraryOpen(false); shareOpen.current = false; setClipboard(null); setModal(null); cancelVoiceStart(); voiceRef.current = false; suppressAbort.current = true; engine.current?.interrupt(); engine.current?.stop('auth-expired'); suppressAbort.current = false; setVoiceActive(false); setPhase('off'); setStatus(value => value ? { ...value, authenticated: false, csrfToken: undefined } : value); setCsrf(); setInitialError('Your session ended. Sign in again to continue.'); };
     window.addEventListener('vc-auth-expired', expired);
     return () => window.removeEventListener('vc-auth-expired', expired);
   }, [cancelVoiceStart]);
@@ -266,7 +268,7 @@ export default function App() {
         else { const turnId = speakingTurn.current; if (turnId) setSpeechReveal(current => current?.turnId === turnId ? { turnId, text } : current); }
       },
     }); instance.setSpeakerMuted(standbyRef.current); instance.setCuesSuppressed(messengerRef.current); engine.current = instance;
-    return () => { instance.dispose(); if (engine.current === instance) engine.current = null; };
+    return () => { greetingRequest.current?.abort(); instance.dispose(); if (engine.current === instance) engine.current = null; };
   }, [updateHeard]);
 
   useEffect(() => {
@@ -653,8 +655,20 @@ export default function App() {
       else if (heard.trim()) updateDraft(value => value ? `${value}\n${heard.trim()}` : heard.trim());
       setNotice('');
       voiceRef.current = true; setVoiceActive(true);
-      // Start audio from this gesture; the orb animation never gates microphone startup.
-      await engine.current.start(nextPreferences, conversationId);
+      const greet = nextPreferences.greeting !== false && voiceSession.current !== conversationId && !standbyRef.current && !activeTurnRef.current;
+      await engine.current.start(nextPreferences, conversationId, greet ? async () => {
+        voiceSession.current = conversationId;
+        setPreparingVoice(false);
+        const controller = new AbortController(); greetingRequest.current = controller;
+        try {
+          const result = await api<VoiceGreeting>(`/api/conversations/${encodeURIComponent(conversationId)}/greeting`, {
+            method: 'POST', body: JSON.stringify({ id: crypto.randomUUID() }), signal: controller.signal,
+          });
+          if (voiceStart.current === request) { speakingTurn.current = result.turnId; setSpeechReveal({ turnId: result.turnId, text: '' }); }
+          return result.text;
+        } finally { if (greetingRequest.current === controller) greetingRequest.current = null; }
+      } : undefined);
+      if (voiceStart.current === request && voiceRef.current) voiceSession.current = conversationId;
       if (voiceStart.current === request && voiceRef.current && standbyRef.current) {
         standbyRef.current = false; setStandby(false); engine.current.setSpeakerMuted(false);
         notifyPresence('resume');
@@ -666,7 +680,7 @@ export default function App() {
       if (voiceStart.current === request) { voiceStart.current = null; setPreparingVoice(false); }
     }
   }
-  function endVoice(withSleepSound = false, reason: VoiceStopReason = 'manual') { ++presenceEpoch.current; ++audioEpoch.current; standbyRef.current = false; setStandby(false); cancelVoiceStart(); voiceRef.current = false; audibleTurns.current.clear(); if (withSleepSound) engine.current?.endSession(); else { engine.current?.interrupt('manual', false); engine.current?.stop(reason); } if (liveDraft.current) { updateDraft(liveDraft.current.text); clearLiveDraft(); } engine.current?.setSpeakerMuted(false); setVoiceActive(false); setPhase('off'); updateHeard(''); setSignal(null); }
+  function endVoice(withSleepSound = false, reason: VoiceStopReason = 'manual') { voiceSession.current = ''; ++presenceEpoch.current; ++audioEpoch.current; standbyRef.current = false; setStandby(false); cancelVoiceStart(); voiceRef.current = false; audibleTurns.current.clear(); if (withSleepSound) engine.current?.endSession(); else { engine.current?.interrupt('manual', false); engine.current?.stop(reason); } if (liveDraft.current) { updateDraft(liveDraft.current.text); clearLiveDraft(); } engine.current?.setSpeakerMuted(false); setVoiceActive(false); setPhase('off'); updateHeard(''); setSignal(null); }
   function toggleAutoMode() {
     if (voiceStart.current || (voiceRef.current && preferences.handsFree && preferences.recognition !== 'browser')) {
       enterTextMode('auto-off'); // Close capture deliberately, preserving its draft and agent playback.

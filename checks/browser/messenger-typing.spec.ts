@@ -6,7 +6,7 @@ import { waitForFixtureBudget } from './fixture-budget';
 test.beforeEach(waitForFixtureBudget);
 async function setup(page: import('@playwright/test').Page) {
   await installationFixture(page, { output: 'fish', fishVoice: 'fixture' });
-  await page.addInitScript(() => { localStorage.setItem('vc2:speaker-muted', 'false'); localStorage.setItem('vc2:speech', JSON.stringify({ audioCues: false, keepAwake: false })); });
+  await page.addInitScript(() => { localStorage.setItem('vc2:speaker-muted', 'false'); localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, audioCues: false, keepAwake: false })); });
   await page.routeWebSocket(url => url.pathname === '/api/audio' && url.searchParams.get('kind') === 'tts', socket => {
     socket.onMessage(raw => {
       const event = JSON.parse(String(raw));

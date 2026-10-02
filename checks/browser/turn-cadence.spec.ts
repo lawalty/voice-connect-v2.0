@@ -8,7 +8,7 @@ test('automatic turns keep cue order and one capture session across orb, messeng
   await context.grantPermissions(['microphone']);
   await installationFixture(page, { recognition: 'deepgram', showTranscriptions: true });
   await page.addInitScript(() => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'deepgram', output: 'browser', handsFree: true, turnMode: 'automatic', audioCues: true }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'deepgram', output: 'browser', handsFree: true, turnMode: 'automatic', audioCues: true }));
     const probe = { cues: [] as string[], captures: 0, tracks: [] as MediaStreamTrack[], spoken: [] as string[], pending: [] as SpeechSynthesisUtterance[], cancellations: 0, cutSentCues: 0 };
     Object.assign(window, { vcCadence: probe });
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);

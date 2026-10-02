@@ -24,6 +24,8 @@ import { registerLibraryRoutes } from './library-routes.js';
 import { SpeechSettings, speechSelection } from './speech-settings.js';
 import { VoskHost } from './vosk.js';
 import { registerOrbRoutes } from './orbs.js';
+import { registerGreetingRoute } from './greeting.js';
+import { VOICE_GREETING_PROMPT } from '../contract/greeting.js';
 
 const password=z.string().min(12).max(256);
 const id=z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
@@ -42,7 +44,14 @@ export async function buildApp(options:AppOptions={}) {
   const app=Fastify({logger:false,bodyLimit:128*1024,trustProxy:false,requestTimeout:30000});
   const sockets=new Map<WebSocket,{conversationId:string;token:string;events:boolean;alive:boolean;revision:number;provider?:'fish'|'deepgram'}>();
   const heartbeat=setInterval(()=>{for(const [socket,binding] of sockets){if(!store.session(binding.token)){socket.close(1008,'Sign in again');continue;}if(!binding.alive){socket.terminate();continue;}binding.alive=false;if(socket.readyState===1)socket.ping();}},20000);heartbeat.unref();
+  const eventObservers=new Set<(event:ServerEvent)=>void>();
   const publish=(event:ServerEvent)=>{
+    for(const observe of eventObservers)observe(event);
+    // Greetings have one playback owner and use the complete HTTP result.
+    if('turnId'in event&&event.turnId&&store.turn(event.turnId)?.text===VOICE_GREETING_PROMPT){
+      if(event.type!=='complete')return;
+      event={type:'reconcile',conversationId:event.conversationId};
+    }
     for(const [socket,binding] of sockets){
       if(!store.session(binding.token)){socket.close(1008,'Sign in again');continue;}
       if(!binding.events)continue;
@@ -85,6 +94,7 @@ export async function buildApp(options:AppOptions={}) {
   app.get('/api/status',async req=>status(req));
   registerLibraryRoutes(app,new LibraryClient(cfg.libraryUrl,cfg.libraryToken),store);
   registerOrbRoutes(app,store);
+  registerGreetingRoute(app,store,gateway,eventObservers);
   app.get('/api/diagnostics',async()=>({build:cfg.build,gateway:gateway.capabilities(),deviceId:store.get('gateway-device-id'),timings:gateway.diagnostics?.()??[]}));
   const authRate={rateLimit:{max:12,timeWindow:15*60*1000}};
   app.post('/api/auth/setup',{config:authRate},async(req,reply)=>{

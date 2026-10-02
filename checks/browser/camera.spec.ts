@@ -10,7 +10,7 @@ for (const mode of ['orb-auto', 'messenger', 'messenger-auto'] as const) {
     await context.grantPermissions(['camera', 'microphone']);
     await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
-      localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'deepgram', output: 'browser', handsFree: true, audioCues: false, keepAwake: false }));
+      localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'deepgram', output: 'browser', handsFree: true, audioCues: false, keepAwake: false }));
       const probe = { tracks: [] as MediaStreamTrack[], spoken: [] as string[], end: () => {}, cancels: 0 };
       Object.assign(window, { cameraProbe: probe });
       const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);

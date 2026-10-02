@@ -10,7 +10,7 @@ for (const [mode, output] of [['voice-orb', 'browser'], ['voice-messenger', 'bro
     await context.grantPermissions(['microphone']);
     await installationFixture(page, { output, fishVoice: 'fixture' });
     await page.addInitScript(provider => {
-      localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output: provider, fishVoice: 'fixture', handsFree: false, audioCues: false }));
+      localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'browser', output: provider, fishVoice: 'fixture', handsFree: false, audioCues: false }));
       localStorage.setItem('vc2:speaker-muted', 'false');
       const probe = { spoken: [] as string[], phases: [] as string[], emit: (_text: string) => {}, generation: 0 };
       Object.assign(window, { vcProgressProbe: probe });

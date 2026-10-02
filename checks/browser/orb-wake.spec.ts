@@ -15,7 +15,7 @@ type WakeProbe = {
 async function enterWithControlledSpeech(page: Page, recognition: 'browser' | 'vosk' = 'browser') {
   await installationFixture(page, { recognition });
   await page.addInitScript((recognition) => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ recognition, output: 'browser', handsFree: recognition === 'vosk', audioCues: false }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition, output: 'browser', handsFree: recognition === 'vosk', audioCues: false }));
     const probe = { starts: 0, captures: 0, aborts: 0, ready: () => {} };
     (window as unknown as { vcWakeProbe: typeof probe }).vcWakeProbe = probe;
     // Browser recognition owns capture. Disable its optional visualizer here so

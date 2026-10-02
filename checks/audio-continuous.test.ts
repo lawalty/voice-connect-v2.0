@@ -117,6 +117,67 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it('does not request a greeting after End during a pending wake-lock request', async () => {
+    const lock = { release: vi.fn(async () => {}) };
+    let grant!: (value: typeof lock) => void;
+    const request = vi.fn(() => new Promise<typeof lock>(resolve => { grant = resolve; }));
+    Object.assign(navigator, { wakeLock: { request } });
+    const run = setup(), greeting = vi.fn(async () => 'What is on your mind?');
+    const starting = run.engine.start({ ...preferences, keepAwake: true }, 'greeting', greeting);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+    run.engine.stop(); grant(lock); await starting;
+    expect(greeting).not.toHaveBeenCalled(); expect(lock.release).toHaveBeenCalledOnce();
+  });
+  it('holds one wake lock through greeting playback and releases it on End', async () => {
+    const lock = { release: vi.fn(async () => {}) }, request = vi.fn(async () => lock);
+    Object.assign(navigator, { wakeLock: { request } });
+    const run = setup(), starting = run.engine.start({ ...preferences, keepAwake: true }, 'greeting', async () => 'What is on your mind?');
+    await vi.waitFor(() => expect(fixture.outputs).toHaveLength(1));
+    fixture.outputs[0]!.end(); await starting;
+    expect(request).toHaveBeenCalledOnce(); run.engine.endSession(); expect(lock.release).toHaveBeenCalledOnce();
+  });
+  it.each(['browser', 'fish'] as const)('holds recognition and the listening cue until the %s greeting ends', async output => {
+    const run = setup(); let answer!: (text: string) => void;
+    const greeting = new Promise<string>(resolve => { answer = resolve; });
+    const starting = run.engine.start({ ...preferences, output }, 'greeting', () => greeting);
+    await vi.waitFor(() => expect(run.phases.at(-1)).toBe('thinking'));
+    expect(fixture.recognizers[0]!.running).toBe(false);
+    expect((await microphone.mock.results[0]!.value).getAudioTracks()[0].enabled).toBe(false);
+    await frame('start'); expect(run.turns).toEqual([]); expect(fixture.cues).toEqual([]);
+    answer('What is on your mind today?');
+    await vi.waitFor(() => expect(fixture.outputs).toHaveLength(1));
+    expect(run.phases.at(-1)).toBe('speaking'); expect(fixture.recognizers[0]!.running).toBe(false);
+    expect(fixture.outputs[0]!.words).toEqual(['What is on your mind today?']);
+    expect(fixture.cues).toEqual([]);
+    fixture.outputs[0]!.end(); await starting;
+    expect(fixture.recognizers[0]!.running).toBe(true); expect(run.phases.at(-1)).toBe('listening');
+    expect(fixture.cues).toEqual(['on']);
+  });
+  it('does not reopen capture after a stopped greeting or late playback callback', async () => {
+    const run = setup(); const starting = run.engine.start(preferences, 'greeting', async () => 'What is on your mind?');
+    await vi.waitFor(() => expect(fixture.outputs).toHaveLength(1));
+    run.engine.stop(); fixture.outputs[0]!.end(); await starting;
+    expect(fixture.recognizers[0]!.running).toBe(false); expect(fixture.outputs[0]!.cancel).toHaveBeenCalledOnce();
+    expect(run.phases).not.toContain('listening'); expect(fixture.cues).toEqual([]);
+  });
+  it('does not play a late generated greeting after capture was stopped', async () => {
+    const run = setup(); let answer!: (text: string) => void;
+    const starting = run.engine.start(preferences, 'greeting', () => new Promise(resolve => { answer = resolve; }));
+    await vi.waitFor(() => expect(answer).toBeTypeOf('function'));
+    run.engine.stop(); answer('What is on your mind?'); await starting;
+    expect(fixture.outputs).toEqual([]); expect(fixture.recognizers[0]!.running).toBe(false);
+    expect(run.phases).not.toContain('listening');
+  });
+  it('continues to listening when greeting generation or playback fails', async () => {
+    const run = setup();
+    await run.engine.start(preferences, 'failed-generation', async () => { throw new Error('Unavailable'); });
+    expect(run.phases.at(-1)).toBe('listening'); expect(run.notices).toContain('The greeting was unavailable. You can begin speaking.');
+    const restarting = run.engine.start({ ...preferences, allowInterruptions: false }, 'failed-playback', async () => 'What is on your mind?');
+    await vi.waitFor(() => expect(fixture.outputs).toHaveLength(1));
+    fixture.outputs[0]!.events.error('Speaker unavailable'); await restarting;
+    expect(run.phases.at(-1)).toBe('listening'); expect(run.notices).toContain('Speaker unavailable');
+    await frame('start'); expect(run.phases.at(-1)).toBe('hearing');
+  });
   it.each(['browser', 'fish'] as const)('starts an opening phrase before completion through %s and keeps every following word', async output => {
     vi.useFakeTimers(); const run = setup();
     run.engine.prepareSpeech({ ...preferences, output }, 'opening-phrase'); run.engine.awaitReply();

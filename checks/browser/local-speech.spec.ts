@@ -21,7 +21,7 @@ async function useNativeSpeechFixture(page:Page){
   await installationFixture(page, { showTranscriptions: true });
   await page.addInitScript(()=>{
     // This fixture deliberately exercises the supported browser fallback, not the new-device default.
-    localStorage.setItem('vc2:speech',JSON.stringify({recognition:'browser',output:'browser',handsFree:false}));
+    localStorage.setItem('vc2:speech',JSON.stringify({ greeting: false,recognition:'browser',output:'browser',handsFree:false}));
     class NativeSpeechFixture{
       onstart?:()=>void;onend?:()=>void;onresult?:(event:unknown)=>void;aborted=false;
       start(){(window as unknown as {vcTestSpeech:NativeSpeechFixture}).vcTestSpeech=this;queueMicrotask(()=>this.onstart?.());}
