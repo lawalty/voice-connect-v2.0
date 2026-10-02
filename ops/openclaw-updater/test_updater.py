@@ -14,6 +14,19 @@ spec.loader.exec_module(updater)
 
 
 class Contracts(unittest.TestCase):
+    def test_desktop_is_preserved_only_for_the_existing_installation_opt_in(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(updater, 'STATE', Path(folder)), patch.object(updater, 'run') as run:
+                self.assertEqual(updater.preserve_desktop_image('pinned', {'version':'2026.9.7'}, Path(folder)), 'pinned')
+                run.assert_not_called()
+                (Path(folder)/'desktop-enabled').touch()
+                with patch.object(updater.Path, 'is_file', return_value=True), patch.object(updater.Path, 'read_bytes', return_value=b'fixed desktop context'):
+                    image=updater.preserve_desktop_image('pinned', {'version':'2026.9.7'}, Path(folder))
+                self.assertRegex(image, r'^openclaw-verified:2026\.9\.7-desktop-[0-9a-f]{12}$')
+                self.assertIn('BASE_IMAGE=pinned',run.call_args_list[0].args[0])
+                self.assertIn('/opt/voice-connect-v2/desktop-build',run.call_args_list[0].args[0])
+                self.assertIn(image,updater.set_environment_image('KEEP=value\n',image))
+                self.assertEqual(run.call_count,2)
     def test_docker_build_cache_uses_writable_service_state(self):
         unit = Path(__file__).with_name('openclaw-host-updater.service').read_text()
         self.assertIn('ProtectHome=read-only', unit)

@@ -219,7 +219,27 @@ def prepare_candidate(pinned, release, job_dir, plugin=None):
     plugin = plugin or Path('/opt/openclaw-updater/current/plugin')
     validate_js = "import fs from 'node:fs';fs.mkdirSync('/probe/node_modules',{recursive:true});fs.symlinkSync('/app','/probe/node_modules/openclaw');await import('file:///probe/plugin/index.mjs');"
     run(['docker', 'run', '--rm', '--network', 'none', '--user', '0', '--entrypoint', 'node', '-v', str(plugin) + ':/probe/plugin:ro', image, '--input-type=module', '-e', validate_js])
+    image = preserve_desktop_image(image, release, job_dir)
     return image, contract
+
+
+def preserve_desktop_image(image, release, job_dir):
+    # Root-owned installation opt-in. Requesters cannot select a build context.
+    if not (STATE/'desktop-enabled').exists():
+        return image
+    context = Path('/opt/voice-connect-v2/desktop-build')
+    names = ['Dockerfile', 'chromium-desktop', 'chromium.desktop']
+    if not all((context/name).is_file() for name in names):
+        raise UpdateError('desktop_build_context_missing')
+    digest = hashlib.sha256(image.encode())
+    for name in names:
+        digest.update((context/name).read_bytes())
+    candidate = 'openclaw-verified:' + release['version'] + '-desktop-' + digest.hexdigest()[:12]
+    run(['docker', 'build', '--build-arg', 'BASE_IMAGE=' + image,
+         '--label', 'org.voice-connect.desktop=true', '-t', candidate, str(context)], timeout=1200)
+    run(['docker', 'run', '--rm', '--network', 'none', '--entrypoint', 'sh', candidate,
+         '-c', 'command -v Xtigervnc && command -v tigervncpasswd && command -v startxfce4 && command -v dbus-daemon && test -x /usr/local/bin/vc-cloud-browser'])
+    return candidate
 
 
 def compose_env(image=None):
@@ -235,7 +255,7 @@ def remove_old_patch(override):
 
 
 def set_environment_image(text, image):
-    if not re.fullmatch(r'(?:ghcr\.io/openclaw/openclaw@sha256:[0-9a-f]{64}|openclaw-verified:202\d\.\d{1,2}\.\d{1,2}-[0-9a-f]{12}|sha256:[0-9a-f]{64})', image):
+    if not re.fullmatch(r'(?:ghcr\.io/openclaw/openclaw@sha256:[0-9a-f]{64}|openclaw-verified:202\d\.\d{1,2}\.\d{1,2}-(?:desktop-)?[0-9a-f]{12}|sha256:[0-9a-f]{64})', image):
         raise UpdateError('pinned_image_invalid')
     lines = [line for line in text.splitlines() if not re.match(r'^\s*(?:export\s+)?OPENCLAW_IMAGE\s*=', line)]
     return '\n'.join(lines) + '\nOPENCLAW_IMAGE=' + image + '\n'

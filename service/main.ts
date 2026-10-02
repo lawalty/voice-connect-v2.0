@@ -26,6 +26,7 @@ import { VoskHost } from './vosk.js';
 import { registerOrbRoutes } from './orbs.js';
 import { registerGreetingRoute } from './greeting.js';
 import { VOICE_GREETING_PROMPT } from '../contract/greeting.js';
+import { registerDesktopRoutes } from './desktop.js';
 
 const password=z.string().min(12).max(256);
 const id=z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
@@ -78,7 +79,7 @@ export async function buildApp(options:AppOptions={}) {
     const path=securityPath(req);if(!path.startsWith('/api/'))return;
     reply.header('Cache-Control','no-store');
     const authEntry=path==='/api/auth/setup'||path==='/api/auth/login';
-    const mutating=!['GET','HEAD','OPTIONS'].includes(req.method),ws=path==='/api/events'||path==='/api/audio';
+    const mutating=!['GET','HEAD','OPTIONS'].includes(req.method),ws=path==='/api/events'||path==='/api/audio'||path==='/api/desktop/stream';
     if((mutating||ws)&&req.headers.origin!==cfg.origin)return reply.code(403).send({error:'This request must come from Voice Connect.'});
     if(path==='/api/status'||authEntry)return;
     const s=session(req);if(!s)return reply.code(401).send({error:'Sign in to continue.'});
@@ -95,6 +96,7 @@ export async function buildApp(options:AppOptions={}) {
   registerLibraryRoutes(app,new LibraryClient(cfg.libraryUrl,cfg.libraryToken),store);
   registerOrbRoutes(app,store);
   registerGreetingRoute(app,store,gateway,eventObservers);
+  registerDesktopRoutes(app,cfg,store,gateway);
   app.get('/api/diagnostics',async()=>({build:cfg.build,gateway:gateway.capabilities(),deviceId:store.get('gateway-device-id'),timings:gateway.diagnostics?.()??[]}));
   const authRate={rateLimit:{max:12,timeWindow:15*60*1000}};
   app.post('/api/auth/setup',{config:authRate},async(req,reply)=>{
