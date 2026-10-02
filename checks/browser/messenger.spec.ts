@@ -9,7 +9,7 @@ for (const provider of ['browser', 'fish'] as const) {
     await context.grantPermissions(['microphone']);
     await installationFixture(page, { output: provider, fishVoice: 'fixture' });
     await page.addInitScript(output => {
-      localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output, fishVoice: 'fixture', handsFree: false, audioCues: false }));
+      localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'browser', output, fishVoice: 'fixture', handsFree: false, audioCues: false }));
       const probe = { spoken: [] as string[], cancelled: 0, captures: 0, tracks: [] as MediaStreamTrack[], emit: (_text: string) => {}, finishFirst: () => {} };
       Object.assign(window, { vcMessengerProbe: probe });
       const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);

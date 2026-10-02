@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { restoreSpeechPreferences, selectRecognizer } from '../client/speech-preferences';
 
 describe('device speech preference compatibility', () => {
+  it('defaults Greeting on and retains an explicit off across provider changes', () => {
+    expect(restoreSpeechPreferences(null).greeting).toBe(true);
+    const saved = restoreSpeechPreferences(JSON.stringify({ greeting: false }));
+    expect(selectRecognizer(saved, 'deepgram').greeting).toBe(false);
+    for (const greeting of [null, 'false', 0, {}, []]) expect(restoreSpeechPreferences(JSON.stringify({ greeting })).greeting).toBe(true);
+  });
   it('defaults VU meters on and preserves an explicit device opt-out across provider changes', () => {
     expect(restoreSpeechPreferences(null).audioVuMeters).toBe(true);
     const saved = restoreSpeechPreferences(JSON.stringify({ audioVuMeters: false }));

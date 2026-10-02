@@ -16,6 +16,7 @@ async function fixture(page: Page) {
   await page.context().grantPermissions(['microphone']);
   await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false }));
     const probe: Probe = window.vcMicProbe = { blocks: 0, dropped: 0, tracks: [], pending: [], cancellations: 0, events: [] };
     const record = (event: Omit<Probe['events'][number], 'at'>) => { probe.events.push({ ...event, at: performance.now() }); if (probe.events.length > 256) probe.events.shift(); };
     new PerformanceObserver(list => list.getEntries().forEach(entry => record({ type: 'long-task', processingMs: entry.duration }))).observe({ entryTypes: ['longtask'] });

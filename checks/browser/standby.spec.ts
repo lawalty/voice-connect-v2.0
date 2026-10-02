@@ -9,7 +9,7 @@ async function setup(page: Page, output: 'browser' | 'fish' = 'browser') {
   await page.context().grantPermissions(['microphone']);
   await installationFixture(page, { output, fishVoice: 'fixture' });
   await page.addInitScript(output => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output, fishVoice: 'fixture', handsFree: false, audioCues: false }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output, fishVoice: 'fixture', handsFree: false, audioCues: false, greeting: false }));
     const probe = { starts: 0, stops: 0, spoken: [] as string[], cancels: 0, tracks: [] as MediaStreamTrack[], emit: (_text: string) => {}, fail: false };
     Object.assign(window, { standbyProbe: probe });
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);

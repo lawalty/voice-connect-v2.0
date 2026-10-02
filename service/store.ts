@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { join } from 'node:path';
 import type { Conversation, Delivery, Attachment, TurnRequest, TurnReceipt, Message } from '../contract/types.js';
+import { VOICE_GREETING_PROMPT } from '../contract/greeting.js';
 
 export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 export interface TurnRow { id: string; conversationId: string; text: string; attachments: string[]; fingerprint: string; delivery: Delivery; runId?: string; cancelRequested: boolean; createdAt: number; }
@@ -83,7 +84,7 @@ export class Store {
   receipt(row:TurnRow):TurnReceipt { return {turnId:row.id,delivery:row.delivery,...row.runId?{runId:row.runId}:{}}; }
   active(conversationId:string):TurnReceipt|undefined { const row=this.db.prepare("SELECT id FROM turns WHERE conversation=? AND delivery IN ('pending','accepted') ORDER BY created DESC LIMIT 1").get(conversationId) as {id:string}|undefined;return row?this.receipt(this.turn(row.id)!):undefined; }
   pendingMessages(conversationId:string):Message[] {
-    return (this.db.prepare("SELECT id FROM turns WHERE conversation=? AND delivery IN ('pending','accepted','uncertain','failed') ORDER BY created").all(conversationId) as {id:string}[]).map(({id})=>{const t=this.turn(id)!;return {id:t.id,role:'user',text:t.text,createdAt:t.createdAt,turnId:t.id,delivery:t.delivery,attachments:t.attachments.map(a=>this.attachment(a)?.meta).filter(Boolean) as Attachment[]};});
+    return (this.db.prepare("SELECT id FROM turns WHERE conversation=? AND delivery IN ('pending','accepted','uncertain','failed') ORDER BY created").all(conversationId) as {id:string}[]).map(({id})=>{const t=this.turn(id)!;const greeting=t.text===VOICE_GREETING_PROMPT;return {id:t.id,role:greeting?'notice':'user',text:greeting?'Connected by voice':t.text,createdAt:t.createdAt,turnId:t.id,delivery:t.delivery,attachments:t.attachments.map(a=>this.attachment(a)?.meta).filter(Boolean) as Attachment[]};});
   }
   saveAttachment(meta:Attachment, bytes:Buffer):void {
     const total=(this.db.prepare('SELECT COALESCE(SUM(length(bytes)),0) AS total FROM attachments').get() as {total:number}).total;

@@ -168,3 +168,23 @@ actual message uses `chat.send`. Native status records are presented separately
 from assistant replies. Failed injection never falls back to generation, retries,
 or a request for the user to speak. Existing cancellation and local capture/audio
 privacy still apply; already-completed external actions cannot be undone.
+
+## Greeting on voice connect (2026-10-01)
+
+Settings → Conversation rhythm → Greeting defaults on and persists per device.
+The first orb wake requests a server-owned greeting using the exact connection
+prompt in `contract/greeting.ts`. OpenClaw receives it in the existing mapped
+session, which owns SOUL.md, personality, recent replies and compaction. Voice
+Connect does not copy or edit SOUL.md, create a temporary agent, or use canned
+invitation text. The synthetic user context displays as “Connected by voice”.
+
+Recognition stays stopped and microphone tracks are disabled during generation
+and playback. The existing browser/Fish output completes before recognition
+starts and the orb turns green. Standby, settings pauses and audio recovery do
+not repeat the greeting; End or changing conversation starts a new voice session.
+Generation times out after 25 seconds. Failure shows a notice and permits
+listening; stopping cancels the request/playback and fences late callbacks.
+
+The no-tools and one-sentence requirements are instructions to the active agent,
+not a change to its tool permissions. Fixture tests prove lifecycle behavior,
+not live personality compliance or physical phone/Bluetooth playback.

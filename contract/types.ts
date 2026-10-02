@@ -21,6 +21,8 @@ export interface SpeechPreferences {
   audioCues?: boolean;
   /** Device-local visibility of the orb's microphone VU meters. */
   audioVuMeters?: boolean;
+  /** Device-local invitation on the first wake of a voice session. */
+  greeting?: boolean;
   /** Installation-wide visibility of live transcription over the orb. */
   showTranscriptions?: boolean;
   /** Installation-wide, case-insensitive preferred spellings for recognized speech only. */
@@ -28,7 +30,7 @@ export interface SpeechPreferences {
 }
 export const DEFAULT_SPEECH: SpeechPreferences = {
   recognition: 'vosk', output: 'browser', browserVoice: '', fishVoice: '', handsFree: true, turnMode: 'automatic', keepAwake: true,
-  interruptionSensitivity: 50, allowInterruptions: true, audioCues: true, audioVuMeters: true, fishDelivery: DEFAULT_FISH_DELIVERY, showTranscriptions: false,
+  interruptionSensitivity: 50, allowInterruptions: true, audioCues: true, audioVuMeters: true, greeting: true, fishDelivery: DEFAULT_FISH_DELIVERY, showTranscriptions: false,
   transcriptRules: DEFAULT_TRANSCRIPT_RULES,
 };
 export interface AcousticSignal { energy: number; speechProbability: number; noiseFloor: number; pitch: number | null; confidence: number; }

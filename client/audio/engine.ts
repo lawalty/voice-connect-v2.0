@@ -61,6 +61,7 @@ export class VoiceEngine {
   private active = false;
   private ready = false;
   private inputPaused = false;
+  private greetingPlaybackDone?: () => void;
   private inputEpoch = 0;
   private muted = false;
   private turnAudio = false;
@@ -223,14 +224,14 @@ export class VoiceEngine {
     }
     return this.closingContext;
   }
-  async start(preferences: SpeechPreferences, conversationId: string): Promise<void> {
+  async start(preferences: SpeechPreferences, conversationId: string, greeting?: () => Promise<string>): Promise<void> {
     if (this.disposed) return;
     if (this.outputActive || this.responseOpen) this.interrupt();
     this.stop('restart');
     this.trace.record('voice-start', { provider: preferences.recognition });
     const generation = ++this.generation;
     this.preferences = { ...preferences }; this.normalizeTranscript = createTranscriptNormalizer(preferences.transcriptRules); this.conversationId = conversationId;
-    this.active = true; this.muted = false; this.inputPaused = false; this.gap = false; this.transcript.clear();
+    this.active = true; this.muted = false; this.inputPaused = Boolean(greeting); this.gap = false; this.transcript.clear();
     this.callbacks.onDraft(''); this.setPhase('starting');
     // Android assigns low-latency output to the mode active when it opens.
     // Opening it before processed capture leaves a media player in call mode:
@@ -265,11 +266,36 @@ export class VoiceEngine {
       if (generation !== this.generation) return;
       const startedAt = performance.now(); this.trace.record('provider-starting', { provider: preferences.recognition });
       this.cues?.dispose(); this.cues = new ListeningCues(this.warmContext(), this.playbackReference);
+      if (greeting) {
+        this.stream?.getAudioTracks().forEach(track => { track.enabled = false; });
+        this.setPhase('thinking');
+        if (preferences.keepAwake) await this.requestWakeLock(generation);
+        if (generation !== this.generation || !this.active) return;
+        try {
+          const text = await greeting();
+          if (generation !== this.generation || !this.active) return;
+          if (text && !this.speakerMuted) {
+            const playback = new Promise<void>(resolve => { this.greetingPlaybackDone = resolve; });
+            this.speak(text); this.responseDone();
+            await playback;
+          }
+        } catch {
+          if (generation !== this.generation || !this.active) return;
+          this.callbacks.onNotice('The greeting was unavailable. You can begin speaking.');
+        }
+        if (generation !== this.generation || !this.active) return;
+        if (this.outputFailed) { ++this.playbackGeneration; this.output?.dispose(); this.output = undefined; this.outputActive = false; this.responseOpen = false; }
+        this.protectReply(false);
+        this.greetingPlaybackDone = undefined; this.inputPaused = false;
+        this.stream?.getAudioTracks().forEach(track => { track.enabled = true; });
+        this.vadIgnoreBefore = this.vadSequence; this.vad?.postMessage({ type: 'reset' });
+        this.lastCaptureAt = 0;
+      }
       await Promise.all([recognizer.start(), preferences.audioCues !== false ? this.cues.prepare() : Promise.resolve()]);
       if (generation !== this.generation) return;
       this.trace.record('provider-ready', { provider: preferences.recognition, durationMs: performance.now() - startedAt });
       this.ready = recognizer.running; this.setPhase(this.ready ? 'listening' : 'paused');
-      if (preferences.keepAwake) await this.requestWakeLock(generation);
+      if (preferences.keepAwake && !greeting) await this.requestWakeLock(generation);
     } catch (error) {
       if (generation !== this.generation) return;
       const message = error instanceof Error ? error.message : String(error);
@@ -603,6 +629,8 @@ export class VoiceEngine {
     if (wasReady && this.preferences?.audioCues !== false) this.cues?.play('sleep');
   }
   stop(reason: VoiceStopReason = 'manual') {
+    // Fence playback before a late greeting end can restart recognition.
+    if (this.greetingPlaybackDone) this.interrupt('manual', false);
     this.stopCommentary();
     if (this.active || this.stream) this.trace.record('voice-stop', { reason, phase: this.phase, provider: this.preferences?.recognition });
     ++this.generation; ++this.inputEpoch; this.inputPaused = false; this.active = false; this.ready = false; this.finishing = false;
@@ -658,11 +686,12 @@ export class VoiceEngine {
             this.setPhase(this.workStage); this.pumpCommentary();
           } else if (!this.responseOpen) { this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.protectReply(false); this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); }
           if (this.outputKind === 'answer') this.callbacks.onSpokenText?.(null);
+          if (!this.responseOpen) this.finishGreetingPlayback();
         },
         progress: (text: string) => { if (playbackGeneration === this.playbackGeneration && this.outputKind === 'answer') this.callbacks.onSpokenText?.(text); },
         reference: (audio: PlaybackSamples) => { if (playbackGeneration !== this.playbackGeneration) return; this.faceTimeline.schedule(audio, this.context?.currentTime); this.playbackReference(audio); },
         cancelled: (atTime: number) => this.vad?.postMessage({ type: 'cancel-reference', atTime }),
-        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.faceTimeline.clear(); this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); if (this.outputKind === 'commentary') this.stopCommentary(); else this.callbacks.onSpokenText?.(null); } },
+        error: (message: string) => { if (playbackGeneration === this.playbackGeneration) { this.outputFailed = true; this.outputActive = false; this.faceTimeline.clear(); this.trace.record('output-error', { provider: this.preferences?.output, reason: 'provider-error' }); this.callbacks.onNotice(message); if (this.outputKind === 'commentary') this.stopCommentary(); else this.callbacks.onSpokenText?.(null); this.finishGreetingPlayback(); } },
       };
       this.output = this.preferences!.output !== 'browser'
         ? new PremiumOutput(this.warmContext(), this.conversationId, this.preferences!.fishVoice || '', events, this.preferences!.fishDelivery)
@@ -687,8 +716,11 @@ export class VoiceEngine {
     if (this.outputFailed) { ++this.playbackGeneration; this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.outputActive = false; this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
     else if (this.output) this.output.finish();
     else { this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
+    if (!this.output || this.outputFailed) this.finishGreetingPlayback();
   }
+  private finishGreetingPlayback() { const done = this.greetingPlaybackDone; this.greetingPlaybackDone = undefined; done?.(); }
   interrupt(reason: 'manual' | 'speech-onset' = 'manual', resumeListening = true) {
+    this.finishGreetingPlayback();
     this.callbacks.onSpokenText?.(null);
     clearTimeout(this.firstPhraseTimer); this.firstPhraseTimer = undefined; this.answerChunked = false;
     ++this.playbackGeneration;

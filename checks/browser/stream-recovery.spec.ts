@@ -7,7 +7,7 @@ test.beforeEach(waitForFixtureBudget);
 async function messenger(page: Page) {
   await page.setViewportSize({ width: 800, height: 1100 });
   await page.addInitScript(() => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output: 'browser', audioCues: false }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'browser', output: 'browser', audioCues: false }));
     Object.assign(window, { recoverySpeech: [] as string[] });
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
       getVoices: () => [], addEventListener() {}, removeEventListener() {}, cancel() {},

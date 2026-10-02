@@ -81,7 +81,7 @@ test('legacy meters follow capture and tool events turn the orb orange without b
   await context.grantPermissions(['microphone']); await installationFixture(page, { output: 'browser', recognition: 'browser' });
   const media: string[] = []; page.on('request', r => { if (/\.(wav|mp3)(?:\?|$)/.test(r.url())) media.push(r.url()); });
   await page.addInitScript(() => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ audioCues: false, keepAwake: false, audioVuMeters: true, handsFree: false }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, audioCues: false, keepAwake: false, audioVuMeters: true, handsFree: false }));
     const probe = { amplitude: .2, spoken: [] as string[], states: [] as string[], generation: 0, emit: (_text: string) => {} };
     Object.assign(window, { legacyProbe: probe });
     class Recognition { onstart?: () => void; onend?: () => void; onresult?: (event: unknown) => void;

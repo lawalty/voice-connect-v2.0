@@ -29,7 +29,7 @@ test('onboarding installs on the host and independent provider choices survive a
   await routes(page);
   await page.exposeFunction('captureAttempt', () => { microphones++; });
   await page.addInitScript(() => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'deepgram', output: 'fish', fishVoice: 'stale-device-voice' }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'deepgram', output: 'fish', fishVoice: 'stale-device-voice' }));
     navigator.mediaDevices.getUserMedia = async () => { await (window as unknown as { captureAttempt(): Promise<void> }).captureAttempt(); throw Error('Setup must not open the microphone'); };
   });
   await enterFixtureSession(page);

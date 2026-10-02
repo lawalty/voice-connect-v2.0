@@ -9,7 +9,7 @@ test('an OpenClaw display-name change updates both views without resetting voice
   await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
     localStorage.setItem('vc2:speaker-muted', 'true');
-    localStorage.setItem('vc2:speech', JSON.stringify({ handsFree: true, audioCues: false, keepAwake: false }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, handsFree: true, audioCues: false, keepAwake: false }));
   });
   let name = 'NorthPointe', unavailable = false, identityReads = 0;
   await page.route('**/api/conversations/*/agent', async route => {

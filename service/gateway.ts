@@ -8,6 +8,7 @@ import { Timings, type TimingSample } from './telemetry.js';
 import { assistantPhase, displayText, publicCommentary } from './assistant-text.js';
 import { historyRowId, readHistoryPage } from './history-page.js';
 import { presenceCaptions, presenceLabel, presenceMode, presenceNotes, type PresenceMode } from '../contract/presence.js';
+import { VOICE_GREETING_PROMPT } from '../contract/greeting.js';
 export { displayText } from './assistant-text.js';
 
 type Json = Record<string, any>;
@@ -173,6 +174,8 @@ export class Gateway implements GatewayPort {
       const createdAt=typeof raw.timestamp==='number'?raw.timestamp:Date.parse(raw.timestamp??'')||Date.now();
       const attachments=raw.role==='user'&&known?known.attachments.flatMap(a=>{const value=this.store.attachment(a);return value?[value.meta]:[];}):[];
       const rowId=historyRowId(raw,siblings);
+      const greeting=raw.role==='user'&&text===VOICE_GREETING_PROMPT;
+      if(greeting){messages.push({id:rowId,role:'notice',text:'Connected by voice',createdAt,...known?{turnId:known.id,delivery:this.store.turn(known.id)!.delivery}:{}});continue;}
       const notice=raw.role==='assistant'&&raw.provider==='openclaw'&&raw.model==='gateway-injected'?presenceMode(text):undefined;
       if(text||attachments.length)messages.push({id:rowId,role:notice?'notice':raw.role,text:notice?presenceCaptions[notice]:text,createdAt,...known?{turnId:known.id,delivery:this.store.turn(known.id)!.delivery}:{},...raw.runId?{runId:raw.runId}:{},...attachments.length?{attachments}:{}});
     }

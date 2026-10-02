@@ -9,7 +9,7 @@ test('saved transcription visibility only controls the orb popup, never automati
   // Older installations omit the field and must default off.
   await installationFixture(page, { recognition: 'deepgram' });
   await page.addInitScript(() => {
-    localStorage.setItem('vc2:speech', JSON.stringify({ showTranscriptions: true, audioCues: false }));
+    localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, showTranscriptions: true, audioCues: false }));
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
       getVoices: () => [], cancel() {}, addEventListener() {}, removeEventListener() {},
       speak(utterance: SpeechSynthesisUtterance) { queueMicrotask(() => {

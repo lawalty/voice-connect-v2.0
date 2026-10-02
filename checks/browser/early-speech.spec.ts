@@ -7,7 +7,7 @@ test.beforeEach(waitForFixtureBudget);
 
 test('Messenger receives partial native text and starts Fish before the answer is complete', async ({ page }) => {
   await installationFixture(page, { output: 'fish', fishVoice: 'fixture' });
-  await page.addInitScript(() => localStorage.setItem('vc2:speech', JSON.stringify({ audioCues: false, keepAwake: false })));
+  await page.addInitScript(() => localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, audioCues: false, keepAwake: false })));
   let submitted: string | undefined, complete = false, historyReads = 0;
   const speech: { text: string; beforeComplete: boolean }[] = [], errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));

@@ -10,7 +10,7 @@ for (const output of ['browser', 'fish'] as const) {
     await context.grantPermissions(['microphone']);
     await installationFixture(page, { output, fishVoice: 'fixture' });
     await page.addInitScript(provider => {
-      localStorage.setItem('vc2:speech', JSON.stringify({ recognition: 'browser', output: provider, fishVoice: 'fixture', handsFree: false, audioCues: false }));
+      localStorage.setItem('vc2:speech', JSON.stringify({ greeting: false, recognition: 'browser', output: provider, fishVoice: 'fixture', handsFree: false, audioCues: false }));
       const probe = { spoken: [] as string[], emit: (_text: string) => {} };
       Object.assign(window, { vcMarkdownProbe: probe });
       class Recognition {
