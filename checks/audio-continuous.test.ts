@@ -106,7 +106,7 @@ beforeEach(() => {
   microphone = vi.fn(async () => ({ getTracks: () => [track], getAudioTracks: () => [track] }));
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: microphone } });
   vi.stubGlobal('window', { isSecureContext: true, addEventListener() {}, removeEventListener() {} });
-  vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' });
+  vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
   vi.stubGlobal('Worker', FakeWorker); vi.stubGlobal('AudioWorkletNode', FakeWorklet);
   vi.stubGlobal('AudioContext', class {
     state = 'running'; currentTime = 0; sampleRate = 48000; destination = {}; audioWorklet = { addModule: async () => {} };
@@ -117,6 +117,44 @@ beforeEach(() => {
 afterEach(() => { engine?.dispose(); engine = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('automatic continuous VoiceEngine orchestration', () => {
+  it.each(['listening', 'thinking', 'speaking'] as const)('keeps healthy capture through hiding the page while %s and accepts the next turn', async phase => {
+    const run = setup(); await run.engine.start(preferences, 'same-conversation');
+    if (phase !== 'listening') run.engine.awaitReply();
+    if (phase === 'speaking') run.engine.speak('The reply continues.');
+    Object.assign(document, { visibilityState: 'hidden' }); document.dispatchEvent(new Event('visibilitychange'));
+    const track = (await microphone.mock.results[0]!.value).getAudioTracks()[0];
+    expect(track.stop).not.toHaveBeenCalled(); expect(fixture.recognizers[0]!.running).toBe(true);
+    expect(run.phases.at(-1)).toBe(phase);
+    if (phase !== 'listening') {
+      if (phase === 'thinking') run.engine.speak('The reply continues.');
+      run.engine.responseDone(); fixture.outputs[0]!.end();
+      expect(run.phases.at(-1)).toBe('listening');
+    }
+    await frame('start'); fixture.recognizers[0]!.partial('The next thought.');
+    fixture.recognizers[0]!.finals.push('The next thought.'); await frame('end');
+    await vi.waitFor(() => expect(run.turns).toEqual(['The next thought.']));
+    Object.assign(document, { visibilityState: 'visible' }); document.dispatchEvent(new Event('visibilitychange'));
+    expect(run.engine.diagnostics().filter(entry => entry.event === 'voice-start')).toHaveLength(1);
+    expect(run.engine.diagnostics().filter(entry => entry.event === 'input-failure' || entry.event === 'voice-stop')).toEqual([]);
+  });
+  it('keeps a real microphone interruption paused after playback and does not resume on foreground', async () => {
+    const run = setup(); await run.engine.start(preferences, 'same-conversation');
+    run.engine.speak('The existing reply.'); run.engine.responseDone();
+    const track = (await microphone.mock.results[0]!.value).getAudioTracks()[0]; track.onmute();
+    fixture.outputs[0]!.end(); expect(run.phases.at(-1)).toBe('paused');
+    document.dispatchEvent(new Event('visibilitychange')); expect(run.phases.at(-1)).toBe('paused');
+    expect(microphone).toHaveBeenCalledOnce(); expect(run.turns).toEqual([]);
+    run.engine.endSession(); document.dispatchEvent(new Event('visibilitychange'));
+    expect(run.phases.at(-1)).toBe('off'); expect(microphone).toHaveBeenCalledOnce();
+  });
+  it.each(['end-session', 'standby', 'auto-off'] as const)('does not restart capture after %s on a visibility change', async reason => {
+    const run = setup(); await run.engine.start(preferences, 'same-conversation');
+    run.engine.stop(reason);
+    Object.assign(document, { visibilityState: 'hidden' }); document.dispatchEvent(new Event('visibilitychange'));
+    Object.assign(document, { visibilityState: 'visible' }); document.dispatchEvent(new Event('visibilitychange'));
+    expect(run.phases.at(-1)).toBe('off'); expect(microphone).toHaveBeenCalledOnce();
+    expect(fixture.recognizers[0]!.running).toBe(false); expect(run.turns).toEqual([]);
+  });
   it('does not request a greeting after End during a pending wake-lock request', async () => {
     const lock = { release: vi.fn(async () => {}) };
     let grant!: (value: typeof lock) => void;

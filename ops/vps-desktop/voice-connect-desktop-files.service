@@ -1,0 +1,21 @@
+[Unit]
+Description=Voice Connect incoming files for the cloud desktop
+After=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/voice-connect-v2/desktop-build/shared-files.py
+Restart=on-failure
+RestartSec=5
+StateDirectory=voice-connect-desktop-files
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/voice-connect-v2/shared-files /var/lib/voice-connect-desktop-files
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_CHOWN
+
+[Install]
+WantedBy=multi-user.target

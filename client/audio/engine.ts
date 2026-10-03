@@ -78,6 +78,7 @@ export class VoiceEngine {
   private responseOpen = false;
   private wakeLock?: { release(): Promise<void> };
   private gap = false;
+  private captureInterrupted = false;
   private disposed = false;
   private browserMeterSupported = true;
   private lastCaptureAt = 0;
@@ -144,7 +145,7 @@ export class VoiceEngine {
     this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.outputActive = false;
     this.protectReply(this.preferences?.allowInterruptions === false && this.responseOpen);
     this.commentaryQueue = [];
-    this.setPhase(this.responseOpen ? this.workStage : this.active && this.ready ? 'listening' : 'off');
+    this.setPhase(this.responseOpen ? this.workStage : this.inputPhase());
   }
   setWorkStage(stage: 'thinking' | 'working') {
     this.workStage = stage;
@@ -153,6 +154,10 @@ export class VoiceEngine {
   }
   private replyPhase(): VoicePhase {
     return this.outputActive ? this.outputKind === 'commentary' ? `${this.workStage}-commentary` : 'speaking' : this.workStage;
+  }
+  private inputPhase(): VoicePhase {
+    if (this.captureInterrupted) return 'paused';
+    return this.active ? this.ready && this.recognizer?.running ? 'listening' : 'paused' : 'off';
   }
   /** Ephemeral public commentary has its own sentence buffer and bounded queue.
    * Finishing it never finishes the agent turn or invites the next user turn. */
@@ -617,7 +622,8 @@ export class VoiceEngine {
   private captureFailure(message: string, reason: AudioDiagnosticReason) {
     if (!this.active || this.gap) return;
     this.trace.record('input-failure', { reason, phase: this.phase, provider: this.preferences?.recognition });
-    this.gap = true; this.callbacks.onNotice(message); this.stop('capture-error'); this.setPhase(this.outputActive || this.responseOpen ? this.replyPhase() : 'paused');
+    this.gap = true; this.captureInterrupted = true;
+    this.callbacks.onNotice(message); this.stop('capture-error'); this.setPhase(this.outputActive || this.responseOpen ? this.replyPhase() : this.inputPhase());
   }
   /** A deliberate End has its own sound. Shut capture/output first; never wait
    * for a sound to load, and never play it for a failure or cancelled startup. */
@@ -629,6 +635,7 @@ export class VoiceEngine {
     if (wasReady && this.preferences?.audioCues !== false) this.cues?.play('sleep');
   }
   stop(reason: VoiceStopReason = 'manual') {
+    if (reason !== 'capture-error') this.captureInterrupted = false;
     // Fence playback before a late greeting end can restart recognition.
     if (this.greetingPlaybackDone) this.interrupt('manual', false);
     this.stopCommentary();
@@ -643,7 +650,7 @@ export class VoiceEngine {
     this.protectReply(false);
     void this.wakeLock?.release().catch(() => {}); this.wakeLock = undefined;
     this.callbacks.onSignal({ energy: 0, speechProbability: 0, noiseFloor: 0, pitch: null, confidence: 0 });
-    this.setPhase(!this.outputActive && !this.responseOpen ? 'off' : this.phase);
+    this.setPhase(!this.outputActive && !this.responseOpen ? this.inputPhase() : this.phase);
   }
   private closeCapture() {
     this.microphoneEnergy = 0; this.microphoneEnergyAt = -Infinity;
@@ -684,7 +691,7 @@ export class VoiceEngine {
           if (this.outputKind === 'commentary') {
             ++this.playbackGeneration; this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined;
             this.setPhase(this.workStage); this.pumpCommentary();
-          } else if (!this.responseOpen) { this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.protectReply(false); this.setPhase(this.active && this.ready && this.recognizer?.running ? 'listening' : this.active ? 'paused' : 'off'); }
+          } else if (!this.responseOpen) { this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.protectReply(false); this.setPhase(this.inputPhase()); }
           if (this.outputKind === 'answer') this.callbacks.onSpokenText?.(null);
           if (!this.responseOpen) this.finishGreetingPlayback();
         },
@@ -713,9 +720,9 @@ export class VoiceEngine {
     this.stopCommentary(); this.answerStarted = true;
     for (const piece of this.sentences.finish()) this.enqueue(piece);
     this.responseOpen = false;
-    if (this.outputFailed) { ++this.playbackGeneration; this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.outputActive = false; this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
+    if (this.outputFailed) { ++this.playbackGeneration; this.faceTimeline.clear(); this.output?.dispose(); this.output = undefined; this.outputActive = false; this.protectReply(false); this.setPhase(this.inputPhase()); }
     else if (this.output) this.output.finish();
-    else { this.protectReply(false); this.setPhase(this.active && this.ready ? 'listening' : this.active ? 'paused' : 'off'); }
+    else { this.protectReply(false); this.setPhase(this.inputPhase()); }
     if (!this.output || this.outputFailed) this.finishGreetingPlayback();
   }
   private finishGreetingPlayback() { const done = this.greetingPlaybackDone; this.greetingPlaybackDone = undefined; done?.(); }
@@ -733,7 +740,7 @@ export class VoiceEngine {
     if (pending) this.trace.record('output-interrupt', { provider: this.preferences?.output, durationMs: performance.now() - requestedAt, reason });
     if (pending) this.callbacks.onInterrupt();
     if (this.active && resumeListening) this.setPhase(this.ready && this.recognizer?.running ? 'listening' : 'paused');
-    else if (!this.active) this.setPhase('off');
+    else if (!this.active) this.setPhase(this.inputPhase());
   }
   private async requestWakeLock(generation: number) {
     try {
@@ -745,7 +752,10 @@ export class VoiceEngine {
     } catch { this.callbacks.onNotice('Keep this page visible while speaking; the browser could not keep the screen awake.'); }
   }
   private visibility = () => {
-    if (document.visibilityState === 'hidden' && this.active) this.captureFailure('Voice paused because the page was hidden. Reopen it and tap the microphone to resume.', 'page-hidden');
+    // Cloud Desktop opens in another tab. Visibility alone is not an audio
+    // failure: retain capture and playback; actual track/context/provider
+    // failures still pause safely. Foregrounding never restarts stopped voice.
+    if (this.active) this.trace.record(document.visibilityState === 'hidden' ? 'page-hidden' : 'page-visible', { phase: this.phase });
   };
   private offline = () => {
     // Flux owns transient transport retries; an unrelated connection event must

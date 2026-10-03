@@ -16,6 +16,7 @@ class RejectedRequest extends Error {constructor(readonly code?:string){super('O
 class IncompatibleGateway extends Error {constructor(readonly reason:string){super('Gateway compatibility check failed');}}
 const terminal=new Set(['complete','failed','cancelled']);
 export interface GatewayPort extends HarnessAdapter {
+  request?(method:string,params:Json):Promise<Json>;
   presence(id:string,mode:PresenceMode):Promise<void>;
   approval(id:string,decision:string):Promise<void>; answer(id:string,answer:string):Promise<void>; diagnostics?():TimingSample[];
 }

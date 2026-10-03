@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Cloud Google Chrome
+Exec=/usr/local/bin/vc-cloud-workspace browser
+Terminal=false
+OnlyShowIn=XFCE;
+X-GNOME-Autostart-enabled=true
