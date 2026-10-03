@@ -2,6 +2,7 @@ import type { VoicePhase } from '../../contract/types';
 
 export type AudioDiagnosticEvent =
   | 'voice-start' | 'voice-stop' | 'input-failure'
+  | 'page-hidden' | 'page-visible'
   | 'phase' | 'capture-settings' | 'provider-starting' | 'provider-ready' | 'provider-reconnecting' | 'provider-restored' | 'connection-retry'
   | 'endpoint-request' | 'endpoint-ready' | 'output-start' | 'output-end'
   | 'output-interrupt' | 'output-request' | 'output-error' | 'capture-gap' | 'backpressure' | 'barge-in' | 'barge-in-blocked';
@@ -40,6 +41,7 @@ export interface AudioDiagnosticEntry {
 
 const EVENTS = new Set<AudioDiagnosticEvent>([
   'voice-start', 'voice-stop', 'input-failure',
+  'page-hidden', 'page-visible',
   'phase', 'capture-settings', 'provider-starting', 'provider-ready', 'provider-reconnecting', 'provider-restored', 'connection-retry',
   'endpoint-request', 'endpoint-ready', 'output-start', 'output-end',
   'output-interrupt', 'output-request', 'output-error', 'capture-gap', 'backpressure', 'barge-in', 'barge-in-blocked',

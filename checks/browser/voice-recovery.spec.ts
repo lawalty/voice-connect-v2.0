@@ -53,6 +53,69 @@ async function finishSentence(page: Page) {
   });
 }
 
+async function visibility(page: Page, state: 'visible' | 'hidden') {
+  await page.evaluate(value => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, state);
+}
+
+async function finishReply(page: Page) {
+  await finishSentence(page);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { voiceRecovery: Probe }).voiceRecovery.spoken.length)).toBe(2);
+  await finishSentence(page);
+}
+
+for (const phase of ['thinking', 'speaking'] as const) {
+  test(`a hidden voice page during ${phase} returns to listening and accepts another turn without reopening capture`, async ({ page }) => {
+    let hold = phase === 'thinking';
+    const pending: (() => void)[] = [];
+    await page.routeWebSocket(url => url.pathname === '/api/events', route => {
+      const server = route.connectToServer();
+      server.onMessage(message => {
+        if (hold && ['assistant', 'completed'].includes(JSON.parse(message.toString()).type)) pending.push(() => route.send(message));
+        else route.send(message);
+      });
+    });
+    const p = await setup(page), before = await p.state();
+    p.recognition[0]!.send(JSON.stringify({ type: 'stt', text: 'Synthetic hidden-page check.', started: true, final: true, turnComplete: true }));
+    await expect(page.locator(`.orb-stage.phase-${phase}`)).toBeVisible();
+    await visibility(page, 'hidden');
+    hold = false; pending.splice(0).forEach(send => send());
+    await expect.poll(async () => (await p.state()).spoken.length).toBe(1);
+    await finishReply(page);
+    await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
+    await expect(page.getByRole('switch', { name: 'Auto mode' })).toBeChecked();
+    const after = await p.state(); expect(after.captures).toBe(before.captures); expect(after.live).toBe(1);
+    p.recognition[0]!.send(JSON.stringify({ type: 'stt', text: 'A second synthetic message.', started: true, final: true, turnComplete: true }));
+    await expect.poll(() => p.turns.length).toBe(2);
+    expect(p.aborts).toEqual([]); expect(p.recognition).toHaveLength(1);
+    expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(p.conversation);
+    await visibility(page, 'visible');
+    await expect(page.getByText('Voice paused because the page was hidden.', { exact: false })).toHaveCount(0);
+  });
+}
+
+test('a real capture failure stays paused after the reply and resumes the same conversation by gesture', async ({ page }) => {
+  const p = await setup(page);
+  p.recognition[0]!.send(JSON.stringify({ type: 'stt', text: 'Synthetic pause recovery check.', started: true, final: true, turnComplete: true }));
+  await expect.poll(async () => (await p.state()).spoken.length).toBe(1);
+  await page.evaluate(() => (window as unknown as { voiceRecovery: Probe }).voiceRecovery.tracks[0]!.dispatchEvent(new Event('mute')));
+  await finishReply(page);
+  await expect(page.locator('.orb-stage.phase-paused')).toBeVisible();
+  await expect(page.locator('.orb-stage')).not.toHaveClass(/orb-sleeping/);
+  await visibility(page, 'hidden'); await visibility(page, 'visible');
+  expect(p.recognition).toHaveLength(1);
+  await page.getByRole('button', { name: 'Resume microphone' }).click();
+  await expect(page.locator('.orb-stage.phase-listening')).toBeVisible();
+  expect(p.recognition).toHaveLength(2); expect(p.turns).toHaveLength(1); expect(p.aborts).toEqual([]);
+  expect(await page.evaluate(() => localStorage.getItem('vc2:conversation'))).toBe(p.conversation);
+  await page.getByRole('button', { name: 'End voice session' }).click();
+  await visibility(page, 'hidden'); await visibility(page, 'visible');
+  await expect(page.getByRole('switch', { name: 'Auto mode' })).not.toBeChecked();
+  expect(p.recognition).toHaveLength(2);
+});
+
 test('a microphone failure during speech remains visible in diagnostics after waking again', async ({ page }) => {
   const p = await setup(page);
   p.recognition[0]!.send(JSON.stringify({ type: 'stt', text: 'Synthetic diagnostics check.', started: true, final: true, turnComplete: true }));
