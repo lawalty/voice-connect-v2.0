@@ -228,7 +228,7 @@ def preserve_desktop_image(image, release, job_dir):
     if not (STATE/'desktop-enabled').exists():
         return image
     context = Path('/opt/voice-connect-v2/desktop-build')
-    names = ['Dockerfile', 'chromium-desktop', 'chromium.desktop']
+    names = ['Dockerfile', 'chromium-desktop', 'chromium.desktop', 'cloud-workspace.py', 'workspace.desktop']
     if not all((context/name).is_file() for name in names):
         raise UpdateError('desktop_build_context_missing')
     digest = hashlib.sha256(image.encode())
@@ -238,7 +238,7 @@ def preserve_desktop_image(image, release, job_dir):
     run(['docker', 'build', '--build-arg', 'BASE_IMAGE=' + image,
          '--label', 'org.voice-connect.desktop=true', '-t', candidate, str(context)], timeout=1200)
     run(['docker', 'run', '--rm', '--network', 'none', '--entrypoint', 'sh', candidate,
-         '-c', 'command -v Xtigervnc && command -v tigervncpasswd && command -v startxfce4 && command -v dbus-daemon && test -x /usr/local/bin/vc-cloud-browser'])
+         '-c', 'command -v Xtigervnc && command -v tigervncpasswd && command -v startxfce4 && command -v dbus-daemon && command -v thunar && command -v wmctrl && test -x /usr/local/bin/vc-cloud-browser && test -x /usr/local/bin/vc-cloud-workspace'])
     return candidate
 
 

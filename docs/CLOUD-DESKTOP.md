@@ -11,6 +11,13 @@ same-origin monitor link retains its opener for this return action. If the deskt
 was opened directly or its original window has closed, the button returns to Voice
 Connect within the current tab, without opening another window.
 
+The green wrapper has a fixed application area and a centered three-icon dock:
+Browser, Terminal and Files. Files opens Shared files. Take control enables these
+buttons; view-only and disconnected viewers cannot send dock input. Dock clicks
+send only the fixed Super+B, Super+T and Super+E shortcuts over the existing RFB
+connection, so native control arbitration applies to them too. No command API is
+exposed. Clipboard controls are available in a collapsible section below.
+
 This uses OpenClaw **Host Desktop**, not **Cloud Worker Desktop**. The latter
 provisions separate Crabbox workers. This workspace runs inside the existing
 Gateway container; it is not an isolated VM. Chrome uses the container's existing
@@ -88,3 +95,26 @@ deletes it. Files over 100 MiB from native channels are not copied. Destination
 creation uses directory handles, exclusive writes and no-follow checks to reject
 symlink redirection. Agent guidance identifies the visible paths for received
 files and user-facing document/image work.
+
+## Fixed application area
+
+`cloud-workspace.py` supplies fixed launchers and an XFCE autostart watcher. It
+focuses existing main windows, serializes launches to avoid duplicate instances,
+keeps Browser/Terminal/Files borderless at the display size, and recovers the last
+dock-selected application if its final window closes. Modal dialogs and unrelated
+applications are excluded. Chrome retains its tabs and address bar; its profile
+uses the system frame so native move/minimize/close controls can be removed.
+The normal XFCE panel and desktop icons are hidden; wallpaper colors remain.
+Window-management shortcuts and Alt-drag are disabled in this managed workspace.
+This affects presentation, not the agent's existing file or terminal permissions.
+
+The wrapper opt-in migration uses `VC_DESKTOP_IMAGE=openclaw-desktop:2026.9.7-wrapper`
+and `VC_DESKTOP_WRAPPER=true` with `python3 upgrade.py` from the reviewed root-owned
+build context. It preserves the original configuration in the stopped Gateway
+snapshot, and installs the updater revision that hashes all five image-context
+files. Retain a distinct image tag for each verified build so replacing a local
+tag does not discard a running image's manifest. If that manifest is already
+missing, `VC_DESKTOP_ROLLBACK_IMAGE` must explicitly identify a retained desktop
+image with the same installed version; it is validated before the Gateway stops.
+The browser launcher remains sandbox-disabled under the existing container
+restrictions. Appearance changes do not remove that limitation.

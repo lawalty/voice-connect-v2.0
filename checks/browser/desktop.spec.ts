@@ -13,6 +13,10 @@ test('monitor icon opens an authenticated separate cloud desktop and preserves t
   await expect(popup.getByRole('heading',{name:'Cloud desktop'})).toBeVisible();
   await expect(popup.getByRole('alert')).toContainText('unavailable');
   await expect(popup.getByRole('button',{name:'Take control'})).toBeDisabled();
+  const dock=popup.getByRole('navigation',{name:'Desktop applications'});
+  await expect(dock.getByRole('button')).toHaveCount(3);
+  for(const name of ['Browser','Terminal','Files'])await expect(dock.getByRole('button',{name,exact:true})).toBeDisabled();
+  expect(await popup.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await popup.screenshot({path:info.outputPath('desktop-unavailable.png')});
   expect(await page.evaluate(()=>localStorage.getItem('vc2:conversation'))).toBe(conversation);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
