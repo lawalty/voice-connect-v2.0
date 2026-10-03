@@ -19,7 +19,7 @@ class WorkspaceTests(unittest.TestCase):
 0x06 0 0 0 100 100 host Other app'''
         def output(*command):
             if command[0]=='wmctrl':return listing
-            kind='_NET_WM_WINDOW_TYPE_DIALOG' if command[2]=='0x04' else '_NET_WM_WINDOW_TYPE_NORMAL'
+            kind='_NET_WM_WINDOW_TYPE:  not found.' if command[2]=='0x02' else '_NET_WM_WINDOW_TYPE_DIALOG' if command[2]=='0x04' else '_NET_WM_WINDOW_TYPE_NORMAL'
             cls={'0x02':'VCCloudTerminal','0x03':'Thunar','0x06':'Unrelated'}.get(command[2],'Google-chrome')
             return 'WM_CLASS(STRING) = "google-chrome (/profile with spaces)", "'+cls+'"\n'+kind
         with patch.object(workspace,'run',side_effect=output):

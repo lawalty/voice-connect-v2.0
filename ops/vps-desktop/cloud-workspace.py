@@ -37,7 +37,10 @@ def windows():
         app = 'browser' if lower == 'google-chrome' else 'terminal' if lower == 'vccloudterminal' else 'files' if lower == 'thunar' else None
         if not app or title.startswith('DevTools'):
             continue
-        if '_NET_WM_WINDOW_TYPE_NORMAL' not in properties:
+        # Legacy XTerm omits EWMH window type; that defaults to a normal main
+        # window. Accept it only for our explicitly named terminal class.
+        legacy_terminal = app == 'terminal' and '_NET_WM_WINDOW_TYPE:  not found.' in properties
+        if '_NET_WM_WINDOW_TYPE_NORMAL' not in properties and not legacy_terminal:
             continue
         try:
             result.append({'id': identity, 'app': app, 'geometry': tuple(int(v) for v in [x, y, width, height])})
